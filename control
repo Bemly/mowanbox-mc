@@ -2,7 +2,7 @@ Package: moe.bemly.mowanbox
 Name: 魔玩我的世界盒子
 Depends: mobilesubstrate
 Architecture: iphoneos-arm
-Version: 0.1.0
+Version: 2026.8.27
 Section: Tweaks
 Maintainer: bemly
 Author: bemly
