@@ -1,0 +1,9 @@
+Package: moe.bemly.mowanbox
+Name: 魔玩我的世界盒子
+Depends: mobilesubstrate
+Architecture: iphoneos-arm
+Version: 0.1.0
+Section: Tweaks
+Maintainer: bemly
+Author: bemly
+Description: 为 Minecraft PE 0.10.0 提供游戏内悬浮窗修改器（天气/游戏模式/无敌/高跳等），仅用于本地离线单机世界。
