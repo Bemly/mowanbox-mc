@@ -379,6 +379,7 @@ static NormalTickFn orig_normalTick = NULL;
 static void hooked_normalTick(void *self) {
     orig_normalTick(self);
     gLocalPlayer = self;
+    // 应用 Abilities 类修改 (无敌/飞行/快速破坏)
     char *abil = (char *)self + PLAYER_ABILITIES_OFFSET;
     if (gInvincible) abil[ABIL_INVULNERABLE] = 1;  // 无敌
     if (gFly) {
@@ -386,6 +387,18 @@ static void hooked_normalTick(void *self) {
         abil[ABIL_MAY_FLY] = 1;                      // 允许飞行
     }
     if (gFastBreak) abil[ABIL_INSTABUILD] = 1;       // 瞬间建造/快速破坏
+    // 加速奔跑: 放大水平速度 (x/z), 每帧 aiStep 会重新计算, 不会累乘
+    if (gSpeed) {
+        float *vx = (float *)((char *)self + 108);
+        float *vz = (float *)((char *)self + 116);
+        *vx *= 2.5f;
+        *vz *= 2.5f;
+    }
+    // 超级跳跃: 检测跳跃初速度 (jumpFromGround 写入约 0.42), 瞬间放大一次
+    if (gSuperJump) {
+        float *vy = (float *)((char *)self + ENTITY_VELOCITY_Y_OFFSET);
+        if (*vy > 0.40f && *vy < 0.44f) *vy *= 2.5f;
+    }
 }
 
 // ---- Level::tick() ----
@@ -403,27 +416,14 @@ static void hooked_levelTick(void *self) {
     }
 }
 
-// ---- Player::getBaseSpeed() ----
-// 返回基础移动速度, 开启加速时乘 2.5
-// mangled: __ZN6Player12getBaseSpeedEv
-typedef float (*GetBaseSpeedFn)(void *self);
-static GetBaseSpeedFn orig_getBaseSpeed = NULL;
-static float hooked_getBaseSpeed(void *self) {
-    float base = orig_getBaseSpeed(self);
-    return gSpeed ? base * 2.5f : base;
-}
+// ---- Player::getBaseSpeed() 不能 hook ----
+// 该函数只有 12 字节 (adrp/ldr/ret), MSHookFunction 写入 16 字节
+// 跳转桩会覆盖相邻的 Player::getEntityTypeId() 开头, 导致 SIGILL 闪退。
+// 加速改为在 normalTick 里直接放大水平速度向量。
 
-// ---- Mob::jumpFromGround() ----
-// 跳跃时设置 y 速度, 开启超级跳跃时乘 2.5 (仅对本地玩家生效)
-// mangled: __ZN3Mob14jumpFromGroundEv
-typedef void (*JumpFn)(void *self);
-static JumpFn orig_jumpFromGround = NULL;
-static void hooked_jumpFromGround(void *self) {
-    orig_jumpFromGround(self);
-    if (gSuperJump && self == gLocalPlayer) {
-        *(float *)((char *)self + ENTITY_VELOCITY_Y_OFFSET) *= 2.5f;
-    }
-}
+// ---- Mob::jumpFromGround() 不能 hook ----
+// 该函数只有 16 字节, hook 会覆盖相邻函数 Mob::removeWhenFarAway 开头。
+// 超级跳跃改为在 normalTick 里检测跳跃初速度 (约 0.42) 瞬间放大 y 速度。
 
 #pragma mark - 安装覆盖窗口
 
@@ -461,8 +461,9 @@ static void MWBInstallOverlay(void) {
 
     MWB_HOOK("__ZN11LocalPlayer10normalTickEv", hooked_normalTick, orig_normalTick);
     MWB_HOOK("__ZN5Level4tickEv", hooked_levelTick, orig_levelTick);
-    MWB_HOOK("__ZN6Player12getBaseSpeedEv", hooked_getBaseSpeed, orig_getBaseSpeed);
-    MWB_HOOK("__ZN3Mob14jumpFromGroundEv", hooked_jumpFromGround, orig_jumpFromGround);
+    // 注意: Player::getBaseSpeed 和 Mob::jumpFromGround 是短函数 (<16 字节),
+    // MSHookFunction 会破坏相邻函数代码导致闪退, 不能 hook。
+    // 加速/超级跳跃改在 normalTick hook 里通过速度字段实现。
 
     // 写 hook 状态到沙盒文件, 便于验证
     NSString *st = [NSString stringWithFormat:@"成功 hook %d 个函数\n", okCount];
