@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <CoreText/CoreText.h>
 #import <substrate.h>
-#import "PixelifySans.h"
+#import "FusionPixel.h"
 
 /* ============================================================
  * 魔玩我的世界盒子 (mowanbox-mc)
@@ -28,8 +28,8 @@ static UIColor *kControlLight;    // #eee9e5
 static UIColor *kControlDark;     // #6b6668
 
 static UIFont *MWBPixelFont(CGFloat size) {
-    UIFont *f = [UIFont fontWithName:@"PixelifySans-Regular" size:size];
-    if (!f) f = [UIFont fontWithName:@"Pixelify Sans" size:size];
+    UIFont *f = [UIFont fontWithName:@"Fusion-Pixel-8px-Prop-zh_hans-Regular" size:size];
+    if (!f) f = [UIFont fontWithName:@"Fusion Pixel 8px Prop zh_hans" size:size];
     return f ?: [UIFont systemFontOfSize:size];
 }
 
@@ -49,7 +49,7 @@ static void MWBRegisterFont(void) {
         kControlLight  = MWB_COLOR(0xee,0xe9,0xe5);
         kControlDark   = MWB_COLOR(0x6b,0x66,0x68);
 
-        CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, kPixelifySansFont, kPixelifySansFont_len, NULL);
+        CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, kFusionPixelFont, kFusionPixelFont_len, NULL);
         CGFontRef cgFont = CGFontCreateWithDataProvider(provider);
         if (cgFont) { CTFontManagerRegisterGraphicsFont(cgFont, NULL); CGFontRelease(cgFont); }
         CGDataProviderRelease(provider);
