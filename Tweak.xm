@@ -1,12 +1,42 @@
 #import <UIKit/UIKit.h>
+#import <substrate.h>
 
 /* ============================================================
  * 魔玩我的世界盒子 (mowanbox)
  * 目标: Minecraft PE 0.10.0  bundle: moe.bemly.mcpe.0.10
  * 形态: 游戏内悬浮按钮 + 左右两栏修改面板 (参考 Toolbox)
- * 阶段: UI 骨架已完成, 功能开关待接入游戏内 hook (见 TODO)
  * 技术: 独立 UIWindow (UIWindowLevelAlert+100) 覆盖, hitTest 透传
+ *       Cydia Substrate hook C++ 游戏函数实现修改功能
  * ============================================================ */
+
+#pragma mark - 功能开关全局状态 (UI 线程写, 游戏线程读)
+
+static BOOL gInvincible  = YES;   // 无敌
+static BOOL gFly         = NO;    // 飞行
+static BOOL gFastBreak   = YES;   // 快速破坏 (创造模式瞬间破坏)
+static BOOL gSpeed       = NO;    // 加速奔跑
+static BOOL gSuperJump   = NO;    // 超级跳跃
+static int  gTimeMode    = 0;     // 时间: 0=不修改, 1=白天, 2=夜晚
+
+// 游戏对象指针 (在 hook 中保存)
+static void *gLocalPlayer = NULL; // LocalPlayer*
+static void *gLevel       = NULL; // Level*
+
+// 关键偏移 (通过反汇编 minecraftpe 0.10.0 arm64 获得)
+// Player 类中 Abilities 结构体的偏移
+#define PLAYER_ABILITIES_OFFSET   5824   // 0x16C0
+// Abilities 结构体字段偏移
+#define ABIL_INVULNERABLE         0      // 无敌
+#define ABIL_FLYING               1      // 正在飞行
+#define ABIL_MAY_FLY              2      // 允许飞行
+#define ABIL_INSTABUILD           3      // 瞬间建造/快速破坏
+// Level 类中时间字段 (int64, 一天 24000 tick)
+#define LEVEL_TIME_OFFSET         5512   // 0x1588
+// Entity 类中速度向量 (float x/y/z)
+#define ENTITY_VELOCITY_Y_OFFSET  112    // 0x70
+
+#define TICK_TIME_DAY   1000    // 白天
+#define TICK_TIME_NIGHT 13000   // 夜晚
 
 #pragma mark - 透传容器: 点到自身空白就把事件交给下面的游戏窗口
 
@@ -248,6 +278,8 @@
     // 时间切换: 白天 / 夜晚
     MWBSegmentRow *timeRow = [[MWBSegmentRow alloc]
         initWithTitle:@"时间" items:@[@"白天", @"夜晚"] selected:0];
+    // 默认不修改时间, 不预选任何段
+    timeRow.seg.selectedSegmentIndex = -1;
     timeRow.frame = CGRectMake(0, ry, 280, 72);
     timeRow.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [timeRow.seg addTarget:self action:@selector(timeChanged:)
@@ -257,6 +289,7 @@
     // 游戏模式切换: 生存 / 创造
     MWBSegmentRow *modeRow = [[MWBSegmentRow alloc]
         initWithTitle:@"游戏模式" items:@[@"生存", @"创造"] selected:0];
+    modeRow.seg.selectedSegmentIndex = -1;
     modeRow.frame = CGRectMake(0, ry, 280, 72);
     modeRow.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [modeRow.seg addTarget:self action:@selector(modeChanged:)
@@ -268,6 +301,7 @@
         @[@"物品叠加×99", @NO],
         @[@"快速破坏",    @YES],
         @[@"无敌",        @YES],
+        @[@"飞行",        @NO],
         @[@"加速奔跑",    @NO],
         @[@"超级跳跃",    @NO],
     ];
@@ -309,25 +343,87 @@
     }
 }
 
-#pragma mark - 功能回调 (TODO: 接入 0.10.0 游戏内符号 hook)
+#pragma mark - 功能回调
 
 - (void)timeChanged:(UISegmentedControl *)s {
-    // TODO: 调用游戏内设置时间的函数
-    NSLog(@"[魔玩盒子] 时间 -> %@ (功能待实现)", s.selectedSegmentIndex == 0 ? @"白天" : @"夜晚");
+    gTimeMode = (int)s.selectedSegmentIndex + 1; // 0->1(白天), 1->2(夜晚)
+    NSLog(@"[魔玩盒子] 时间 -> %@", s.selectedSegmentIndex == 0 ? @"白天" : @"夜晚");
 }
 - (void)modeChanged:(UISegmentedControl *)s {
-    // TODO: 调用游戏内切换游戏模式的函数
+    // TODO: 切换 GameMode 对象 (生存/创造), 较复杂, 后续实现
     NSLog(@"[魔玩盒子] 游戏模式 -> %@ (功能待实现)", s.selectedSegmentIndex == 0 ? @"生存" : @"创造");
 }
 - (void)switchChanged:(UISwitch *)s {
-    // TODO: 根据开关项启用/禁用对应修改功能
     NSString *title = @"";
     if ([s.superview isKindOfClass:[MWBSwitchRow class]])
         title = ((MWBSwitchRow *)s.superview).titleLabel.text;
-    NSLog(@"[魔玩盒子] 开关 [%@] -> %@ (功能待实现)", title, s.on ? @"开" : @"关");
+    NSLog(@"[魔玩盒子] 开关 [%@] -> %@", title, s.on ? @"开" : @"关");
+    // 根据开关标题更新对应全局状态
+    if ([title isEqualToString:@"无敌"])       gInvincible = s.on;
+    else if ([title isEqualToString:@"飞行"])  gFly = s.on;
+    else if ([title isEqualToString:@"快速破坏"]) gFastBreak = s.on;
+    else if ([title isEqualToString:@"加速奔跑"]) gSpeed = s.on;
+    else if ([title isEqualToString:@"超级跳跃"]) gSuperJump = s.on;
+    // 物品叠加×99 待实现
 }
 
 @end
+
+#pragma mark - C++ 游戏函数 hook
+
+// ---- LocalPlayer::normalTick() ----
+// 每帧调用, 保存玩家指针并应用 abilities 类修改
+// mangled: __ZN11LocalPlayer10normalTickEv
+typedef void (*NormalTickFn)(void *self);
+static NormalTickFn orig_normalTick = NULL;
+static void hooked_normalTick(void *self) {
+    orig_normalTick(self);
+    gLocalPlayer = self;
+    char *abil = (char *)self + PLAYER_ABILITIES_OFFSET;
+    if (gInvincible) abil[ABIL_INVULNERABLE] = 1;  // 无敌
+    if (gFly) {
+        abil[ABIL_FLYING]  = 1;                      // 正在飞行
+        abil[ABIL_MAY_FLY] = 1;                      // 允许飞行
+    }
+    if (gFastBreak) abil[ABIL_INSTABUILD] = 1;       // 瞬间建造/快速破坏
+}
+
+// ---- Level::tick() ----
+// 每帧调用, 保存关卡指针并冻结时间
+// mangled: __ZN5Level4tickEv
+typedef void (*LevelTickFn)(void *self);
+static LevelTickFn orig_levelTick = NULL;
+static void hooked_levelTick(void *self) {
+    orig_levelTick(self);
+    gLevel = self;
+    if (gTimeMode == 1) {
+        *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_DAY;
+    } else if (gTimeMode == 2) {
+        *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
+    }
+}
+
+// ---- Player::getBaseSpeed() ----
+// 返回基础移动速度, 开启加速时乘 2.5
+// mangled: __ZN6Player12getBaseSpeedEv
+typedef float (*GetBaseSpeedFn)(void *self);
+static GetBaseSpeedFn orig_getBaseSpeed = NULL;
+static float hooked_getBaseSpeed(void *self) {
+    float base = orig_getBaseSpeed(self);
+    return gSpeed ? base * 2.5f : base;
+}
+
+// ---- Mob::jumpFromGround() ----
+// 跳跃时设置 y 速度, 开启超级跳跃时乘 2.5 (仅对本地玩家生效)
+// mangled: __ZN3Mob14jumpFromGroundEv
+typedef void (*JumpFn)(void *self);
+static JumpFn orig_jumpFromGround = NULL;
+static void hooked_jumpFromGround(void *self) {
+    orig_jumpFromGround(self);
+    if (gSuperJump && self == gLocalPlayer) {
+        *(float *)((char *)self + ENTITY_VELOCITY_Y_OFFSET) *= 2.5f;
+    }
+}
 
 #pragma mark - 安装覆盖窗口
 
@@ -351,6 +447,28 @@ static void MWBInstallOverlay(void) {
 %ctor {
     NSLog(@"[魔玩盒子] 插件已加载: %@",
           [[NSBundle mainBundle] bundleIdentifier]);
+
+    // ---- 安装 C++ 游戏函数 hook ----
+    int okCount = 0;
+    void *sym;
+
+    #define MWB_HOOK(mangled, replacement, original) do {                \
+        sym = MSFindSymbol(NULL, mangled);                              \
+        if (sym) { MSHookFunction(sym, (void *)replacement, (void **)&original); okCount++; \
+            NSLog(@"[魔玩盒子] 已 hook: %s", mangled); }                \
+        else { NSLog(@"[魔玩盒子] 警告: 未找到符号 %s", mangled); }     \
+    } while (0)
+
+    MWB_HOOK("__ZN11LocalPlayer10normalTickEv", hooked_normalTick, orig_normalTick);
+    MWB_HOOK("__ZN5Level4tickEv", hooked_levelTick, orig_levelTick);
+    MWB_HOOK("__ZN6Player12getBaseSpeedEv", hooked_getBaseSpeed, orig_getBaseSpeed);
+    MWB_HOOK("__ZN3Mob14jumpFromGroundEv", hooked_jumpFromGround, orig_jumpFromGround);
+
+    // 写 hook 状态到沙盒文件, 便于验证
+    NSString *st = [NSString stringWithFormat:@"成功 hook %d 个函数\n", okCount];
+    [st writeToFile:[NSHomeDirectory() stringByAppendingPathComponent:@"mowanbox_hook.txt"]
+          atomically:YES encoding:NSUTF8StringEncoding error:nil];
+
     // 监听游戏启动完成通知, 安装悬浮窗
     [[NSNotificationCenter defaultCenter]
         addObserverForName:UIApplicationDidFinishLaunchingNotification
