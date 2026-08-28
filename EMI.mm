@@ -771,7 +771,7 @@ static int MWBIdOfItem(void *item) {
 }
 
 // 遍历游戏配方, 返回产物为 itemId 的所有配方
-// 返回 @[ 每条配方@[材料数组 @[ @[id, count], ... ], 产物数量], ... ]
+// 返回 @[ 每条配方@[9格id数组(0=空, 按行排列), 产物数量], ... ]
 static NSArray *MWBGameRecipesForItem(int itemId) {
     void **recipes = mwb_recipes_singleton();
     if (!recipes) return nil;
@@ -807,32 +807,29 @@ static NSArray *MWBGameRecipesForItem(int itemId) {
 
         // 材料: Recipe 虚表 +0x40 = getIngredient(col, row, flag), 按格子返回材料实例
         // (游戏 SurvivalInventoryScreen::updateIngredientCountFromRecipe 就这么读)
+        // 注意: 合成格每格永远只放 1 个, 数量=格子数, 格子实例里的 count 字段不可信
         void **vtable = *(void ***)r;
         typedef void *(*GetCellFn)(void *, int, int, BOOL);
         GetCellFn getCell = (GetCellFn)vtable[0x40 / 8];
         if (!getCell) continue;
-        NSMutableDictionary<NSValue *, NSNumber *> *merged = [NSMutableDictionary new];
+        NSMutableArray *cells = [NSMutableArray new];
+        BOOL any = NO;
         for (int rowI = 0; rowI < 3; rowI++) {
             for (int colI = 0; colI < 3; colI++) {
+                int cid = 0;
                 void *cell = getCell(r, colI, rowI, NO);
-                if (!cell) continue;
-                void *it = *(void **)((char *)cell + 8);
-                int cnt = *(int *)cell;
-                if (!it || cnt <= 0) continue;
-                NSValue *key = [NSValue valueWithPointer:it];
-                merged[key] = @([merged[key] intValue] + cnt);
+                if (cell) {
+                    void *it = *(void **)((char *)cell + 8);
+                    if (it && *(int *)cell > 0) {
+                        cid = MWBIdOfItem(it);
+                        if (cid > 0) any = YES; else cid = 0;
+                    }
+                }
+                [cells addObject:@(cid)];
             }
         }
-        if (merged.count == 0) continue;
-
-        NSMutableArray *ings = [NSMutableArray new];
-        for (NSValue *key in merged) {
-            int id = MWBIdOfItem([key pointerValue]);
-            if (id <= 0) continue;
-            [ings addObject:@[@(id), merged[key]]];
-        }
-        if (ings.count == 0) continue;
-        [out addObject:@[ings, @(rcount)]];
+        if (!any) continue;
+        [out addObject:@[cells, @(rcount)]];
     }
     return out;
 }
@@ -897,78 +894,91 @@ static NSArray *MWBGameRecipesForItem(int itemId) {
         self.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55];
         CGFloat s = kEMIScale;
 
-        // 从游戏 Recipes 单例读配方
+        // 从游戏 Recipes 单例读配方 (每条 = @[9格id数组, 产物数量])
         NSArray *recipes = MWBGameRecipesForItem(resultId);
         BOOL none = recipes.count == 0;
         NSString *name = MWBItemName(resultId);
 
-        CGFloat pw = 1560 * s;
-        CGFloat rowH = 210 * s;
-        CGFloat titleH = 130 * s;
-        CGFloat ph = titleH + (none ? 140 * s : recipes.count * rowH + 30 * s) + 50 * s;
+        // 布局: 每条配方一行 = 3x3 九宫格 + 箭头 + 产物格
+        CGFloat pw = 1180 * s;
+        CGFloat cell = 108 * s;              // 九宫格格子尺寸
+        CGFloat gridPad = 10 * s;            // 格子间距
+        CGFloat gridW = 3 * cell + 2 * gridPad;
+        CGFloat rowH = gridW + 60 * s;
+        CGFloat titleH = 120 * s;
+        CGFloat ph = titleH + (none ? 140 * s : (CGFloat)recipes.count * rowH + 30 * s) + 50 * s;
         UIView *panel = [[UIView alloc] initWithFrame:(CGRect){{(frame.size.width - pw) / 2, (frame.size.height - ph) / 2},{pw, ph}}];
         panel.backgroundColor = EMIColor(0xc8,0xc0,0xb8);
         panel.layer.borderWidth = 10 * s;
         panel.layer.borderColor = EMIColor(0x9c,0x91,0x89).CGColor;
         [self addSubview:panel];
 
-        UILabel *title = [[UILabel alloc] initWithFrame:(CGRect){{40 * s, 20 * s},{pw - 80 * s, 80 * s}}];
+        UILabel *title = [[UILabel alloc] initWithFrame:(CGRect){{40 * s, 16 * s},{pw - 80 * s, 70 * s}}];
         title.text = [NSString stringWithFormat:@"%@ 的配方", name];
-        title.font = [UIFont boldSystemFontOfSize:48 * s];
+        title.font = [UIFont boldSystemFontOfSize:44 * s];
         title.textColor = EMIColor(0x34,0x31,0x32);
         [panel addSubview:title];
 
         if (none) {
             UILabel *l = [[UILabel alloc] initWithFrame:(CGRect){{40 * s, titleH},{pw - 80 * s, 90 * s}}];
             l.text = @"游戏配方中没有能合成该物品的配方 (自然生成 / 怪物掉落)";
-            l.font = [UIFont systemFontOfSize:36 * s];
+            l.font = [UIFont systemFontOfSize:34 * s];
             l.textColor = EMIColor(0x6b,0x66,0x68);
             [panel addSubview:l];
         }
 
         for (NSInteger rIdx = 0; rIdx < (NSInteger)recipes.count; rIdx++) {
             NSArray *entry = recipes[rIdx];
-            NSArray *ings = entry[0];               // @[ @[id, count], ... ]
+            NSArray *cells = entry[0];           // 9 个 id (0=空), 按行排列
             int rcount = [entry[1] intValue];
-            CGFloat y = titleH + rIdx * rowH;
+            CGFloat gy = titleH + rIdx * rowH + 30 * s;
+            CGFloat gx = 70 * s;
 
-            CGFloat x = 60 * s;
-            for (NSInteger i = 0; i < (NSInteger)ings.count && i < 5; i++) {
-                int ingId = [ings[i][0] intValue];
-                int ingCount = [ings[i][1] intValue];
-                if (i > 0) {
-                    UILabel *plus = [[UILabel alloc] initWithFrame:(CGRect){{x, y + 55 * s},{36 * s, 50 * s}}];
-                    plus.text = @"+";
-                    plus.font = [UIFont boldSystemFontOfSize:38 * s];
-                    plus.textColor = EMIColor(0x34,0x31,0x32);
-                    [panel addSubview:plus];
-                    x += 50 * s;
-                }
-                [panel addSubview:[self iconForId:ingId size:90 * s center:(CGPoint){x + 45 * s, y + 65 * s}]];
-                [panel addSubview:[self ingLabel:ingId count:ingCount
-                                           frame:(CGRect){{x - 20 * s, y + 125 * s},{230 * s, 40 * s}}]];
-                x += 210 * s;
+            // 九宫格底板 (创造物品栏同款深灰)
+            UIView *grid = [[UIView alloc] initWithFrame:(CGRect){{gx, gy},{gridW, gridW}}];
+            grid.backgroundColor = EMIColor(0x8e,0x87,0x80);
+            [panel addSubview:grid];
+
+            for (int i = 0; i < 9; i++) {
+                int cid = [cells[i] intValue];
+                if (cid <= 0) continue;
+                CGFloat cx = gx + (i % 3) * (cell + gridPad);
+                CGFloat cy = gy + (i / 3) * (cell + gridPad);
+                UIView *slot = [[UIView alloc] initWithFrame:(CGRect){{cx, cy},{cell, cell}}];
+                slot.backgroundColor = EMIColor(0x3a,0x3a,0x39);
+                slot.layer.borderWidth = 4 * s;
+                slot.layer.borderColor = EMIColor(0x1b,0x1b,0x1a).CGColor;
+                [panel addSubview:slot];
+                [slot addSubview:[self iconForId:cid size:cell * 0.78 center:(CGPoint){cell / 2, cell / 2}]];
             }
-            if (ings.count > 5) {
-                UILabel *more = [[UILabel alloc] initWithFrame:(CGRect){{x, y + 55 * s},{90 * s, 50 * s}}];
-                more.text = @"...";
-                more.font = [UIFont boldSystemFontOfSize:38 * s];
-                more.textColor = EMIColor(0x34,0x31,0x32);
-                [panel addSubview:more];
-                x += 100 * s;
-            }
-            UILabel *eq = [[UILabel alloc] initWithFrame:(CGRect){{x, y + 55 * s},{50 * s, 50 * s}}];
-            eq.text = @"→";
-            eq.font = [UIFont boldSystemFontOfSize:40 * s];
-            eq.textColor = EMIColor(0x2c,0x76,0x07);
-            [panel addSubview:eq];
-            x += 62 * s;
-            [panel addSubview:[self iconForId:resultId size:90 * s center:(CGPoint){x + 45 * s, y + 65 * s}]];
-            [panel addSubview:[self ingLabel:resultId count:rcount
-                                       frame:(CGRect){{x - 20 * s, y + 125 * s},{230 * s, 40 * s}}]];
+
+            // 箭头
+            CGFloat ax = gx + gridW + 50 * s;
+            UILabel *arrow = [[UILabel alloc] initWithFrame:(CGRect){{ax, gy + gridW / 2 - 40 * s},{80 * s, 80 * s}}];
+            arrow.text = @"→";
+            arrow.font = [UIFont boldSystemFontOfSize:64 * s];
+            arrow.textColor = EMIColor(0x34,0x31,0x32);
+            [panel addSubview:arrow];
+
+            // 产物格 (稍大, 数量标在角上)
+            CGFloat rx = ax + 110 * s;
+            CGFloat resSize = cell * 1.15;
+            UIView *resSlot = [[UIView alloc] initWithFrame:(CGRect){{rx, gy + (gridW - resSize) / 2},{resSize, resSize}}];
+            resSlot.backgroundColor = EMIColor(0x3a,0x3a,0x39);
+            resSlot.layer.borderWidth = 4 * s;
+            resSlot.layer.borderColor = EMIColor(0x1b,0x1b,0x1a).CGColor;
+            [panel addSubview:resSlot];
+            [resSlot addSubview:[self iconForId:resultId size:resSize * 0.78 center:(CGPoint){resSize / 2, resSize / 2}]];
+            UILabel *cnt = [[UILabel alloc] initWithFrame:(CGRect){{resSize - 70 * s, resSize - 56 * s},{66 * s, 52 * s}}];
+            cnt.text = [NSString stringWithFormat:@"×%d", rcount];
+            cnt.font = [UIFont boldSystemFontOfSize:36 * s];
+            cnt.textColor = [UIColor whiteColor];
+            cnt.shadowColor = [UIColor blackColor];
+            cnt.shadowOffset = (CGSize){2 * s, 2 * s};
+            [resSlot addSubview:cnt];
         }
 
-        UILabel *hint = [[UILabel alloc] initWithFrame:(CGRect){{0, ph - 40 * s},{pw, 34 * s}}];
+        UILabel *hint = [[UILabel alloc] initWithFrame:(CGRect){{0, ph - 38 * s},{pw, 32 * s}}];
         hint.text = @"轻触任意处关闭";
         hint.font = [UIFont systemFontOfSize:24 * s];
         hint.textAlignment = NSTextAlignmentCenter;
