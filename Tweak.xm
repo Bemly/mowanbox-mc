@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <CoreText/CoreText.h>
+#import <mach/mach.h>
 #import <substrate.h>
 #import "FusionPixel.h"
 #import "EMI.h"
@@ -62,7 +63,7 @@ static NSAttributedString *MWBPixelText(NSString *text, UIFont *font, UIColor *c
                                         CGFloat shadowX, CGFloat shadowY, UIColor *shadowColor) {
     NSShadow *s = [[NSShadow alloc] init];
     s.shadowColor = shadowColor;
-    s.shadowOffset = CGSizeMake(shadowX, shadowY);
+    s.shadowOffset = (CGSize){shadowX, shadowY};
     s.shadowBlurRadius = 0;
     return [[NSAttributedString alloc] initWithString:text attributes:@{
         NSFontAttributeName: font,
@@ -107,10 +108,10 @@ static NSAttributedString *MWBPixelText(NSString *text, UIFont *font, UIColor *c
         [self.layer addSublayer:_top]; [self.layer addSublayer:_left];
         [self.layer addSublayer:_bottom]; [self.layer addSublayer:_right];
     }
-    _top.frame = CGRectMake(o, o, w - 2*o, i); _top.backgroundColor = _insetLight.CGColor;
-    _left.frame = CGRectMake(o, o, i, h - 2*o); _left.backgroundColor = _insetLight.CGColor;
-    _bottom.frame = CGRectMake(o, h - o - i, w - 2*o, i); _bottom.backgroundColor = _insetDark.CGColor;
-    _right.frame = CGRectMake(w - o - i, o, i, h - 2*o); _right.backgroundColor = _insetDark.CGColor;
+    _top.frame = (CGRect){{o,o},{w - 2*o,i}}; _top.backgroundColor = _insetLight.CGColor;
+    _left.frame = (CGRect){{o,o},{i,h - 2*o}}; _left.backgroundColor = _insetLight.CGColor;
+    _bottom.frame = (CGRect){{o,h - o - i},{w - 2*o,i}}; _bottom.backgroundColor = _insetDark.CGColor;
+    _right.frame = (CGRect){{w - o - i,o},{i,h - 2*o}}; _right.backgroundColor = _insetDark.CGColor;
 }
 @end
 
@@ -144,15 +145,15 @@ static UIBezierPath *MWBPathFromSVG(NSString *d) {
         if (![[NSCharacterSet letterCharacterSet] characterIsMember:cmd]) break;
         i++;
         switch (cmd) {
-            case 'M': x=readNum(); y=readNum(); sx=x; sy=y; [p moveToPoint:CGPointMake(x,y)];
-                      while(atNum()){ x=readNum(); y=readNum(); [p addLineToPoint:CGPointMake(x,y)]; } break;
-            case 'L': while(atNum()){ x=readNum(); y=readNum(); [p addLineToPoint:CGPointMake(x,y)]; } break;
-            case 'H': while(atNum()){ x=readNum(); [p addLineToPoint:CGPointMake(x,y)]; } break;
-            case 'V': while(atNum()){ y=readNum(); [p addLineToPoint:CGPointMake(x,y)]; } break;
-            case 'm': x+=readNum(); y+=readNum(); sx=x; sy=y; [p moveToPoint:CGPointMake(x,y)]; break;
-            case 'l': while(atNum()){ x+=readNum(); y+=readNum(); [p addLineToPoint:CGPointMake(x,y)]; } break;
-            case 'h': while(atNum()){ x+=readNum(); [p addLineToPoint:CGPointMake(x,y)]; } break;
-            case 'v': while(atNum()){ y+=readNum(); [p addLineToPoint:CGPointMake(x,y)]; } break;
+            case 'M': x=readNum(); y=readNum(); sx=x; sy=y; [p moveToPoint:(CGPoint){x,y}];
+                      while(atNum()){ x=readNum(); y=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'L': while(atNum()){ x=readNum(); y=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'H': while(atNum()){ x=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'V': while(atNum()){ y=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'm': x+=readNum(); y+=readNum(); sx=x; sy=y; [p moveToPoint:(CGPoint){x,y}]; break;
+            case 'l': while(atNum()){ x+=readNum(); y+=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'h': while(atNum()){ x+=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'v': while(atNum()){ y+=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
             case 'Z': case 'z': [p closePath]; x=sx; y=sy; break;
             default: break;
         }
@@ -195,12 +196,12 @@ static UIBezierPath *MWBPathFromSVG(NSString *d) {
     // 内阴影条
     for (UIView *v in self.subviews) {
         if (v == _i || v == _b) continue;
-        if ([objc_getAssociatedObject(v, "isHL") boolValue]) v.frame = CGRectMake(5,5,w-10,4);
-        else v.frame = CGRectMake(5,h-9,w-10,4);
+        if ([objc_getAssociatedObject(v, "isHL") boolValue]) v.frame = (CGRect){{5,5},{w-10,4}};
+        else v.frame = (CGRect){{5,h-9},{w-10,4}};
     }
     CGFloat cellW = (w - pad*2 - 4) / 2;
-    _i.frame = CGRectMake(pad, pad, cellW, h - pad*2);
-    _b.frame = CGRectMake(pad + cellW + 4, pad, cellW, h - pad*2);
+    _i.frame = (CGRect){{pad,pad},{cellW,h - pad*2}};
+    _b.frame = (CGRect){{pad + cellW + 4,pad},{cellW,h - pad*2}};
 }
 - (void)toggle { self.on = !_on; [self sendActionsForControlEvents:UIControlEventValueChanged]; }
 - (void)setOn:(BOOL)on { _on = on; [self applyStyle]; }
@@ -248,11 +249,11 @@ static UIBezierPath *MWBPathFromSVG(NSString *d) {
     CGFloat w=rect.size.width, h=rect.size.height, b=4;
     // 内阴影: 左上浅色, 右下深色
     CGContextSetFillColorWithColor(ctx, MWB_COLOR(0xd5,0xce,0xca).CGColor);
-    CGContextFillRect(ctx, CGRectMake(b,b,w-2*b,b)); // top
-    CGContextFillRect(ctx, CGRectMake(b,b,b,h-2*b)); // left
+    CGContextFillRect(ctx, (CGRect){{b,b},{w-2*b,b}}); // top
+    CGContextFillRect(ctx, (CGRect){{b,b},{b,h-2*b}}); // left
     CGContextSetFillColorWithColor(ctx, MWB_COLOR(0x77,0x70,0x6e).CGColor);
-    CGContextFillRect(ctx, CGRectMake(b,h-2*b,w-2*b,b)); // bottom
-    CGContextFillRect(ctx, CGRectMake(w-2*b,b,b,h-2*b)); // right
+    CGContextFillRect(ctx, (CGRect){{b,h-2*b},{w-2*b,b}}); // bottom
+    CGContextFillRect(ctx, (CGRect){{w-2*b,b},{b,h-2*b}}); // right
 }
 @end
 
@@ -269,7 +270,7 @@ static UIBezierPath *MWBPathFromSVG(NSString *d) {
     if ((self = [super init])) {
         self.backgroundColor = MWB_COLOR(0xad,0xa4,0xa0);
         self.layer.borderWidth = 0;
-        _shapeLayers = [NSMutableArray array];
+        _shapeLayers = [NSMutableArray new];
         for (NSString *svg in paths) {
             CAShapeLayer *s = [CAShapeLayer layer];
             s.path = [MWBPathFromSVG(svg) CGPath];
@@ -294,9 +295,9 @@ static UIBezierPath *MWBPathFromSVG(NSString *d) {
         CGPathRef scaled = CGPathCreateCopyByTransformingPath(layer.path, &t);
         layer.path = scaled;
         CGPathRelease(scaled);
-        layer.frame = CGRectMake(ox, oy, s, s);
-        layer.bounds = CGRectMake(0, 0, s, s);
-        layer.position = CGPointMake(w/2, h/2);
+        layer.frame = (CGRect){{ox,oy},{s,s}};
+        layer.bounds = (CGRect){{0,0},{s,s}};
+        layer.position = (CGPoint){w/2, h/2};
     }
 }
 - (void)setActive:(BOOL)active {
@@ -313,13 +314,13 @@ static UIBezierPath *MWBPathFromSVG(NSString *d) {
     CGFloat w=rect.size.width, h=rect.size.height;
     // 左边 4px #6a6463, 右边 4px #d3ccc7, 上边 4px #cabfba, 下边 5px #565253
     CGContextSetFillColorWithColor(ctx, MWB_COLOR(0x6a,0x64,0x63).CGColor);
-    CGContextFillRect(ctx, CGRectMake(0,0,4,h));
+    CGContextFillRect(ctx, (CGRect){{0,0},{4,h}});
     CGContextSetFillColorWithColor(ctx, MWB_COLOR(0xd3,0xcc,0xc7).CGColor);
-    CGContextFillRect(ctx, CGRectMake(w-4,0,4,h));
+    CGContextFillRect(ctx, (CGRect){{w-4,0},{4,h}});
     CGContextSetFillColorWithColor(ctx, MWB_COLOR(0xca,0xbf,0xba).CGColor);
-    CGContextFillRect(ctx, CGRectMake(0,0,w,4));
+    CGContextFillRect(ctx, (CGRect){{0,0},{w,4}});
     CGContextSetFillColorWithColor(ctx, MWB_COLOR(0x56,0x52,0x53).CGColor);
-    CGContextFillRect(ctx, CGRectMake(0,h-5,w,5));
+    CGContextFillRect(ctx, (CGRect){{0,h-5},{w,5}});
 }
 @end
 
@@ -346,26 +347,26 @@ static UIBezierPath *MWBPathFromSVG(NSString *d) {
     [super layoutSubviews];
     CGFloat w=self.bounds.size.width, h=self.bounds.size.height;
     CGFloat labelW = MIN(445, w - 180);
-    _label.frame = CGRectMake(0, 0, labelW, h);
+    _label.frame = (CGRect){{0,0},{labelW,h}};
     CGSize cs = _control.intrinsicContentSize;
     if (cs.width <= 0 || cs.height <= 0) cs = _control.bounds.size;
     CGFloat cw = 152, ch = 77;
     if ([_control isKindOfClass:[MWBPixelToggle class]]) { cw=152; ch=77; }
     else if ([_control isKindOfClass:[MWBPixelButton class]]) { cw=120; ch=60; }
-    _control.frame = CGRectMake(w - cw, (h-ch)/2, cw, ch);
+    _control.frame = (CGRect){{w - cw,(h-ch)/2},{cw,ch}};
 }
 @end
 
 #pragma mark - 功能开关全局状态
 
-static BOOL gInvincible  = YES;
+static BOOL gInvincible  = NO;
 static BOOL gFly         = NO;
-static BOOL gFastBreak   = YES;
+static BOOL gFastBreak   = NO;
 static BOOL gSpeed       = NO;
 static BOOL gSuperJump   = NO;
 static int  gTimeMode    = 0;  // 0=不修改 1=白天 2=夜晚
 
-static void *gLocalPlayer = NULL;
+void *gLocalPlayer = NULL;       // LocalPlayer* (EMI 也用)
 static void *gLevel       = NULL;
 
 #define PLAYER_ABILITIES_OFFSET   5824
@@ -377,6 +378,35 @@ static void *gLevel       = NULL;
 #define ENTITY_VELOCITY_Y_OFFSET 112
 #define TICK_TIME_DAY 1000
 #define TICK_TIME_NIGHT 13000
+
+// 加速奔跑: Player::getBaseSpeed 只有 12 字节 (adrp+ldr+ret, 返回全局常量 0.1f),
+// Substrate 的 arm64 跳板需要 16 字节, hook 它会踩坏紧随其后的
+// Player::getEntityTypeId, 进世界后首次移动即 SIGILL 闪退 (2026-08-28 崩溃日志)。
+// 反汇编确认该常量位于 __TEXT,__const 静态地址 0x1002ab79c,
+// 全二进制仅 getBaseSpeed 一处引用, 因此不 hook 函数, 直接用
+// vm_protect(VM_PROT_COPY) 改写常量, 只影响玩家速度, 不影响怪物
+#define PLAYER_BASESPEED_VMADDR 0x1002ab79c
+#define MWB_SPEED_MULT 2.5f
+
+static float gOrigBaseSpeed = 0.0f;   // 原始基础速度 (首次改写前缓存)
+
+// 按开关改写/恢复玩家基础速度常量
+static void MWBApplySpeed(BOOL on) {
+    float *p = (float *)(MWBMainSlide() + PLAYER_BASESPEED_VMADDR);
+    if (!gOrigBaseSpeed) gOrigBaseSpeed = *p;
+    vm_address_t page = ((vm_address_t)p) & ~(vm_page_size - 1);
+    kern_return_t kr = vm_protect(mach_task_self(), page, vm_page_size, 0,
+                                  VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY);
+    if (kr != KERN_SUCCESS) {
+        NSLog(@"[魔玩盒子] 加速奔跑失败: vm_protect 改写权限被拒 (%d)", kr);
+        return;
+    }
+    *p = on ? gOrigBaseSpeed * MWB_SPEED_MULT : gOrigBaseSpeed;
+    // 写完恢复只读可执行
+    vm_protect(mach_task_self(), page, vm_page_size, 0, VM_PROT_READ | VM_PROT_EXECUTE);
+    NSLog(@"[魔玩盒子] 加速奔跑 %@ (基础速度 %.1f → %.2f)",
+          on ? @"已开启" : @"已关闭", gOrigBaseSpeed, *p);
+}
 
 #pragma mark - 选项菜单主视图
 
@@ -408,7 +438,7 @@ static void *gLevel       = NULL;
 
 - (void)setupTopBar {
     CGFloat barH = 104;
-    _topBar = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.bounds.size.width, barH)];
+    _topBar = [[UIView alloc] initWithFrame:(CGRect){{0,0},{self.bounds.size.width,barH}}];
     _topBar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     _topBar.backgroundColor = kTopBar;
     [self addSubview:_topBar];
@@ -444,12 +474,12 @@ static void *gLevel       = NULL;
                                         4, 4, MWB_COLOR(0x37,0x35,0x37));
     [_topBar addSubview:title];
 
-    _topBar.frame = CGRectMake(0, 0, self.bounds.size.width, barH);
-    topLight.frame = CGRectMake(0, 0, _topBar.bounds.size.width, 5);
-    bottomDark.frame = CGRectMake(0, barH-7, _topBar.bounds.size.width, 7);
-    innerShadow.frame = CGRectMake(0, barH-12, _topBar.bounds.size.width, 5);
-    _backButton.frame = CGRectMake(16, 10, 132, barH-20);
-    title.frame = CGRectMake(148, 0, _topBar.bounds.size.width-296, barH);
+    _topBar.frame = (CGRect){{0,0},{self.bounds.size.width,barH}};
+    topLight.frame = (CGRect){{0,0},{_topBar.bounds.size.width,5}};
+    bottomDark.frame = (CGRect){{0,barH-7},{_topBar.bounds.size.width,7}};
+    innerShadow.frame = (CGRect){{0,barH-12},{_topBar.bounds.size.width,5}};
+    _backButton.frame = (CGRect){{16,10},{132,barH-20}};
+    title.frame = (CGRect){{148,0},{_topBar.bounds.size.width-296,barH}};
 }
 
 - (void)setupBody {
@@ -458,7 +488,7 @@ static void *gLevel       = NULL;
     CGFloat w = self.bounds.size.width, h = self.bounds.size.height;
 
     // 左侧导航
-    _sideNav = [[UIView alloc] initWithFrame:CGRectMake(0, barH, sideW, h-barH)];
+    _sideNav = [[UIView alloc] initWithFrame:(CGRect){{0,barH},{sideW,h-barH}}];
     _sideNav.autoresizingMask = UIViewAutoresizingFlexibleHeight;
     _sideNav.backgroundColor = kSidebar;
     [self addSubview:_sideNav];
@@ -467,7 +497,7 @@ static void *gLevel       = NULL;
     navEdge.backgroundColor = MWB_COLOR(0x74,0x6e,0x6d);
     navEdge.autoresizingMask = UIViewAutoresizingFlexibleHeight|UIViewAutoresizingFlexibleLeftMargin;
     [_sideNav addSubview:navEdge];
-    navEdge.frame = CGRectMake(sideW-5, 0, 5, _sideNav.bounds.size.height);
+    navEdge.frame = (CGRect){{sideW-5,0},{5,_sideNav.bounds.size.height}};
 
     // 4 个分类图标 (SVG path 与参考一致)
     NSArray *icons = @[
@@ -477,12 +507,12 @@ static void *gLevel       = NULL;
         @[@"M18 17h28l8 7 6 22-5 10h-9L36 45h-8L18 56H9L4 46l6-22zm-2 10v7h-7v8h7v7h8v-7h7v-8h-7v-7zm27 5v7h7v-7zm8 9v7h7v-7z"],
         @[@"M27 5h9v12h-9zM8 14h9v9H8zm38 1h9v9h-9zM18 24h10v10H18zm19-2h10v10H37zM5 36h10v10H5zm49-4h8v11h-8zM26 39h12v12H26zm-13 10h9v10h-9zm32-9h10v11H45zM35 54h8v8h-8z"],
     ];
-    NSMutableArray *btns = [NSMutableArray array];
+    NSMutableArray *btns = [NSMutableArray new];
     CGFloat btnPad = 18, btnTop = 34;
     CGFloat btnSize = sideW - btnPad*2;
     for (int i = 0; i < 4; i++) {
         MWBSideButton *b = [[MWBSideButton alloc] initWithSVGPaths:icons[i]];
-        b.frame = CGRectMake(btnPad, btnTop + i*(btnSize+6), btnSize, btnSize);
+        b.frame = (CGRect){{btnPad,btnTop + i*(btnSize+6)},{btnSize,btnSize}};
         b.tag = i;
         b.active = (i == 0);
         [b addTarget:self action:@selector(switchPage:) forControlEvents:UIControlEventTouchUpInside];
@@ -492,7 +522,7 @@ static void *gLevel       = NULL;
     _sideButtons = btns;
 
     // 右侧设置面板
-    _panel = [[UIScrollView alloc] initWithFrame:CGRectMake(sideW, barH, w-sideW, h-barH)];
+    _panel = [[UIScrollView alloc] initWithFrame:(CGRect){{sideW,barH},{w-sideW,h-barH}}];
     _panel.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     _panel.backgroundColor = kPanelBG;
     _panel.alwaysBounceVertical = YES;
@@ -519,7 +549,7 @@ static void *gLevel       = NULL;
 }
 
 - (void)buildPages {
-    NSMutableArray *pages = [NSMutableArray array];
+    NSMutableArray *pages = [NSMutableArray new];
     CGFloat pw = _panel.bounds.size.width;
     CGFloat padL = 58, padTop = 4;
 
@@ -530,12 +560,13 @@ static void *gLevel       = NULL;
     h0.attributedText = MWBPixelText(@"Game", MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
                                      4, 4, MWB_COLOR(0x30,0x30,0x31));
     [h0 sizeToFit];
-    h0.frame = CGRectMake(padL, padTop, h0.bounds.size.width, h0.bounds.size.height);
+    h0.frame = (CGRect){{padL,padTop},{h0.bounds.size.width,h0.bounds.size.height}};
     [p0 addSubview:h0];
     NSArray *rows0 = @[
         @[@"无敌", [self makeToggle:gInvincible action:@selector(togInvincible:)]],
         @[@"飞行", [self makeToggle:gFly action:@selector(togFly:)]],
         @[@"快速破坏", [self makeToggle:gFastBreak action:@selector(togFastBreak:)]],
+        @[@"调试模式", [self makeToggle:gMWBDebug action:@selector(togDebug:)]],
     ];
     CGFloat ry = CGRectGetMaxY(h0.frame) + 20;
     for (NSArray *r in rows0) {
@@ -544,13 +575,13 @@ static void *gLevel       = NULL;
         UIView *row = [[UIView alloc] init];
         row.backgroundColor = [UIColor clearColor];
         [row addSubview:l]; [row addSubview:t];
-        row.frame = CGRectMake(33, ry, pw-66-33, 77);
-        l.frame = CGRectMake(0, 0, MIN(445,row.bounds.size.width-180), 77);
-        t.frame = CGRectMake(row.bounds.size.width-152, 0, 152, 77);
+        row.frame = (CGRect){{33,ry},{pw-66-33,77}};
+        l.frame = (CGRect){{0,0},{MIN(445,row.bounds.size.width-180),77}};
+        t.frame = (CGRect){{row.bounds.size.width-152,0},{152,77}};
         [p0 addSubview:row];
         ry += 85;
     }
-    p0.frame = CGRectMake(0, 0, pw, ry);
+    p0.frame = (CGRect){{0,0},{pw,ry}};
     [pages addObject:p0];
 
     // ---- 页 1: Blocks (方块) ----
@@ -560,15 +591,15 @@ static void *gLevel       = NULL;
     h1.attributedText = MWBPixelText(@"Blocks", MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
                                      4, 4, MWB_COLOR(0x30,0x30,0x31));
     [h1 sizeToFit];
-    h1.frame = CGRectMake(padL, padTop, h1.bounds.size.width, h1.bounds.size.height);
+    h1.frame = (CGRect){{padL,padTop},{h1.bounds.size.width,h1.bounds.size.height}};
     [p1 addSubview:h1];
     UILabel *todo1 = [[UILabel alloc] init];
     todo1.attributedText = MWBPixelText(@"物品功能开发中...", MWBPixelFont(28), kWhiteText,
                                         3, 3, [UIColor blackColor]);
     [todo1 sizeToFit];
-    todo1.frame = CGRectMake(padL, CGRectGetMaxY(h1.frame)+30, todo1.bounds.size.width, todo1.bounds.size.height);
+    todo1.frame = (CGRect){{padL,CGRectGetMaxY(h1.frame)+30},{todo1.bounds.size.width,todo1.bounds.size.height}};
     [p1 addSubview:todo1];
-    p1.frame = CGRectMake(0, 0, pw, CGRectGetMaxY(todo1.frame)+30);
+    p1.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(todo1.frame)+30}};
     [pages addObject:p1];
 
     // ---- 页 2: Controls (手柄) ----
@@ -578,7 +609,7 @@ static void *gLevel       = NULL;
     h2.attributedText = MWBPixelText(@"Controls", MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
                                      4, 4, MWB_COLOR(0x30,0x30,0x31));
     [h2 sizeToFit];
-    h2.frame = CGRectMake(padL, padTop, h2.bounds.size.width, h2.bounds.size.height);
+    h2.frame = (CGRect){{padL,padTop},{h2.bounds.size.width,h2.bounds.size.height}};
     [p2 addSubview:h2];
     NSArray *rows2 = @[
         @[@"加速奔跑", [self makeToggle:gSpeed action:@selector(togSpeed:)]],
@@ -590,13 +621,13 @@ static void *gLevel       = NULL;
         MWBPixelToggle *t = r[1];
         UIView *row = [[UIView alloc] init];
         [row addSubview:l]; [row addSubview:t];
-        row.frame = CGRectMake(33, ry, pw-66-33, 77);
-        l.frame = CGRectMake(0, 0, MIN(445,row.bounds.size.width-180), 77);
-        t.frame = CGRectMake(row.bounds.size.width-152, 0, 152, 77);
+        row.frame = (CGRect){{33,ry},{pw-66-33,77}};
+        l.frame = (CGRect){{0,0},{MIN(445,row.bounds.size.width-180),77}};
+        t.frame = (CGRect){{row.bounds.size.width-152,0},{152,77}};
         [p2 addSubview:row];
         ry += 85;
     }
-    p2.frame = CGRectMake(0, 0, pw, ry);
+    p2.frame = (CGRect){{0,0},{pw,ry}};
     [pages addObject:p2];
 
     // ---- 页 3: World (粒子) ----
@@ -606,27 +637,27 @@ static void *gLevel       = NULL;
     h3.attributedText = MWBPixelText(@"World", MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
                                      4, 4, MWB_COLOR(0x30,0x30,0x31));
     [h3 sizeToFit];
-    h3.frame = CGRectMake(padL, padTop, h3.bounds.size.width, h3.bounds.size.height);
+    h3.frame = (CGRect){{padL,padTop},{h3.bounds.size.width,h3.bounds.size.height}};
     [p3 addSubview:h3];
     // 时间切换: 白天 / 夜晚 两个像素按钮
     UILabel *timeLabel = [self makeRowLabel:@"时间"];
-    timeLabel.frame = CGRectMake(33, CGRectGetMaxY(h3.frame)+30, 200, 60);
+    timeLabel.frame = (CGRect){{33,CGRectGetMaxY(h3.frame)+30},{200,60}};
     [p3 addSubview:timeLabel];
     MWBPixelButton *dayBtn = [[MWBPixelButton alloc] init];
     [dayBtn setAttributedTitle:MWBPixelText(@"白天", MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
                                             3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
     dayBtn.tag = 1;
     [dayBtn addTarget:self action:@selector(setTime:) forControlEvents:UIControlEventTouchUpInside];
-    dayBtn.frame = CGRectMake(pw-33-260, CGRectGetMaxY(h3.frame)+30, 120, 60);
+    dayBtn.frame = (CGRect){{pw-33-260,CGRectGetMaxY(h3.frame)+30},{120,60}};
     [p3 addSubview:dayBtn];
     MWBPixelButton *nightBtn = [[MWBPixelButton alloc] init];
     [nightBtn setAttributedTitle:MWBPixelText(@"夜晚", MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
                                               3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
     nightBtn.tag = 2;
     [nightBtn addTarget:self action:@selector(setTime:) forControlEvents:UIControlEventTouchUpInside];
-    nightBtn.frame = CGRectMake(pw-33-130, CGRectGetMaxY(h3.frame)+30, 120, 60);
+    nightBtn.frame = (CGRect){{pw-33-130,CGRectGetMaxY(h3.frame)+30},{120,60}};
     [p3 addSubview:nightBtn];
-    p3.frame = CGRectMake(0, 0, pw, CGRectGetMaxY(dayBtn.frame)+30);
+    p3.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(dayBtn.frame)+30}};
     [pages addObject:p3];
 
     self.pages = pages;
@@ -676,8 +707,12 @@ static void *gLevel       = NULL;
 - (void)togInvincible:(MWBPixelToggle *)t { gInvincible = t.on; }
 - (void)togFly:(MWBPixelToggle *)t { gFly = t.on; }
 - (void)togFastBreak:(MWBPixelToggle *)t { gFastBreak = t.on; }
-- (void)togSpeed:(MWBPixelToggle *)t { gSpeed = t.on; }
+- (void)togSpeed:(MWBPixelToggle *)t { gSpeed = t.on; MWBApplySpeed(t.on); }
 - (void)togSuperJump:(MWBPixelToggle *)t { gSuperJump = t.on; }
+- (void)togDebug:(MWBPixelToggle *)t {
+    gMWBDebug = t.on;
+    NSLog(@"[魔玩盒子] 调试模式 %@", gMWBDebug ? @"已开启" : @"已关闭");
+}
 - (void)setTime:(MWBPixelButton *)sender { gTimeMode = (int)sender.tag; }
 
 @end
@@ -698,7 +733,7 @@ static void *gLevel       = NULL;
         self.layer.borderWidth = 4;
         self.layer.borderColor = MWB_COLOR(0x2b,0x29,0x2a).CGColor;
         self.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.layer.shadowOffset = CGSizeMake(5, 5);
+        self.layer.shadowOffset = (CGSize){5, 5};
         self.layer.shadowRadius = 0;
         self.layer.shadowOpacity = 0.55;
 
@@ -732,10 +767,10 @@ static void *gLevel       = NULL;
     [super layoutSubviews];
     CGFloat h = self.bounds.size.height;
     CGFloat iconSize = 39;
-    _iconBox.frame = CGRectMake(7, (h-iconSize)/2, iconSize, iconSize);
+    _iconBox.frame = (CGRect){{7,(h-iconSize)/2},{iconSize,iconSize}};
     _iconLabel.frame = _iconBox.bounds;
     [_textLabel sizeToFit];
-    _textLabel.frame = CGRectMake(7+iconSize+11, 0, _textLabel.bounds.size.width, h);
+    _textLabel.frame = (CGRect){{7+iconSize+11,0},{_textLabel.bounds.size.width,h}};
 }
 - (void)handleTap { if (self.onTap) self.onTap(); }
 - (void)handlePan:(UIPanGestureRecognizer *)pan {
@@ -753,19 +788,19 @@ static void *gLevel       = NULL;
     CGFloat w=rect.size.width, h=rect.size.height, b=4;
     // inset 4px 4px 0 light, inset -4px -4px 0 dark
     CGContextSetFillColorWithColor(ctx, kSidebarLight.CGColor);
-    CGContextFillRect(ctx, CGRectMake(b,b,w-2*b,b));
-    CGContextFillRect(ctx, CGRectMake(b,b,b,h-2*b));
+    CGContextFillRect(ctx, (CGRect){{b,b},{w-2*b,b}});
+    CGContextFillRect(ctx, (CGRect){{b,b},{b,h-2*b}});
     CGContextSetFillColorWithColor(ctx, kSidebarDark.CGColor);
-    CGContextFillRect(ctx, CGRectMake(b,h-2*b,w-2*b,b));
-    CGContextFillRect(ctx, CGRectMake(w-2*b,b,b,h-2*b));
+    CGContextFillRect(ctx, (CGRect){{b,h-2*b},{w-2*b,b}});
+    CGContextFillRect(ctx, (CGRect){{w-2*b,b},{b,h-2*b}});
     // 图标方块内阴影
     CGFloat ix=7, iy=(h-39)/2, is=39;
     CGContextSetFillColorWithColor(ctx, MWB_COLOR(0x75,0x83,0x53).CGColor);
-    CGContextFillRect(ctx, CGRectMake(ix+3, iy+3, is-6, 3));
-    CGContextFillRect(ctx, CGRectMake(ix+3, iy+3, 3, is-6));
+    CGContextFillRect(ctx, (CGRect){{ix+3,iy+3},{is-6,3}});
+    CGContextFillRect(ctx, (CGRect){{ix+3,iy+3},{3,is-6}});
     CGContextSetFillColorWithColor(ctx, MWB_COLOR(0x25,0x30,0x20).CGColor);
-    CGContextFillRect(ctx, CGRectMake(ix+3, iy+is-6, is-6, 3));
-    CGContextFillRect(ctx, CGRectMake(ix+is-6, iy+3, 3, is-6));
+    CGContextFillRect(ctx, (CGRect){{ix+3,iy+is-6},{is-6,3}});
+    CGContextFillRect(ctx, (CGRect){{ix+is-6,iy+3},{3,is-6}});
 }
 @end
 
@@ -792,7 +827,7 @@ static void *gLevel       = NULL;
 - (void)viewDidLoad {
     [super viewDidLoad];
     CGFloat sw = self.view.bounds.size.width;
-    _floatButton = [[MWBFloatingButton alloc] initWithFrame:CGRectMake(sw-22-200, 22, 200, 58)];
+    _floatButton = [[MWBFloatingButton alloc] initWithFrame:(CGRect){{sw-22-200,22},{200,58}}];
     _floatButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     __weak MWBViewController *ws = self;
     _floatButton.onTap = ^{ [ws toggleMenu]; };
@@ -823,20 +858,33 @@ static void *gLevel       = NULL;
 
 typedef void (*NormalTickFn)(void *self);
 static NormalTickFn orig_normalTick = NULL;
+static int gTickCount = 0;
 static void hooked_normalTick(void *self) {
     orig_normalTick(self);
     gLocalPlayer = self;
+    gTickCount++;
     char *abil = (char *)self + PLAYER_ABILITIES_OFFSET;
     if (gInvincible) abil[ABIL_INVULNERABLE] = 1;
     if (gFly) { abil[ABIL_FLYING] = 1; abil[ABIL_MAY_FLY] = 1; }
     if (gFastBreak) abil[ABIL_INSTABUILD] = 1;
-    if (gSpeed) {
-        *(float *)((char *)self + 108) *= 2.5f;
-        *(float *)((char *)self + 116) *= 2.5f;
-    }
+    // 超级跳跃: 检测跳跃瞬间的速度 (jumpFromGround 设为 0.42)
     if (gSuperJump) {
         float *vy = (float *)((char *)self + ENTITY_VELOCITY_Y_OFFSET);
-        if (*vy > 0.40f && *vy < 0.44f) *vy *= 2.5f;
+        if (*vy > 0.40f && *vy < 0.44f) *vy = 0.85f;
+    }
+    // 调试日志: 每 200 tick 输出一次状态
+    if (gMWBDebug && (gTickCount % 200) == 1) {
+        NSString *m = [NSString stringWithFormat:
+            @"%@ [Toolbox调试] tick #%d player=%p abil=[%d,%d,%d,%d] vy=%.3f speed=%s fly=%s inv=%s fast=%s jump=%s\n",
+            [NSDate date], gTickCount, self,
+            abil[0], abil[1], abil[2], abil[3],
+            *(float *)((char *)self + ENTITY_VELOCITY_Y_OFFSET),
+            gSpeed ? "开" : "关", gFly ? "开" : "关",
+            gInvincible ? "开" : "关", gFastBreak ? "开" : "关",
+            gSuperJump ? "开" : "关"];
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) { [fh seekToEndOfFile]; [fh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
     }
 }
 
@@ -848,6 +896,93 @@ static void hooked_levelTick(void *self) {
     if (gTimeMode == 1) *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_DAY;
     else if (gTimeMode == 2) *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
 }
+
+#pragma mark - 触摸模拟 (调试用, cycript 可调用)
+
+// 通过 UITouch 模拟单次点击
+// 用法 (cycript): [MWBTouchHelper tapAtX:512 y:480]
+@interface MWBTouchHelper : NSObject
++ (void)tapAtX:(CGFloat)x y:(CGFloat)y;
++ (UIView *)findGameView;
+@end
+
+@implementation MWBTouchHelper
+
+// 找到 MCPE 的 OpenGL 渲染 view (GLKView/EAGLView)
++ (UIView *)findGameView {
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        // 跳过我们自己的 overlay window
+        if ([w isKindOfClass:NSClassFromString(@"MWBOverlayWindow")]) continue;
+        // 递归查找 GLKView/EAGLView
+        NSMutableArray *stack = [@[w] mutableCopy];
+        while (stack.count > 0) {
+            UIView *v = stack.lastObject;
+            [stack removeLastObject];
+            NSString *cls = NSStringFromClass([v class]);
+            if ([cls containsString:@"GLKView"] || [cls containsString:@"EAGL"] ||
+                [cls containsString:@"Surface"] || [cls containsString:@"Render"]) {
+                return v;
+            }
+            for (UIView *sub in v.subviews) [stack addObject:sub];
+        }
+    }
+    return nil;
+}
+
++ (UITouch *)createTouchAt:(CGPoint)pt window:(UIWindow *)window view:(UIView *)view phase:(UITouchPhase)phase {
+    UITouch *touch = [[UITouch alloc] init];
+    [touch setValue:window forKey:@"_window"];
+    [touch setValue:view forKey:@"_view"];
+    [touch setValue:@(phase) forKey:@"_phase"];
+    [touch setValue:@([[NSDate date] timeIntervalSinceReferenceDate]) forKey:@"_timestamp"];
+    [touch setValue:@1 forKey:@"_tapCount"];
+    NSValue *loc = [NSValue valueWithCGPoint:pt];
+    [touch setValue:loc forKey:@"_locationInWindow"];
+    [touch setValue:loc forKey:@"_previousLocationInWindow"];
+    return touch;
+}
+
++ (void)tapAtX:(CGFloat)x y:(CGFloat)y {
+    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    void (^log)(NSString *) = ^(NSString *m) {
+        NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], m];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) { [fh seekToEndOfFile]; [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
+    };
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIView *gameView = [self findGameView];
+        UIWindow *window = gameView.window;
+        log([NSString stringWithFormat:@"模拟点击 (%.0f,%.0f) gameView=%@ window=%@",
+            x, y, gameView.class, window.class]);
+        if (!gameView || !window) { log(@"未找到游戏 view, 放弃"); return; }
+
+        CGPoint pt = (CGPoint){x, y};
+
+        // 必须走 UIApplication sendEvent: 路由 (直接调 window touchesBegan: 是
+        // UIResponder 空实现, 不会转发给子 view); 同时 UIEvent 内部 _touches
+        // 也要塞进触摸, 否则游戏侧查 allTouches 拿不到
+        UITouch *touch = [self createTouchAt:pt window:window view:gameView phase:UITouchPhaseBegan];
+        UIEvent *beganEvent = [[UIEvent alloc] init];
+        @try { [beganEvent setValue:[NSSet setWithObject:touch] forKey:@"_touches"]; }
+        @catch (NSException *e) { log([NSString stringWithFormat:@"注入 _touches 失败: %@", e]); return; }
+        [[UIApplication sharedApplication] sendEvent:beganEvent];
+        log(@"触摸 began 已发送");
+
+        // Touch Ended (延迟 80ms, 复用同一个 UITouch 对象)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [touch setValue:@(UITouchPhaseEnded) forKey:@"_phase"];
+            UIEvent *endEvent = [[UIEvent alloc] init];
+            @try { [endEvent setValue:[NSSet setWithObject:touch] forKey:@"_touches"]; }
+            @catch (NSException *e) { log([NSString stringWithFormat:@"注入 _touches 失败: %@", e]); return; }
+            [[UIApplication sharedApplication] sendEvent:endEvent];
+            log(@"触摸 ended 已发送");
+        });
+    });
+}
+
+@end
 
 #pragma mark - 安装
 
@@ -873,11 +1008,22 @@ static void MWBInstall(void) {
     MWBRegisterFont();
     NSLog(@"[魔玩盒子] 插件已加载");
 
+    // 日志辅助: 追加写文件
+    void (^logFile)(NSString *) = ^(NSString *m) {
+        NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], m];
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) { [fh seekToEndOfFile]; [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
+        else { [line writeToURL:logURL atomically:YES encoding:NSUTF8StringEncoding error:nil]; }
+    };
+
     #define MWB_HOOK(mangled, replacement, original) do { \
         void *_s = MSFindSymbol(NULL, mangled); \
         if (_s) { MSHookFunction(_s, (void *)replacement, (void **)&original); \
-            NSLog(@"[魔玩盒子] 已 hook: %s", mangled); } \
-        else NSLog(@"[魔玩盒子] 警告: 未找到 %s", mangled); \
+            NSLog(@"[魔玩盒子] 已 hook: %s -> %p", mangled, _s); \
+            logFile([NSString stringWithFormat:@"[Toolbox] hook 成功: %s @ %p", mangled, _s]); } \
+        else { NSLog(@"[魔玩盒子] 警告: 未找到 %s", mangled); \
+            logFile([NSString stringWithFormat:@"[Toolbox] hook 失败: 未找到 %s", mangled]); } \
     } while (0)
 
     MWB_HOOK("__ZN11LocalPlayer10normalTickEv", hooked_normalTick, orig_normalTick);

@@ -3,6 +3,9 @@ packages/
 *.deb
 .DS_Store
 .commandcode/
+.mimosa/
+.v2c/
+.video_agent/
 
 # 从设备拉取的 MC 原版贴图 (版权素材, 禁止提交)
 terrain-atlas.tga
