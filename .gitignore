@@ -3,3 +3,11 @@ packages/
 *.deb
 .DS_Store
 .commandcode/
+
+# 从设备拉取的 MC 原版贴图 (版权素材, 禁止提交)
+terrain-atlas.tga
+terrain-atlas.png
+terrain.meta
+items-opaque.png
+items.meta
+spritesheet.png

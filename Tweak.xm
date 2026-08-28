@@ -2,6 +2,7 @@
 #import <CoreText/CoreText.h>
 #import <substrate.h>
 #import "FusionPixel.h"
+#import "EMI.h"
 
 /* ============================================================
  * 魔玩我的世界盒子 (mowanbox-mc)
@@ -863,6 +864,8 @@ static void MWBInstall(void) {
         w.hidden = NO;
         gWindow = w;
         NSLog(@"[魔玩盒子] 像素风 UI 已安装");
+        // 安装 EMI 物品管理器 (独立悬浮按钮)
+        [MWBEMIManager install];
     });
 }
 
