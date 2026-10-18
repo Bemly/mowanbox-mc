@@ -4,6 +4,7 @@
 #import <substrate.h>
 #import "FusionPixel.h"
 #import "EMI.h"
+#import "MWBVersion.h"
 
 /* ============================================================
  * 魔玩我的世界盒子 (mowanbox-mc)
@@ -1007,6 +1008,10 @@ static void MWBInstall(void) {
 %ctor {
     MWBRegisterFont();
     NSLog(@"[魔玩盒子] 插件已加载");
+    // 版本自适应: 不依赖包名,运行时识别游戏版本再选注入方式,同一UI操作
+    MWBGameVersion gv = [MWBVersion currentVersion];
+    NSLog(@"[魔玩盒子] 当前游戏版本: %@ 注入方式=%ld",
+          [MWBVersion nameForVersion:gv], (long)[MWBVersion currentInjectStyle]);
 
     // 日志辅助: 追加写文件
     void (^logFile)(NSString *) = ^(NSString *m) {

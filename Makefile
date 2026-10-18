@@ -9,7 +9,7 @@ TARGET_CODESIGN_FLAGS = -s - --force
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = mowanbox
-mowanbox_FILES = Tweak.xm EMI.mm
+mowanbox_FILES = Tweak.xm EMI.mm MWBVersion.mm
 mowanbox_FRAMEWORKS = UIKit CoreGraphics Foundation QuartzCore ImageIO
 mowanbox_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 
