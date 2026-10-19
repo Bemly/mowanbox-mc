@@ -905,6 +905,11 @@ static void hooked_levelTick(void *self) {
 @interface MWBTouchHelper : NSObject
 + (void)tapAtX:(CGFloat)x y:(CGFloat)y;
 + (UIView *)findGameView;
+// 直调式点击 (AGENTS 坑#6 合规路径: 直接调游戏 VC 的 touchesBegan/Ended,
+// 不走 UIApplication sendEvent:, 不会 SIGSEGV)
+// 用法 (cycript): [MWBTouchHelper tapGameAtX:512 y:485]
++ (void)tapGameAtX:(CGFloat)x y:(CGFloat)y;
++ (UIViewController *)findGameVC;
 @end
 
 @implementation MWBTouchHelper
@@ -979,6 +984,49 @@ static void hooked_levelTick(void *self) {
             @catch (NSException *e) { log([NSString stringWithFormat:@"注入 _touches 失败: %@", e]); return; }
             [[UIApplication sharedApplication] sendEvent:endEvent];
             log(@"触摸 ended 已发送");
+        });
+    });
+}
+
+// 找到游戏的主 ViewController (minecraftpe 开头、非自家 overlay)
++ (UIViewController *)findGameVC {
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        UIViewController *rvc = w.rootViewController;
+        if (!rvc) continue;
+        NSString *cls = NSStringFromClass([rvc class]);
+        if ([cls containsString:@"MWB"] || [cls containsString:@"EMI"]) continue;
+        if ([cls rangeOfString:@"minecraftpe" options:NSCaseInsensitiveSearch].length > 0) {
+            return rvc;
+        }
+    }
+    return nil;
+}
+
+// 直调式点击: began+ended 直接打到游戏 VC (主线程同步执行)
++ (void)tapGameAtX:(CGFloat)x y:(CGFloat)y {
+    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    void (^log)(NSString *) = ^(NSString *m) {
+        NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], m];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) { [fh seekToEndOfFile]; [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
+    };
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIViewController *vc = [self findGameVC];
+        UIView *gameView = vc.view ?: [self findGameView];
+        UIWindow *window = gameView.window;
+        log([NSString stringWithFormat:@"直调点击 (%.0f,%.0f) vc=%@ view=%@",
+             x, y, NSStringFromClass([vc class]), NSStringFromClass([gameView class])]);
+        if (!vc || !gameView) { log(@"未找到游戏 VC/view, 放弃"); return; }
+        CGPoint pt = (CGPoint){x, y};
+        UITouch *touch = [self createTouchAt:pt window:window view:gameView phase:UITouchPhaseBegan];
+        NSSet *s = [NSSet setWithObject:touch];
+        [vc touchesBegan:s withEvent:nil];
+        log(@"直调 began 已调用");
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [touch setValue:@(UITouchPhaseEnded) forKey:@"_phase"];
+            [vc touchesEnded:s withEvent:nil];
+            log(@"直调 ended 已调用");
         });
     });
 }
