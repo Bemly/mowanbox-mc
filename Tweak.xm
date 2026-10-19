@@ -365,7 +365,10 @@ static BOOL gFly         = NO;
 static BOOL gFastBreak   = NO;
 static BOOL gSpeed       = NO;
 static BOOL gSuperJump   = NO;
+static BOOL gNoclip      = NO;
+static BOOL gNightVision = NO;
 static int  gTimeMode    = 0;  // 0=不修改 1=白天 2=夜晚
+static int  gWeatherMode = 0;  // 0=不修改 1=晴 2=雨 3=雷
 
 void *gLocalPlayer = NULL;       // LocalPlayer* (EMI 也用)
 static void *gLevel       = NULL;
@@ -567,6 +570,8 @@ static void MWBApplySpeed(BOOL on) {
         @[@"无敌", [self makeToggle:gInvincible action:@selector(togInvincible:)]],
         @[@"飞行", [self makeToggle:gFly action:@selector(togFly:)]],
         @[@"快速破坏", [self makeToggle:gFastBreak action:@selector(togFastBreak:)]],
+        @[@"穿墙", [self makeToggle:gNoclip action:@selector(togNoclip:)]],
+        @[@"夜视", [self makeToggle:gNightVision action:@selector(togNightVision:)]],
         @[@"调试模式", [self makeToggle:gMWBDebug action:@selector(togDebug:)]],
     ];
     CGFloat ry = CGRectGetMaxY(h0.frame) + 20;
@@ -658,7 +663,21 @@ static void MWBApplySpeed(BOOL on) {
     [nightBtn addTarget:self action:@selector(setTime:) forControlEvents:UIControlEventTouchUpInside];
     nightBtn.frame = (CGRect){{pw-33-130,CGRectGetMaxY(h3.frame)+30},{120,60}};
     [p3 addSubview:nightBtn];
-    p3.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(dayBtn.frame)+30}};
+    // 天气: 晴 / 雨 / 雷 三个像素按钮 (tag 3/4/5)
+    UILabel *wxLabel = [self makeRowLabel:@"天气"];
+    wxLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+20},{200,60}};
+    [p3 addSubview:wxLabel];
+    NSArray *wxTitles = @[@"晴", @"雨", @"雷"];
+    for (int i = 0; i < 3; i++) {
+        MWBPixelButton *wxBtn = [[MWBPixelButton alloc] init];
+        [wxBtn setAttributedTitle:MWBPixelText(wxTitles[i], MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
+                                              3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
+        wxBtn.tag = 3 + i;
+        [wxBtn addTarget:self action:@selector(setWeather:) forControlEvents:UIControlEventTouchUpInside];
+        wxBtn.frame = (CGRect){{pw-33-400+i*135,CGRectGetMaxY(dayBtn.frame)+20},{120,60}};
+        [p3 addSubview:wxBtn];
+    }
+    p3.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(dayBtn.frame)+110}};
     [pages addObject:p3];
 
     self.pages = pages;
@@ -710,11 +729,14 @@ static void MWBApplySpeed(BOOL on) {
 - (void)togFastBreak:(MWBPixelToggle *)t { gFastBreak = t.on; }
 - (void)togSpeed:(MWBPixelToggle *)t { gSpeed = t.on; MWBApplySpeed(t.on); }
 - (void)togSuperJump:(MWBPixelToggle *)t { gSuperJump = t.on; }
+- (void)togNoclip:(MWBPixelToggle *)t { gNoclip = t.on; }
+- (void)togNightVision:(MWBPixelToggle *)t { gNightVision = t.on; }
 - (void)togDebug:(MWBPixelToggle *)t {
     gMWBDebug = t.on;
     NSLog(@"[魔玩盒子] 调试模式 %@", gMWBDebug ? @"已开启" : @"已关闭");
 }
 - (void)setTime:(MWBPixelButton *)sender { gTimeMode = (int)sender.tag; }
+- (void)setWeather:(MWBPixelButton *)sender { gWeatherMode = (int)sender.tag - 2; }
 
 @end
 
@@ -908,6 +930,14 @@ static void hooked_levelTick(void *self) {
 #define V1133_PLAYER_ABILITIES_OFF 2376
 #define V1133_PLAYER_INV_OFF       4416
 #define V1133_LEVEL_DAYTIME_OFF    0x510
+#define V1133_LEVEL_SHARED_OFF     0x1e8
+#define V1133_UNWRAP_VA            0x1024ECE84UL
+#define V1133_SETRAIN_VA           0x1024EC9E0UL
+#define V1133_SETRAINTIME_VA       0x1024EC9F0UL
+#define V1133_SETLIGHT_VA          0x1024EC9B0UL
+#define V1133_SETLIGHTTIME_VA      0x1024EC9C0UL
+#define V1133_MOBEFFECT_GET_VA     0x101E40170UL
+#define V1133_WEATHERWRAP_VA       0x101FB32F4UL
 
 static void *gPlayer1133 = NULL;
 static void *gLevel1133 = NULL;
@@ -950,6 +980,21 @@ static void hooked_1133_playerTick(void *self) {
         *(float *)(ab + 14 * 12) = 1.0f;                // walkSpeed
         *(float *)(ab + 13 * 12) = 1.0f;                // flySpeed
     }
+    if (gNoclip) ab[17 * 12] = 1;                       // noclip
+    // 夜视药水探测: getById(速度1/跳跃8/夜视16) 回读指针, 非空即药水系统可达
+    if (gNightVision && gMWBDebug && (gTick1133 % 200) == 1) {
+        void *(*getById)(int) = (void *(*)(int))(MWBMainSlide() + V1133_MOBEFFECT_GET_VA);
+        void *e1 = getById(1), *e8 = getById(8), *e16 = getById(16);
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ [1133药水] speed=%p jump=%p nightvision=%p\n",
+                              [NSDate date], e1, e8, e16];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
     if (gMWBDebug && (gTick1133 % 200) == 1) {
         NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
@@ -969,16 +1014,29 @@ static void hooked_1133_levelTick(void *self) {
     gLevel1133 = self;
     if (gTimeMode == 1) *(int32_t *)((char *)self + V1133_LEVEL_DAYTIME_OFF) = TICK_TIME_DAY;
     else if (gTimeMode == 2) *(int32_t *)((char *)self + V1133_LEVEL_DAYTIME_OFF) = TICK_TIME_NIGHT;
+    // 天气: 调 Level wrapper (自带变更检测+同步广播, 比裸写setter靠谱)
+    // void wrapper(Level*, float rain, int rainTime, float lightning, int lightningTime)
+    if (gWeatherMode >= 1 && gWeatherMode <= 3) {
+        void (*wfn)(void *, float, int, float, int) =
+            (void (*)(void *, float, int, float, int))(MWBMainSlide() + V1133_WEATHERWRAP_VA);
+        if (gWeatherMode == 1) wfn(self, 0.0f, 0, 0.0f, 0);
+        else if (gWeatherMode == 2) wfn(self, 1.0f, 12000, 0.0f, 0);
+        else wfn(self, 1.0f, 12000, 1.0f, 12000);
+    }
     static int s_lvTick = 0;
     if (gMWBDebug && ((++s_lvTick % 200) == 1)) {
         NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
+            void *(*uw)(void *) = (void *(*)(void *))(MWBMainSlide() + V1133_UNWRAP_VA);
+            void *dbgLd = uw((char *)self + V1133_LEVEL_SHARED_OFF);
+            float rain = dbgLd ? *(float *)((char *)dbgLd + 0x354) : -9.0f;
             NSString *line = [NSString stringWithFormat:
-                @"%@ [1133关卡] tick #%d level=%p dayTime=%d gTimeMode=%d\n",
+                @"%@ [1133关卡] tick #%d level=%p dayTime=%d gTimeMode=%d ld=%p rain=%.2f wmode=%d\n",
                 [NSDate date], s_lvTick, self,
-                *(int32_t *)((char *)self + V1133_LEVEL_DAYTIME_OFF), gTimeMode];
+                *(int32_t *)((char *)self + V1133_LEVEL_DAYTIME_OFF), gTimeMode,
+                dbgLd, rain, gWeatherMode];
             [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
             [fh closeFile];
         }
