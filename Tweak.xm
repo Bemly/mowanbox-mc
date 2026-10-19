@@ -898,6 +898,335 @@ static void hooked_levelTick(void *self) {
     else if (gTimeMode == 2) *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
 }
 
+#pragma mark - 1.13.3 版本适配 (静态VA+slide,无需符号)
+// 逆向结论: Player::normalTick @0x101D5CAC8 (2636B,可hook)
+// Level::tick @0x101FAAC70, 背包 Player+4416,
+// abilities Player+2376 (12B步长x18条目,使能位+8,值+12),
+// dayTime Level+0x510 (int32), gameTime Level+0x4E8
+#define V1133_PLAYERNORMALTICK_VA 0x101D5CAC8UL
+#define V1133_LEVELTICK_VA        0x101FAAC70UL
+#define V1133_PLAYER_ABILITIES_OFF 2376
+#define V1133_PLAYER_INV_OFF       4416
+#define V1133_LEVEL_DAYTIME_OFF    0x510
+
+static void *gPlayer1133 = NULL;
+static void *gLevel1133 = NULL;
+static int gTick1133 = 0;
+typedef void (*V1133TickFn)(void *self);
+static V1133TickFn orig_1133_playerTick = NULL;
+static V1133TickFn orig_1133_levelTick = NULL;
+
+// 能力表探测: 18条目x12B,附名字表(静态0x10340F230)和12字节hex,用于定位无敌下标
+#define V1133_ABIL_NAMES_VA 0x10340F230UL
+static void MWB1133LogAbilities(void *player, NSFileHandle *fh) {
+    char *base = (char *)player + V1133_PLAYER_ABILITIES_OFF;
+    char **names = (char **)(MWBMainSlide() + V1133_ABIL_NAMES_VA);
+    NSMutableString *m = [NSMutableString stringWithFormat:@"[1133能力表] player=%p\n", player];
+    for (int i = 0; i < 18; i++) {
+        char *e = base + i * 12;
+        const char *nm = "??";
+        @try {
+            char *np = names[i];
+            if (np && (uintptr_t)np > 0x100000000UL) nm = np;
+        } @catch (NSException *ex) { nm = "bad"; }
+        [m appendFormat:@" [%d]%-12s", i, nm];
+        for (int b = 0; b < 12; b++) [m appendFormat:@" %02x", (unsigned char)e[b]];
+        [m appendString:@"\n"];
+    }
+    [fh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]];
+}
+
+static void hooked_1133_playerTick(void *self) {
+    orig_1133_playerTick(self);
+    gPlayer1133 = self;
+    gTick1133++;
+    // 无敌: entry[8]invulnerable 值=Player+2480 (Base2376+12+8*12, 逆向分队实锤)
+    // 旧双写 base[8*12]/[9*12] 实为 teleport/invulnerable, 现改为单写去副作用
+    char *ab = (char *)self + V1133_PLAYER_ABILITIES_OFF + 12;
+    if (gInvincible) ab[8 * 12] = 1;                    // Player+2480 invulnerable
+    if (gFly) { ab[9 * 12] = 1; ab[10 * 12] = 1; }      // flying+mayfly
+    if (gFastBreak) ab[11 * 12] = 1;                    // instabuild
+    if (gSpeed) {
+        *(float *)(ab + 14 * 12) = 1.0f;                // walkSpeed
+        *(float *)(ab + 13 * 12) = 1.0f;                // flySpeed
+    }
+    if (gMWBDebug && (gTick1133 % 200) == 1) {
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ [1133] tick #%d player=%p\n",
+                              [NSDate date], gTick1133, self];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            MWB1133LogAbilities(self, fh);
+            [fh closeFile];
+        }
+    }
+}
+
+static void hooked_1133_levelTick(void *self) {
+    orig_1133_levelTick(self);
+    gLevel1133 = self;
+    if (gTimeMode == 1) *(int32_t *)((char *)self + V1133_LEVEL_DAYTIME_OFF) = TICK_TIME_DAY;
+    else if (gTimeMode == 2) *(int32_t *)((char *)self + V1133_LEVEL_DAYTIME_OFF) = TICK_TIME_NIGHT;
+    static int s_lvTick = 0;
+    if (gMWBDebug && ((++s_lvTick % 200) == 1)) {
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:
+                @"%@ [1133关卡] tick #%d level=%p dayTime=%d gTimeMode=%d\n",
+                [NSDate date], s_lvTick, self,
+                *(int32_t *)((char *)self + V1133_LEVEL_DAYTIME_OFF), gTimeMode];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+}
+
+#pragma mark - 1.1.7 版本适配 (Abilities API 直接调用)
+// 逆向结论: Abilities=Player+0x1258, setBool/getBool/setFloat 三件套+能力名bss,
+// Level::tick @0x100B0398C, dayTime=Level+0x15C int32, 跳跃取值器 @0x10099CA88
+#define V117_PLAYERTICK_VA     0x100439DE0UL
+#define V117_LEVELTICK_VA      0x100B0398CUL
+#define V117_JUMPPOWER_VA      0x10099CA88UL
+#define V117_SETBOOL_VA        0x100A450F0UL
+#define V117_SETFLOAT_VA       0x100A45134UL
+#define V117_ABILITIES_OFF     0x1258
+#define V117_LEVEL_DAYTIME_OFF 0x15C
+#define V117_ABIL_INVULN       0x10178BD48UL
+#define V117_ABIL_FLYING       0x10178BD60UL
+#define V117_ABIL_INSTABUILD   0x10178BD78UL
+#define V117_ABIL_MAYFLY       0x10178BDF0UL
+#define V117_ABIL_WALKSPEED    0x10178BDC0UL
+#define V117_ABIL_FLYSPEED     0x10178BDA8UL
+#define V117_GETBOOL_VA        0x100A450C4UL
+
+typedef void (*V117TickFn)(void *self);
+typedef void (*V117SetBoolFn)(void *abil, void *name, int v);
+typedef int (*V117GetBoolFn)(void *abil, void *name);
+typedef void (*V117SetFloatFn)(void *abil, void *name, float v);
+typedef float (*V117JumpFn)(void *self);
+static V117TickFn orig_117_playerTick = NULL, orig_117_levelTick = NULL;
+static V117JumpFn orig_117_jump = NULL;
+static V117SetBoolFn v117_setBool = NULL;
+static V117SetFloatFn v117_setFloat = NULL;
+static void *gPlayer117 = NULL;
+static int gTick117 = 0;
+
+static void hooked_117_playerTick(void *self) {
+    orig_117_playerTick(self);
+    gPlayer117 = self;
+    gTick117++;
+    if (!v117_setBool) return;
+    void *abil = (char *)self + V117_ABILITIES_OFF;
+    uintptr_t s = MWBMainSlide();
+    if (gInvincible) v117_setBool(abil, (void *)(s + V117_ABIL_INVULN), 1);
+    if (gFly) {
+        v117_setBool(abil, (void *)(s + V117_ABIL_FLYING), 1);
+        v117_setBool(abil, (void *)(s + V117_ABIL_MAYFLY), 1);
+    }
+    if (gFastBreak) v117_setBool(abil, (void *)(s + V117_ABIL_INSTABUILD), 1);
+    if (gSpeed && v117_setFloat) v117_setFloat(abil, (void *)(s + V117_ABIL_WALKSPEED), 0.25f);
+    if (gMWBDebug && (gTick117 % 200) == 1) {
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            V117GetBoolFn getB = (V117GetBoolFn)(MWBMainSlide() + V117_GETBOOL_VA);
+            int inv = -1, fly = -1;
+            if (getB) {
+                void *abil = (char *)self + V117_ABILITIES_OFF;
+                uintptr_t s = MWBMainSlide();
+                inv = getB(abil, (void *)(s + V117_ABIL_INVULN));
+                fly = getB(abil, (void *)(s + V117_ABIL_FLYING));
+            }
+            NSString *line = [NSString stringWithFormat:@"%@ [117] tick #%d player=%p inv=%d fly=%d\n",
+                              [NSDate date], gTick117, self, inv, fly];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+}
+static void hooked_117_levelTick(void *self) {
+    orig_117_levelTick(self);
+    if (gTimeMode == 1) *(int32_t *)((char *)self + V117_LEVEL_DAYTIME_OFF) = TICK_TIME_DAY;
+    else if (gTimeMode == 2) *(int32_t *)((char *)self + V117_LEVEL_DAYTIME_OFF) = TICK_TIME_NIGHT;
+    static int s_lv117 = 0;
+    if (gMWBDebug && ((++s_lv117 % 200) == 1)) {
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ [117关卡] #%d level=%p dayTime=%d mode=%d\n",
+                              [NSDate date], s_lv117, self,
+                              *(int32_t *)((char *)self + V117_LEVEL_DAYTIME_OFF), gTimeMode];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+}
+static float hooked_117_jump(void *self) {
+    if (gSuperJump) return 0.85f;
+    return orig_117_jump(self);
+}
+
+#pragma mark - 1.4.3 版本适配 (Abilities map 模型, getter 拦截)
+// 逆向结论: Abilities=Player+0x1388(内嵌map), getBool/getFloat/canFly/tickTime hook,
+// setGameType one-shot 切生存创造, LevelData=Level+0xf8解引用+0x12c
+#define V143_GETBOOL_VA     0x100f5070cUL
+#define V143_GETFLOAT_VA    0x100f5081cUL
+#define V143_CANFLY_VA      0x100f506b4UL
+#define V143_SETGAMETYPE_VA 0x100f60b04UL
+#define V143_TICKTIME_VA    0x100620c88UL
+#define V143_ABILITIES_OFF  0x1388
+#define V143_AB_INVULN      0x102089b50UL
+#define V143_AB_FLYING      0x102089b68UL
+#define V143_AB_INSTABUILD  0x102089b80UL
+#define V143_AB_WALKSPEED   0x102089bc8UL
+#define V143_AB_MAYFLY      0x102089bf8UL
+
+typedef unsigned char (*V143GetBoolFn)(void *abil, void *entry);
+typedef float (*V143GetFloatFn)(void *abil, void *entry);
+typedef int (*V143CanFlyFn)(void *abil);
+typedef void (*V143TickTimeFn)(void *level);
+static V143GetBoolFn orig_143_getBool = NULL;
+static V143GetFloatFn orig_143_getFloat = NULL;
+static V143CanFlyFn orig_143_canFly = NULL;
+static V143TickTimeFn orig_143_tickTime = NULL;
+static void *gPlayer143 = NULL;
+static int gTick143 = 0;
+
+static unsigned char hooked_143_getBool(void *abil, void *entry) {
+    gPlayer143 = (char *)abil - V143_ABILITIES_OFF;
+    uintptr_t s = MWBMainSlide();
+    if (gInvincible && entry == (void *)(s + V143_AB_INVULN)) return 1;
+    if (gFastBreak && entry == (void *)(s + V143_AB_INSTABUILD)) return 1;
+    return orig_143_getBool(abil, entry);
+}
+static int hooked_143_canFly(void *abil) {
+    gPlayer143 = (char *)abil - V143_ABILITIES_OFF;
+    if (gFly) return 1;
+    return orig_143_canFly(abil);
+}
+static float hooked_143_getFloat(void *abil, void *entry) {
+    if (gSpeed && entry == (void *)(MWBMainSlide() + V143_AB_WALKSPEED)) return 0.25f;
+    return orig_143_getFloat(abil, entry);
+}
+static void hooked_143_tickTime(void *level) {
+    orig_143_tickTime(level);
+    if (gTimeMode == 1 || gTimeMode == 2) {
+        void *ld = *(void **)((char *)level + 0xf8);
+        if (ld) *(int32_t *)((char *)ld + 0x12c) = (gTimeMode == 1 ? 1000 : 13000);
+    }
+    if (gMWBDebug && ((++gTick143 % 200) == 1)) {
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ [143] tickTime #%d level=%p player=%p\n",
+                              [NSDate date], gTick143, level, gPlayer143];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+}
+
+#pragma mark - 1.2.15 版本适配 (本机未安装, 只合入不验证)
+// 逆向结论: Actor+0x24E 无敌位, Abilities=Player+0x370(表基BSS步长0x18),
+// instabuild idx3 / flySpeed idx4 / walkSpeed idx5, Level+0xF8→+0x12c 时间
+#define V1215_PLAYER_TICK   0x100376F78UL
+#define V1215_LEVEL_TIMETICK 0x1005D41A4UL
+#define V1215_SET_BOOL      0x100E97BF0UL
+#define V1215_SET_FLOAT     0x100E97C88UL
+#define V1215_ABIL_BASE     0x101F112D8UL
+#define V1215_PLAYER_ABIL_OFF 0x370
+#define V1215_ACTOR_INVULN_OFF 0x24E
+#define V1215_LEVELDATA_OFF 0xF8
+#define V1215_LEVELDATA_TIME_OFF 0x12C
+
+typedef void (*V1215TickFn)(void *self);
+typedef void (*V1215SetBoolFn)(void *abil, void *entry, unsigned char v);
+typedef void (*V1215SetFloatFn)(void *abil, void *entry, float v);
+static V1215TickFn orig_1215_playerTick = NULL, orig_1215_timeTick = NULL;
+
+static void hooked_1215_playerTick(void *self) {
+    orig_1215_playerTick(self);
+    if (gInvincible) ((unsigned char *)self)[V1215_ACTOR_INVULN_OFF] = 1;
+    void *abil = (char *)self + V1215_PLAYER_ABIL_OFF;
+    uintptr_t slide = MWBMainSlide();
+    V1215SetBoolFn setB = (V1215SetBoolFn)(slide + V1215_SET_BOOL);
+    V1215SetFloatFn setF = (V1215SetFloatFn)(slide + V1215_SET_FLOAT);
+    if (gFastBreak) setB(abil, (void *)(slide + V1215_ABIL_BASE + 3 * 0x18), 1);
+    if (gSpeed) setF(abil, (void *)(slide + V1215_ABIL_BASE + 5 * 0x18), 0.25f);
+}
+static void hooked_1215_timeTick(void *level) {
+    orig_1215_timeTick(level);
+    if (gTimeMode == 1 || gTimeMode == 2) {
+        void *ld = *(void **)((char *)level + V1215_LEVELDATA_OFF);
+        if (ld) *(int32_t *)((char *)ld + V1215_LEVELDATA_TIME_OFF) =
+            (gTimeMode == 1 ? 1000 : 13000);
+    }
+}
+
+#pragma mark - 1.20.62 版本适配 (EnTT ECS, tick+时间先行)
+// 逆向结论: tick候选 @0x105D03F74, LevelData+0x388 dayTime/+0x370 gameTime,
+// getTime/setTime 仅8B只调不hook, abilities待运行时探测
+#define V120_TICK_SENDINPUT_VA 0x105D03F74UL
+#define V120_LEVELDATA_TIME_OFF 0x388
+#define V120_GETTIME_VA 0x1026D2DD8UL
+#define V120_SETTIME_VA 0x106D30960UL
+#define V120_UNWRAP_VA  0x106D31750UL
+
+typedef void (*V120TickFn)(void *self);
+typedef int (*V120GetTimeFn)(void *levelData);
+typedef void (*V120SetTimeFn)(void *levelData, int t);
+typedef void *(*V120UnwrapFn)(void *smartptr);
+static V120TickFn orig_120_tick = NULL;
+static void *gLevelData120 = NULL;
+static int gTick120 = 0;
+
+static void hooked_120_tick(void *self) {
+    orig_120_tick(self);
+    gTick120++;
+    if (!gLevelData120 && self) {
+        V120UnwrapFn unwrap = (V120UnwrapFn)(MWBMainSlide() + V120_UNWRAP_VA);
+        void *cand = unwrap((char *)self + 0x9D0);
+        if (!cand) cand = unwrap(*(void **)((char *)self + 8));
+        gLevelData120 = cand;
+    }
+    if (gLevelData120) {
+        V120SetTimeFn setTime = (V120SetTimeFn)(MWBMainSlide() + V120_SETTIME_VA);
+        if (gTimeMode == 1) setTime(gLevelData120, TICK_TIME_DAY);
+        else if (gTimeMode == 2) setTime(gLevelData120, TICK_TIME_NIGHT);
+    }
+    if (gMWBDebug && (gTick120 % 200) == 1) {
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            V120GetTimeFn getTime = (V120GetTimeFn)(MWBMainSlide() + V120_GETTIME_VA);
+            int dayTime = gLevelData120 ? getTime(gLevelData120) : -1;
+            NSString *line = [NSString stringWithFormat:@"%@ [120] tick #%d self=%p dayTime=%d\n",
+                              [NSDate date], gTick120, self, dayTime];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+}
+
+#pragma mark - 0.10 生存/创造切换后端
+// 逆向结论: Minecraft::setIsCreativeMode @0x1000ce840 (MSFindSymbol),
+// 轻量版直接写 Player+5824 (创造=abil[0,2,3]置1, 生存=清零4B)
+void MWB010SetCreative(void *player, bool creative) {
+    if (!player) player = gLocalPlayer;
+    if (!player) return;
+    char *a = (char *)player + PLAYER_ABILITIES_OFFSET;
+    if (creative) { a[0] = 1; a[2] = 1; a[3] = 1; }
+    else *(uint32_t *)a = 0;
+}
+
 #pragma mark - 触摸模拟 (调试用, cycript 可调用)
 
 // 通过 UITouch 模拟单次点击
@@ -1081,6 +1410,57 @@ static void MWBInstall(void) {
 
     MWB_HOOK("__ZN11LocalPlayer10normalTickEv", hooked_normalTick, orig_normalTick);
     MWB_HOOK("__ZN5Level4tickEv", hooked_levelTick, orig_levelTick);
+
+    // 1.13.3: 无符号,按静态VA+slide直接hook (函数2636B/2396B,跳板安全)
+    if (gv == MWBGameV1_13_3) {
+        uintptr_t slide = MWBMainSlide();
+        void *pTick = (void *)(slide + V1133_PLAYERNORMALTICK_VA);
+        void *lTick = (void *)(slide + V1133_LEVELTICK_VA);
+        MSHookFunction(pTick, (void *)hooked_1133_playerTick, (void **)&orig_1133_playerTick);
+        MSHookFunction(lTick, (void *)hooked_1133_levelTick, (void **)&orig_1133_levelTick);
+        NSLog(@"[魔玩盒子] 1.13.3 hook: playerTick=%p levelTick=%p", pTick, lTick);
+        logFile([NSString stringWithFormat:@"[1133] hook 成功: playerTick=%p levelTick=%p", pTick, lTick]);
+    }
+
+    // 1.1.7: Abilities API + tick hook + 跳跃取值器 (函数均≥32B,跳板安全)
+    if (gv == MWBGameV1_1_7) {
+        uintptr_t slide = MWBMainSlide();
+        v117_setBool = (V117SetBoolFn)(slide + V117_SETBOOL_VA);
+        v117_setFloat = (V117SetFloatFn)(slide + V117_SETFLOAT_VA);
+        MSHookFunction((void *)(slide + V117_PLAYERTICK_VA), (void *)hooked_117_playerTick, (void **)&orig_117_playerTick);
+        MSHookFunction((void *)(slide + V117_LEVELTICK_VA), (void *)hooked_117_levelTick, (void **)&orig_117_levelTick);
+        MSHookFunction((void *)(slide + V117_JUMPPOWER_VA), (void *)hooked_117_jump, (void **)&orig_117_jump);
+        NSLog(@"[魔玩盒子] 1.1.7 hook: playerTick/levelTick/jump");
+        logFile(@"[117] hook 成功: playerTick+levelTick+jump");
+    }
+
+    // 1.4.3: getter 拦截模型 (无需 normalTick)
+    if (gv == MWBGameV1_4_3) {
+        uintptr_t s143 = MWBMainSlide();
+        MSHookFunction((void *)(s143 + V143_GETBOOL_VA), (void *)hooked_143_getBool, (void **)&orig_143_getBool);
+        MSHookFunction((void *)(s143 + V143_CANFLY_VA), (void *)hooked_143_canFly, (void **)&orig_143_canFly);
+        MSHookFunction((void *)(s143 + V143_GETFLOAT_VA), (void *)hooked_143_getFloat, (void **)&orig_143_getFloat);
+        MSHookFunction((void *)(s143 + V143_TICKTIME_VA), (void *)hooked_143_tickTime, (void **)&orig_143_tickTime);
+        NSLog(@"[魔玩盒子] 1.4.3 hook: getBool/canFly/getFloat/tickTime");
+        logFile(@"[143] hook 成功: getBool+canFly+getFloat+tickTime");
+    }
+
+    // 1.2.15: 本机未安装, 合入待验 (Actor无敌位+能力setter+时间tick)
+    if (gv == MWBGameV1_2_15) {
+        uintptr_t s1215 = MWBMainSlide();
+        MSHookFunction((void *)(s1215 + V1215_PLAYER_TICK), (void *)hooked_1215_playerTick, (void **)&orig_1215_playerTick);
+        MSHookFunction((void *)(s1215 + V1215_LEVEL_TIMETICK), (void *)hooked_1215_timeTick, (void **)&orig_1215_timeTick);
+        NSLog(@"[魔玩盒子] 1.2.15 hook: playerTick+timeTick");
+        logFile(@"[1215] hook 成功: playerTick+timeTick");
+    }
+
+    // 1.20.62: ECS tick + 时间先行 (abilities 待运行时探测)
+    if (gv == MWBGameV1_20_62) {
+        uintptr_t s120 = MWBMainSlide();
+        MSHookFunction((void *)(s120 + V120_TICK_SENDINPUT_VA), (void *)hooked_120_tick, (void **)&orig_120_tick);
+        NSLog(@"[魔玩盒子] 1.20.62 hook: tick");
+        logFile(@"[120] hook 成功: tick");
+    }
 
     [[NSNotificationCenter defaultCenter]
         addObserverForName:UIApplicationDidFinishLaunchingNotification

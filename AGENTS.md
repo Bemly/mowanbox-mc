@@ -18,6 +18,7 @@
   - 2026-10-19 真机验证（插件`2026.8.27-1+debug`，Filter 6包）：0.10 ✅双hook成功+悬浮窗正常；1.1.7 ✅注入无崩+悬浮窗正常（注：早前killall+uiopen连崩两次含一次裸跑，手动点图标可进，自动拉起路径待查）；1.4.3 ✅注入无崩+悬浮窗正常；1.13.3 ✅同上；1.20.62 ✅同上（仅UI，ECS暂不hook）；1.2.15未安装未验。
   - 2026-10-19 0.10进世界全功能实测 ✅（cycript直调`[MWBTouchHelper tapGameAtX:y]`进My World生存档）：无敌/速破 `abil=[1,0,1,1]` 落盘；`giveItem:264` 背包回读+快捷栏5钻石可见；时间切白天世界变亮。新增`tapGameAtX:y`（直调游戏VC touchesBegan/Ended，合规不崩；cycript调不了CGPointMake，改走编译侧）。
   - 2026-10-19 全版本进世界实测 ✅（同一插件`2026.8.27-2+debug`，cycript直调进档，均无崩、TOOLBOX+E悬浮窗全在）：1.1.7 ✅进My World复活存活；1.4.3 ✅进My World复活存活（蜘蛛杀过一次）；1.13.3 ✅进My World复活存活；1.20.62 ✅过不支持设备弹窗+存档升级弹窗进樱花林世界（仅UI）；0.10为唯一全功能版，其余高版本hook待接。
+  - 2026-10-19 六路子agent逆向+全版本功能合入（插件`2026.8.27-10+debug`）：0.10无附魔系统（附魔台0.12才进PE，做不到；另得setIsCreativeMode@0x1000ce840与hurt头abil[0]实锤）；1.1.7 Abilities API直调（Player+0x1258/setBool/setFloat，tick@0x100439DE0实锤流动，inv回读=1粘住，dayTime锁13000，但开着无敌死过一次、天空停留日落疑客户端/服务端两套时间，未全实锤）；1.4.3 getter拦截模型（getBool/canFly/getFloat/tickTime，进世界流动，深夜+满血骷髅 adjacent ✅）；1.13.3能力表纠正（Base+12+i*12，invulnerable=Player+2480单写，fly/mayfly/instabuild/walkSpeed/flySpeed全接，时间双实锤）；1.2.15合入未验（本机无安装：Actor+0x24E无敌、能力表BSS步长0x18、Level+0xF8→+0x12C）；1.20.62 tick@0x105D03F74装上无崩但进世界25秒+跳跃3次均不触发（打偏，下一轮换备选0x101F5CD20，abilities待运行时探测）。附魔255：仅1.1.7有路（0x100AE6028绕上限检查，未调），其余版本待真机跟。
 
 ## Git 约定
 
