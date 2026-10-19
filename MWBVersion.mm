@@ -31,7 +31,7 @@ static dispatch_once_t gOnce;
     if ([ver hasPrefix:@"1.1.7"]) return MWBGameV1_1_7;
     if ([ver hasPrefix:@"1.2.15"]) return MWBGameV1_2_15;
     if ([ver hasPrefix:@"1.13.3"]) return MWBGameV1_13_3;
-    if ([ver hasPrefix:@"1.4.3"]) return MWBGameV1_13_3; // 容错: 万一有真1.4.3包,暂按1.13.3处理
+    if ([ver hasPrefix:@"1.4.3"]) return MWBGameV1_4_3;
     if ([ver hasPrefix:@"1.20"]) return MWBGameV1_20_62;
 
     // 兜底: 主二进制大小(解包后字节数,见逆向记录)
@@ -55,7 +55,8 @@ static dispatch_once_t gOnce;
     const unsigned long long M = 1024 * 1024;
     if (size > 7*M && size < 10*M) return MWBGameV0_10;     // 8.5M
     if (size > 22*M && size < 26*M) return MWBGameV1_1_7;   // 24M
-    if (size > 29*M && size < 33*M) return MWBGameV1_2_15;  // 31M
+    if (size > 29*M && size < 32*M) return MWBGameV1_2_15;  // 31M
+    if (size > 32*M && size < 34*M) return MWBGameV1_4_3;   // 真1.4.3 33M
     if (size > 53*M && size < 57*M) return MWBGameV1_13_3;  // 55M
     if (size > 165*M && size < 175*M) return MWBGameV1_20_62; // 170M
     return MWBGameUnknown;
@@ -70,6 +71,7 @@ static dispatch_once_t gOnce;
         case MWBGameV0_10: return MWBInjectSymbol;
         case MWBGameV1_1_7:
         case MWBGameV1_2_15:
+        case MWBGameV1_4_3:
         case MWBGameV1_13_3: return MWBInjectPattern;
         case MWBGameV1_20_62: return MWBInjectECS;
         default: return MWBInjectPattern;
@@ -81,7 +83,8 @@ static dispatch_once_t gOnce;
         case MWBGameV0_10: return @"0.10.0";
         case MWBGameV1_1_7: return @"1.1.7";
         case MWBGameV1_2_15: return @"1.2.15";
-        case MWBGameV1_13_3: return @"1.13.3(含文件名1.4.3的同体包)";
+        case MWBGameV1_4_3: return @"真1.4.3";
+        case MWBGameV1_13_3: return @"1.13.3";
         case MWBGameV1_20_62: return @"1.20.62";
         default: return @"未知版本";
     }

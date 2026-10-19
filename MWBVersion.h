@@ -6,6 +6,7 @@ typedef NS_ENUM(NSInteger, MWBGameVersion) {
     MWBGameV0_10,    // 0.10.0, 8.5M, 符号齐全
     MWBGameV1_1_7,   // 1.1.7.1, 24M, 全strip
     MWBGameV1_2_15,  // 1.2.15.1, 31M, 全strip
+    MWBGameV1_4_3,   // 真1.4.3.0, 33M, 全strip (注意:文件名"MCPE替身 1.4.3.ipa"实为1.13.3,勿信文件名)
     MWBGameV1_13_3,  // 1.13.3.0, 55M, 全strip (文件名1.4.3的包实为此版本,MD5相同)
     MWBGameV1_20_62, // 1.20.62.01, 170M, ECS重构
 };
