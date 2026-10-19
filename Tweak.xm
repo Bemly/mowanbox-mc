@@ -367,8 +367,22 @@ static BOOL gSpeed       = NO;
 static BOOL gSuperJump   = NO;
 static BOOL gNoclip      = NO;
 static BOOL gNightVision = NO;
+static BOOL gKillAura    = NO;
+static BOOL gMinimap     = NO;
+static int  gGV          = 0;   // 当前游戏版本 (MWBGameVersion 数值, %ctor 内赋值, 跨版本分发用)
 static int  gTimeMode    = 0;  // 0=不修改 1=白天 2=夜晚
 static int  gWeatherMode = 0;  // 0=不修改 1=晴 2=雨 3=雷
+
+// 跨版本动作分发 (定义在版本段之后, 这里前置声明)
+static void MWBHealNow(void);
+static void MWBEnchantHeld255(void);
+static void MWBTeleportUp10(void);
+static void MWBFillStone5(void);
+static void MWBMinimapShow(BOOL on);
+static void MWBMinimapRefresh(void);
+void MWB1133_KillAuraTick(void);
+int MWB1133_SampleMinimap(void);
+static void MWBPollCmdFile(void);
 
 void *gLocalPlayer = NULL;       // LocalPlayer* (EMI 也用)
 static void *gLevel       = NULL;
@@ -572,6 +586,8 @@ static void MWBApplySpeed(BOOL on) {
         @[@"快速破坏", [self makeToggle:gFastBreak action:@selector(togFastBreak:)]],
         @[@"穿墙", [self makeToggle:gNoclip action:@selector(togNoclip:)]],
         @[@"夜视", [self makeToggle:gNightVision action:@selector(togNightVision:)]],
+        @[@"杀戮光环", [self makeToggle:gKillAura action:@selector(togKillAura:)]],
+        @[@"小地图", [self makeToggle:gMinimap action:@selector(togMinimap:)]],
         @[@"调试模式", [self makeToggle:gMWBDebug action:@selector(togDebug:)]],
     ];
     CGFloat ry = CGRectGetMaxY(h0.frame) + 20;
@@ -677,7 +693,21 @@ static void MWBApplySpeed(BOOL on) {
         wxBtn.frame = (CGRect){{pw-33-400+i*135,CGRectGetMaxY(dayBtn.frame)+20},{120,60}};
         [p3 addSubview:wxBtn];
     }
-    p3.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(dayBtn.frame)+110}};
+    // 动作: 治疗 / 附魔255 / 传送+10 / 铺石块 (tag 10-13)
+    UILabel *actLabel = [self makeRowLabel:@"动作"];
+    actLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+100},{200,60}};
+    [p3 addSubview:actLabel];
+    NSArray *actTitles = @[@"治疗", @"附魔", @"传送", @"铺石"];
+    for (int i = 0; i < 4; i++) {
+        MWBPixelButton *actBtn = [[MWBPixelButton alloc] init];
+        [actBtn setAttributedTitle:MWBPixelText(actTitles[i], MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
+                                               3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
+        actBtn.tag = 10 + i;
+        [actBtn addTarget:self action:@selector(doAction:) forControlEvents:UIControlEventTouchUpInside];
+        actBtn.frame = (CGRect){{pw-33-430+i*105,CGRectGetMaxY(dayBtn.frame)+100},{95,56}};
+        [p3 addSubview:actBtn];
+    }
+    p3.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(dayBtn.frame)+186}};
     [pages addObject:p3];
 
     self.pages = pages;
@@ -731,12 +761,21 @@ static void MWBApplySpeed(BOOL on) {
 - (void)togSuperJump:(MWBPixelToggle *)t { gSuperJump = t.on; }
 - (void)togNoclip:(MWBPixelToggle *)t { gNoclip = t.on; }
 - (void)togNightVision:(MWBPixelToggle *)t { gNightVision = t.on; }
+- (void)togKillAura:(MWBPixelToggle *)t { gKillAura = t.on; }
+- (void)togMinimap:(MWBPixelToggle *)t { gMinimap = t.on; MWBMinimapShow(t.on); }
 - (void)togDebug:(MWBPixelToggle *)t {
     gMWBDebug = t.on;
     NSLog(@"[魔玩盒子] 调试模式 %@", gMWBDebug ? @"已开启" : @"已关闭");
 }
 - (void)setTime:(MWBPixelButton *)sender { gTimeMode = (int)sender.tag; }
 - (void)setWeather:(MWBPixelButton *)sender { gWeatherMode = (int)sender.tag - 2; }
+- (void)doAction:(MWBPixelButton *)sender {
+    int tag = (int)sender.tag;
+    if (tag == 10) MWBHealNow();
+    else if (tag == 11) MWBEnchantHeld255();
+    else if (tag == 12) MWBTeleportUp10();
+    else if (tag == 13) MWBFillStone5();
+}
 
 @end
 
@@ -981,6 +1020,11 @@ static void hooked_1133_playerTick(void *self) {
         *(float *)(ab + 13 * 12) = 1.0f;                // flySpeed
     }
     if (gNoclip) ab[17 * 12] = 1;                       // noclip
+    if (gKillAura) MWB1133_KillAuraTick();
+    if (gMinimap && (gTick1133 % 40) == 1) {
+        if (MWB1133_SampleMinimap() >= 0) MWBMinimapRefresh();
+    }
+    MWBPollCmdFile();
     // 夜视药水探测: getById(速度1/跳跃8/夜视16) 回读指针, 非空即药水系统可达
     if (gNightVision && gMWBDebug && (gTick1133 % 200) == 1) {
         void *(*getById)(int) = (void *(*)(int))(MWBMainSlide() + V1133_MOBEFFECT_GET_VA);
@@ -1043,6 +1087,259 @@ static void hooked_1133_levelTick(void *self) {
     }
 }
 
+#pragma mark - 1.13.3 大件 (药水应用/传送/治疗/遍历/WorldEdit/KillAura/小地图)
+// 收尾逆向结论, 静态VA+slide
+#define V1133_EFFECT_CTOR_VA   0x101E401CCUL
+#define V1133_ADDEFFECT_SLOT   0x5F8
+#define V1133_TELEPORT_SLOT    0x88
+#define V1133_GETPOS_SLOT      0x60
+#define V1133_GETATTR_VA       0x101119404UL
+#define V1133_LEVEL_ACTORS_OFF 0x58
+#define V1133_GETBLOCK_VA      0x101F87334UL
+#define V1133_SETBLOCK_VA      0x101F88950UL
+#define V1133_BLOCKBASE_VA     0x1034C8870UL
+#define V1133_STONESLOT_OFF    0x38  // 重推导结论: base+8是map, 真石头在base+0x38
+#define V1133_ACTOR_BS_OFF     0x338
+#define V1133_KILLAURA_RANGE   4.0f
+#define V1133_VT_MELEE_SLOT    0x9e8
+
+// 药水应用 (实例0xE8: id@8/amp@C/dur@38, +0x78恒1)
+bool MWB1133_ApplyEffect(void *actor, int fxId, int amplifier, int durTicks) {
+    if (!actor) return false;
+    uintptr_t s = MWBMainSlide();
+    void *(*getById)(int) = (void *(*)(int))(s + V1133_MOBEFFECT_GET_VA);
+    void *fx = getById(fxId);
+    if (!fx) return false;
+    char e1[24] = {0}, e2[24] = {0}, e3[24] = {0};
+    void *buf = malloc(0xE8);
+    if (!buf) return false;
+    memset(buf, 0, 0xE8);
+    ((void (*)(void *, int, void *, void *, int, int, int, void *))(s + V1133_EFFECT_CTOR_VA))(
+        buf, fxId, e1, e2, amplifier, 0, durTicks, e3);
+    *(uint8_t *)((char *)buf + 0x78) = 1;
+    NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+    if (lfh) {
+        [lfh seekToEndOfFile];
+        NSMutableString *m = [NSMutableString stringWithFormat:@"%@ [1133实例] id=%d fx=%p inst:",
+                             [NSDate date], fxId, fx];
+        for (int i = 0; i < 0x40; i += 8)
+            [m appendFormat:@" +%x=%02x%02x%02x%02x%02x%02x%02x%02x", i,
+             ((uint8_t *)fx)[i], ((uint8_t *)fx)[i+1], ((uint8_t *)fx)[i+2], ((uint8_t *)fx)[i+3],
+             ((uint8_t *)fx)[i+4], ((uint8_t *)fx)[i+5], ((uint8_t *)fx)[i+6], ((uint8_t *)fx)[i+7]];
+        [m appendString:@" buf:"];
+        for (int i = 0; i < 0xE8; i += 8)
+            [m appendFormat:@" +%x=%02x%02x%02x%02x%02x%02x%02x%02x", i,
+             ((uint8_t *)buf)[i], ((uint8_t *)buf)[i+1], ((uint8_t *)buf)[i+2], ((uint8_t *)buf)[i+3],
+             ((uint8_t *)buf)[i+4], ((uint8_t *)buf)[i+5], ((uint8_t *)buf)[i+6], ((uint8_t *)buf)[i+7]];
+        [m appendString:@"\n"];
+        [lfh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]];
+        [lfh closeFile];
+    }
+    void *vt = *(void **)actor;
+    bool r = ((bool (*)(void *, void *))(*(void **)((char *)vt + V1133_ADDEFFECT_SLOT)))(actor, buf);
+    return r;
+}
+// 传送: getPos槽读当前(+10Y)→teleportTo槽 (不碰raw偏移, 避三pos之争)
+bool MWB1133_TeleportUp10(void *actor) {
+    NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+    if (!actor) return false;
+    void *vt = *(void **)actor;
+    void *(*getPos)(void *) = (void *(*)(void *))(*(void **)((char *)vt + V1133_GETPOS_SLOT));
+    float *p = (float *)getPos(actor);
+    if (!p) {
+        if (lfh) { [lfh seekToEndOfFile];
+            [lfh writeData:[@"[1133传送] getPos空\n" dataUsingEncoding:NSUTF8StringEncoding]]; [lfh closeFile]; }
+        return false;
+    }
+    float v[3] = {p[0], p[1] + 10.0f, p[2]};
+    ((void (*)(void *, void *))(*(void **)((char *)vt + V1133_TELEPORT_SLOT)))(actor, v);
+    if (lfh) {
+        [lfh seekToEndOfFile];
+        NSString *line = [NSString stringWithFormat:@"%@ [1133传送] 从(%.1f,%.1f,%.1f)+10Y\n",
+                          [NSDate date], p[0], p[1], p[2]];
+        [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [lfh closeFile];
+    }
+    return true;
+}
+// 属性实例 (治疗/饱食/XP: 先取实例, CURR/MAX槽运行时定界)
+void *MWB1133_GetAttr(void *actor, const char *name) {
+    if (!actor || !name) return NULL;
+    char sstr[24] = {0};
+    size_t n = strlen(name);
+    if (n >= 24) return NULL;
+    memcpy(sstr, name, n);
+    return ((void *(*)(void *, void *))(MWBMainSlide() + V1133_GETATTR_VA))(actor, sstr);
+}
+// 实体遍历 (Level+0x58 vector<Actor*>, 越界保护)
+void MWB1133_ForEachActor(void *level, void (^blk)(void *actor)) {
+    if (!level || !blk) return;
+    void **begin = *(void ***)((char *)level + V1133_LEVEL_ACTORS_OFF);
+    void **end = *(void ***)((char *)level + V1133_LEVEL_ACTORS_OFF + 8);
+    if (!begin || !end || end < begin || (end - begin) > 10000) return;
+    for (void **it = begin; it < end; it++) if (*it) blk(*it);
+}
+// WorldEdit: 方块读写原语
+typedef struct { int x, y, z; } MWBBlockPos;
+static void *MWB1133BlockSource(void) {
+    if (!gPlayer1133) return NULL;
+    return *(void **)((char *)gPlayer1133 + V1133_ACTOR_BS_OFF);
+}
+static void *MWB1133BlockById(int blockId) {
+    if (blockId == 1) {
+        // 石头走修正槽 base+0x38, 并验虚表落在TEXT段才回 (防map指针再崩)
+        void *s = *(void **)(MWBMainSlide() + V1133_BLOCKBASE_VA + V1133_STONESLOT_OFF);
+        if (s) {
+            void *vt = *(void **)s;
+            uintptr_t lo = MWBMainSlide() + 0x100000000UL, hi = lo + 0x4000000UL;
+            if ((uintptr_t)vt >= lo && (uintptr_t)vt < hi) return s;
+        }
+        return NULL;
+    }
+    if (blockId < 0 || blockId > 255) return NULL;
+    return ((void **)(MWBMainSlide() + V1133_BLOCKBASE_VA))[blockId];
+}
+int MWB1133_BlockIdOf(void *blk) {
+    if (!blk) return 0;
+    // base[i]轮询已证伪(base+8是map), 只认air槽与石头槽
+    if (blk == MWB1133BlockById(0)) return 0;
+    void *stone = MWB1133BlockById(1);
+    if (stone && blk == stone) return 1;
+    return -1;
+}
+static void *MWB1133GetOne(void *bs, int x, int y, int z) {
+    if (!bs) return NULL;
+    MWBBlockPos p = {x, y, z};
+    return ((void *(*)(void *, void *))(MWBMainSlide() + V1133_GETBLOCK_VA))(bs, &p);
+}
+int MWB1133SetOne(void *bs, int x, int y, int z, void *blk) {
+    if (!bs || !blk || y < 0 || y > 255) return 0;
+    MWBBlockPos p = {x, y, z};
+    char dummy[16] = {0};
+    return ((int (*)(void *, void *, void *, int, void *, int))(MWBMainSlide() + V1133_SETBLOCK_VA))(
+        bs, &p, blk, 3, dummy, 0);
+}
+// fillCube: 以玩家脚下为中心边长n的石头立方 (分帧由调用方按tick切, 单次默认5³)
+int MWB1133_FillStone(int half) {
+    void *bs = MWB1133BlockSource();
+    void *blk = MWB1133BlockById(1);
+    NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+    uintptr_t slide = MWBMainSlide();
+    uintptr_t lo = slide + 0x100000000UL, hi = lo + 0x4000000UL;
+    BOOL bsOk = bs && (uintptr_t)bs > 0x100000000UL && *(void **)bs &&
+                (uintptr_t)(*(void **)bs) >= lo && (uintptr_t)(*(void **)bs) < hi;
+    if (!bs || !blk || !gPlayer1133) {
+        if (lfh) { [lfh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ [1133铺石] 缺件 bs=%p blk=%p player=%p\n",
+                              [NSDate date], bs, blk, gPlayer1133];
+            [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [lfh closeFile]; }
+        return -1;
+    }
+    if (!bsOk) {
+        if (lfh) { [lfh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ [1133铺石] bs虚表无效, 停写 bs=%p\n",
+                              [NSDate date], bs];
+            [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [lfh closeFile]; }
+        return -3;
+    }
+    float px = *(float *)((char *)gPlayer1133 + 0x41C);
+    float py = *(float *)((char *)gPlayer1133 + 0x41C + 4);
+    float pz = *(float *)((char *)gPlayer1133 + 0x41C + 8);
+    int cx = (int)floorf(px), cy = (int)floorf(py), cz = (int)floorf(pz);
+    // 先验: 读脚下方块+注册表比对, 不对就停 (避免125连写崩)
+    int footId = MWB1133_BlockIdOf(MWB1133GetOne(bs, cx, cy - 1, cz));
+    if (lfh) { [lfh seekToEndOfFile];
+        NSString *line = [NSString stringWithFormat:
+                          @"%@ [1133铺石] 玩家(%d,%d,%d) 脚下id=%d bs高度=%d\n",
+                          [NSDate date], cx, cy, cz, footId, *(int16_t *)((char *)bs + 0x30)];
+        [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [lfh closeFile]; }
+    if (footId < 0) return -2;  // 读链不通, 不写
+    int n = 0;
+    for (int y = cy - half; y <= cy + half; y++)
+        for (int z = cz - half; z <= cz + half; z++)
+            for (int x = cx - half; x <= cx + half; x++)
+                n += MWB1133SetOne(bs, x, y, z, blk);
+    if (lfh) { [lfh seekToEndOfFile];
+        NSString *line = [NSString stringWithFormat:@"%@ [1133铺石] 写入%d块\n", [NSDate date], n];
+        [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [lfh closeFile]; }
+    return n;
+}
+// KillAura: 最近敌对虚表攻击 (虚表需运行时填表, 空表时只记日志)
+static void *gHostileVTs1133[16];
+static int gHostileVTCount1133 = 0;
+void MWB1133_KillAuraTick(void) {
+    if (!gLevel1133 || !gPlayer1133) return;
+    // 填表前探测: 每200tick记一次周围实体数与虚表 (填表后自动转攻击)
+    if (gHostileVTCount1133 == 0) {
+        if (gMWBDebug && (gTick1133 % 200) == 1) {
+            __block int n = 0;
+            __block int nv = 0;
+            MWB1133_ForEachActor(gLevel1133, ^(void *a) {
+                if (a == gPlayer1133) return;
+                n++;
+                if (n > 1000 || nv >= 16) return;
+                void *vt = *(void **)a;
+                for (int i = 0; i < nv; i++) if (gHostileVTs1133[i] == vt) return;
+                gHostileVTs1133[nv++] = vt;  // 借表暂存 (count仍0, 不转攻击)
+            });
+            NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+            if (fh) {
+                [fh seekToEndOfFile];
+                NSMutableString *m = [NSMutableString stringWithFormat:@"%@ [1133光环探测] 实体=%d 虚表%d种:",
+                                      [NSDate date], n, nv];
+                for (int i = 0; i < nv; i++) [m appendFormat:@" %p", gHostileVTs1133[i]];
+                [m appendString:@"\n"];
+                [fh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]];
+                [fh closeFile];
+            }
+        }
+        return;
+    }
+    __block void *best = NULL;
+    __block float bestD2 = V1133_KILLAURA_RANGE * V1133_KILLAURA_RANGE;
+    float *pp = (float *)((char *)gPlayer1133 + 0x41C);
+    MWB1133_ForEachActor(gLevel1133, ^(void *a) {
+        if (a == gPlayer1133) return;
+        if (gHostileVTCount1133 == 0) return;  // 未填表只探测 (探测在debug日志)
+        void *vt = *(void **)a;
+        BOOL hostile = NO;
+        for (int i = 0; i < gHostileVTCount1133; i++)
+            if (gHostileVTs1133[i] == vt) { hostile = YES; break; }
+        if (!hostile) return;
+        if (*(uint8_t *)((char *)a + 0x351)) return;  // 已死跳过
+        float *mp = (float *)((char *)a + 0x41C);
+        float dx = mp[0] - pp[0], dy = mp[1] - pp[1], dz = mp[2] - pp[2];
+        float d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < bestD2) { bestD2 = d2; best = a; }
+    });
+    if (best) {
+        void **pvt = *(void ***)gPlayer1133;
+        ((void (*)(void *, void *))pvt[V1133_VT_MELEE_SLOT / 8])(gPlayer1133, best);
+    }
+}
+// 小地图后端: 48x48单层采样 (玩家Y-2层, 矿石标红由UI侧按id着色)
+static uint8_t gMiniMap1133[48 * 48];
+int MWB1133_SampleMinimap(void) {
+    void *bs = MWB1133BlockSource();
+    if (!bs || !gPlayer1133) return -1;
+    float px = *(float *)((char *)gPlayer1133 + 0x41C);
+    float py = *(float *)((char *)gPlayer1133 + 0x41C + 4);
+    float pz = *(float *)((char *)gPlayer1133 + 0x41C + 8);
+    int cx = (int)floorf(px), cy = (int)floorf(py) - 2, cz = (int)floorf(pz);
+    int air = 0;
+    for (int dz = -24; dz < 24; dz++)
+        for (int dx = -24; dx < 24; dx++) {
+            int id = MWB1133_BlockIdOf(MWB1133GetOne(bs, cx + dx, cy, cz + dz));
+            if (id <= 0) { air++; id = 0; }
+            gMiniMap1133[(dz + 24) * 48 + (dx + 24)] = (uint8_t)(id & 0xFF);
+        }
+    return air;  // air数过大说明pos错层, 运行时判据
+}
+
 #pragma mark - 1.1.7 版本适配 (Abilities API 直接调用)
 // 逆向结论: Abilities=Player+0x1258, setBool/getBool/setFloat 三件套+能力名bss,
 // Level::tick @0x100B0398C, dayTime=Level+0x15C int32, 跳跃取值器 @0x10099CA88
@@ -1060,6 +1357,13 @@ static void hooked_1133_levelTick(void *self) {
 #define V117_ABIL_WALKSPEED    0x10178BDC0UL
 #define V117_ABIL_FLYSPEED     0x10178BDA8UL
 #define V117_GETBOOL_VA        0x100A450C4UL
+#define V117_HURT_VA           0x100997D40UL
+#define V117_MKITEM_VA         0x1007B16F4UL
+#define V117_MKENCH_VA         0x1007B1748UL
+#define V117_APPLYENCH_VA      0x100AE6028UL
+#define V117_HELDITEM_VA       0x100A4A110UL
+#define V117_ITEMREG_VA        0x10178CCF8UL
+#define V117_NIGHT_TRUE        18000  // 13000只是日落, 真夜用18000
 
 typedef void (*V117TickFn)(void *self);
 typedef void (*V117SetBoolFn)(void *abil, void *name, int v);
@@ -1068,6 +1372,34 @@ typedef void (*V117SetFloatFn)(void *abil, void *name, float v);
 typedef float (*V117JumpFn)(void *self);
 static V117TickFn orig_117_playerTick = NULL, orig_117_levelTick = NULL;
 static V117JumpFn orig_117_jump = NULL;
+typedef int (*V117HurtFn)(void *self, void *src, int dmg, void *a, void *b);
+static V117GetBoolFn orig_117_getBool = NULL;
+static V117HurtFn orig_117_hurt = NULL;
+static int gHurtCount117 = 0;  // hurt 调用计数 (死亡之谜诊断用)
+
+// 无敌: 拦截 getBool 单点, 覆盖所有副本与伤害类型 (hurt/fire/helper 全走这里)
+static int hooked_117_getBool(void *abil, void *entry) {
+    if (gInvincible && entry == (void *)(MWBMainSlide() + V117_ABIL_INVULN)) return 1;
+    return orig_117_getBool(abil, entry);
+}
+// 兜底: hurt 计数+诊断 (若getBool拦截后仍死, 下一步直接return 0)
+static int hooked_117_hurt(void *self, void *src, int dmg, void *a, void *b) {
+    gHurtCount117++;
+    if (gMWBDebug && (gHurtCount117 % 5) == 1) {
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            V117GetBoolFn getB = (V117GetBoolFn)(MWBMainSlide() + V117_GETBOOL_VA);
+            int inv = getB((char *)self + V117_ABILITIES_OFF, (void *)(MWBMainSlide() + V117_ABIL_INVULN));
+            NSString *line = [NSString stringWithFormat:@"%@ [117受伤] #%d self=%p dmg=%d inv=%d\n",
+                              [NSDate date], gHurtCount117, self, dmg, inv];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+    return orig_117_hurt(self, src, dmg, a, b);
+}
 static V117SetBoolFn v117_setBool = NULL;
 static V117SetFloatFn v117_setFloat = NULL;
 static void *gPlayer117 = NULL;
@@ -1076,17 +1408,19 @@ static int gTick117 = 0;
 static void hooked_117_playerTick(void *self) {
     orig_117_playerTick(self);
     gPlayer117 = self;
+    MWBPollCmdFile();
     gTick117++;
-    if (!v117_setBool) return;
     void *abil = (char *)self + V117_ABILITIES_OFF;
     uintptr_t s = MWBMainSlide();
-    if (gInvincible) v117_setBool(abil, (void *)(s + V117_ABIL_INVULN), 1);
+    V117SetBoolFn setB = (V117SetBoolFn)(s + V117_SETBOOL_VA);
+    V117SetFloatFn setF = (V117SetFloatFn)(s + V117_SETFLOAT_VA);
+    if (gInvincible) setB(abil, (void *)(s + V117_ABIL_INVULN), 1);
     if (gFly) {
-        v117_setBool(abil, (void *)(s + V117_ABIL_FLYING), 1);
-        v117_setBool(abil, (void *)(s + V117_ABIL_MAYFLY), 1);
+        setB(abil, (void *)(s + V117_ABIL_FLYING), 1);
+        setB(abil, (void *)(s + V117_ABIL_MAYFLY), 1);
     }
-    if (gFastBreak) v117_setBool(abil, (void *)(s + V117_ABIL_INSTABUILD), 1);
-    if (gSpeed && v117_setFloat) v117_setFloat(abil, (void *)(s + V117_ABIL_WALKSPEED), 0.25f);
+    if (gFastBreak) setB(abil, (void *)(s + V117_ABIL_INSTABUILD), 1);
+    if (gSpeed) setF(abil, (void *)(s + V117_ABIL_WALKSPEED), 0.25f);
     if (gMWBDebug && (gTick117 % 200) == 1) {
         NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
@@ -1110,7 +1444,7 @@ static void hooked_117_playerTick(void *self) {
 static void hooked_117_levelTick(void *self) {
     orig_117_levelTick(self);
     if (gTimeMode == 1) *(int32_t *)((char *)self + V117_LEVEL_DAYTIME_OFF) = TICK_TIME_DAY;
-    else if (gTimeMode == 2) *(int32_t *)((char *)self + V117_LEVEL_DAYTIME_OFF) = TICK_TIME_NIGHT;
+    else if (gTimeMode == 2) *(int32_t *)((char *)self + V117_LEVEL_DAYTIME_OFF) = V117_NIGHT_TRUE;
     static int s_lv117 = 0;
     if (gMWBDebug && ((++s_lv117 % 200) == 1)) {
         NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
@@ -1130,6 +1464,66 @@ static float hooked_117_jump(void *self) {
     return orig_117_jump(self);
 }
 
+// 1.1.7 给予: 复刻 GiveCommand 内环 (描述子0x50 + 实例0x70 + mgr虚表+0x18)
+bool MWB117_Give(void *player, int itemId, int count) {
+    if (!player || itemId < 0 || itemId >= 0x200) return false;
+    uintptr_t s = MWBMainSlide();
+    void **reg = (void **)(s + V117_ITEMREG_VA);
+    void *item = reg[itemId];
+    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+    // 堆分配 (容器add可能引用传入实例, 栈内存返回即野指针, -20连给冻屏教训)
+    unsigned char *inst = (unsigned char *)malloc(0x70);
+    unsigned char *elem = (unsigned char *)malloc(0x50);
+    if (!inst || !elem) { free(inst); free(elem); return false; }
+    memset(inst, 0, 0x70);
+    memset(elem, 0, 0x50);
+    if (item) {
+        *(uint16_t *)(elem + 0x00) = (uint16_t)itemId;
+        *(int *)(elem + 0x04) = 1;
+        *(void **)(elem + 0x10) = item;
+        ((void (*)(void *, int, void *))(s + V117_MKITEM_VA))(inst, 0, elem);
+    }
+    void *mgr = *(void **)((char *)(*(void **)((char *)player + 0x40)) + 0x320);
+    void *inv = (char *)player + 0x1288;
+    if (fh) {
+        [fh seekToEndOfFile];
+        NSMutableString *m = [NSMutableString stringWithFormat:@"%@ [117给予] id=%d item=%p mgr=%p inst:",
+                             [NSDate date], itemId, item, mgr];
+        for (int i = 0; i < 0x70; i += 8)
+            [m appendFormat:@" +%x=%02x%02x%02x%02x%02x%02x%02x%02x", i,
+             inst[i], inst[i+1], inst[i+2], inst[i+3], inst[i+4], inst[i+5], inst[i+6], inst[i+7]];
+        [m appendString:@"\n"];
+        [fh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]];
+        [fh closeFile];
+    }
+    if (!item) { free(inst); free(elem); return false; }
+    (void)count;  // count 搬运待实例dump定界后写死
+    ((void (*)(void *, void *, void *))((*(void ***)mgr)[3]))(mgr, inv, inst);
+    return true;  // inst/elem 堆留给游戏 (容器可能引用, 不free)
+}
+
+// 1.1.7 超等级附魔: 跳过 0x100839D74 前置检查, 直调应用 (例: 锋利id9 x255)
+bool MWB117_EnchantMax(void *player, int enchId, int level) {
+    if (!player || enchId < 0 || enchId >= 0x1B) return false;
+    uintptr_t s = MWBMainSlide();
+    void *tbl = *(void **)(s + 0x10178E0C78UL);
+    if (!tbl || !((void **)tbl)[enchId]) return false;
+    void *held = ((void *(*)(void *))(s + V117_HELDITEM_VA))(player);
+    if (!held) return false;
+    unsigned char st = 0;
+    ((void (*)(void *, int, int, unsigned char *))(s + V117_APPLYENCH_VA))(held, enchId, level, &st);
+    if ((st & 0xFE) != 2) return false;
+    unsigned char *einst = (unsigned char *)malloc(0x70);
+    if (!einst) return false;
+    memset(einst, 0, 0x70);
+    ((void (*)(void *, void *, int, int))(s + V117_MKENCH_VA))(einst, held, enchId, level);
+    void *mgr = *(void **)((char *)(*(void **)((char *)player + 0x40)) + 0x320);
+    void *inv = (char *)player + 0x1288;
+    ((void (*)(void *, void *, void *))((*(void ***)mgr)[3]))(mgr, inv, einst);
+    return true;  // einst 堆留给游戏, 不free
+}
+
 #pragma mark - 1.4.3 版本适配 (Abilities map 模型, getter 拦截)
 // 逆向结论: Abilities=Player+0x1388(内嵌map), getBool/getFloat/canFly/tickTime hook,
 // setGameType one-shot 切生存创造, LevelData=Level+0xf8解引用+0x12c
@@ -1144,6 +1538,22 @@ static float hooked_117_jump(void *self) {
 #define V143_AB_INSTABUILD  0x102089b80UL
 #define V143_AB_WALKSPEED   0x102089bc8UL
 #define V143_AB_MAYFLY      0x102089bf8UL
+#define V143_GETITEM_VA     0x100FB2560UL
+#define V143_TAGBYITEM_VA   0x100FD7BDCUL
+#define V143_GIVEADD_VA     0x100CAB61CUL
+#define V143_EMPTYTAG_VA    0x10208D4A0UL
+#define V143_APPLYENCH_VA   0x10102C0B4UL
+#define V143_HANDREFRESH_VA 0x100F58704UL
+#define V143_HAND_OFF       0x15D0
+#define V143_SETGAMETYPE2_VA 0x100703F94UL
+#define V143_FXMAKE_VA      0x100DF200CUL
+#define V143_FXAPPLY_VA     0x100E5F158UL
+#define V143_TPFAST_VA      0x100CCE7E4UL
+#define V143_PLAYER_LEVEL_OFF 0xD00
+#define V143_WEATHER_RAIN_OFF 0x15C
+#define V143_WEATHER_RAINT_OFF 0x160
+#define V143_WEATHER_LIGHT_OFF 0x164
+#define V143_WEATHER_LIGHTT_OFF 0x168
 
 typedef unsigned char (*V143GetBoolFn)(void *abil, void *entry);
 typedef float (*V143GetFloatFn)(void *abil, void *entry);
@@ -1170,13 +1580,39 @@ static int hooked_143_canFly(void *abil) {
 }
 static float hooked_143_getFloat(void *abil, void *entry) {
     if (gSpeed && entry == (void *)(MWBMainSlide() + V143_AB_WALKSPEED)) return 0.25f;
-    return orig_143_getFloat(abil, entry);
+    float r = orig_143_getFloat(abil, entry);
+    if (gSuperJump) {  // vy=+0xc8, 起跳瞬间抬升 (三证据, 无需新hook)
+        void *p = (char *)abil - V143_ABILITIES_OFF;
+        float vy = *(float *)((char *)p + 0xc8);
+        if (vy > 0.1f && vy < 0.6f) *(float *)((char *)p + 0xc8) = 0.9f;
+    }
+    return r;
 }
 static void hooked_143_tickTime(void *level) {
     orig_143_tickTime(level);
+    MWBPollCmdFile();
     if (gTimeMode == 1 || gTimeMode == 2) {
         void *ld = *(void **)((char *)level + 0xf8);
         if (ld) *(int32_t *)((char *)ld + 0x12c) = (gTimeMode == 1 ? 1000 : 13000);
+    }
+    if (gWeatherMode == 1 || gWeatherMode == 2 || gWeatherMode == 3) {
+        void *ld = *(void **)((char *)level + 0xf8);
+        if (ld) {
+            char *w = (char *)ld;
+            if (gWeatherMode == 1) {
+                *(float *)(w + V143_WEATHER_RAIN_OFF) = 0.0f;
+                *(float *)(w + V143_WEATHER_LIGHT_OFF) = 0.0f;
+            } else if (gWeatherMode == 2) {
+                *(float *)(w + V143_WEATHER_RAIN_OFF) = 1.0f;
+                *(int *)(w + V143_WEATHER_RAINT_OFF) = 6000;
+                *(float *)(w + V143_WEATHER_LIGHT_OFF) = 0.0f;
+            } else {
+                *(float *)(w + V143_WEATHER_RAIN_OFF) = 1.0f;
+                *(int *)(w + V143_WEATHER_RAINT_OFF) = 6000;
+                *(float *)(w + V143_WEATHER_LIGHT_OFF) = 1.0f;
+                *(int *)(w + V143_WEATHER_LIGHTT_OFF) = 6000;
+            }
+        }
     }
     if (gMWBDebug && ((++gTick143 % 200) == 1)) {
         NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
@@ -1191,59 +1627,200 @@ static void hooked_143_tickTime(void *level) {
     }
 }
 
+// 1.4.3 one-shot: 给予钻石 (Tag布局已定死, 容器Player+0x1888)
+bool MWB143_Give(void *player, int itemId, int count) {
+    if (!player || itemId < 0 || itemId > 511) return false;
+    uintptr_t s = MWBMainSlide();
+    void *item = ((void *(*)(int))(s + V143_GETITEM_VA))(itemId);
+    if (!item) return false;
+    char tag[0x78];
+    memset(tag, 0, sizeof(tag));
+    ((void (*)(void *, void *, int))(s + V143_TAGBYITEM_VA))(tag, item, count);
+    ((void (*)(void *, void *, void *))(s + V143_GIVEADD_VA))(
+        (char *)player + 0x1888, (void *)(s + V143_EMPTYTAG_VA), tag);
+    return true;
+}
+// 1.4.3 one-shot: 手持超附魔 (跳过上限校验, 例锋利id9 x255)
+bool MWB143_EnchantMax(void *player, int enchId, int level) {
+    if (!player) return false;
+    uintptr_t s = MWBMainSlide();
+    void *hand = *(void **)((char *)player + V143_HAND_OFF);
+    if (!hand) return false;
+    ((void (*)(void *, int, int))(s + V143_APPLYENCH_VA))(hand, enchId, level);
+    ((void (*)(void *))(s + V143_HANDREFRESH_VA))(player);
+    return true;
+}
+// 1.4.3 one-shot: 夜视/速度药水 (实例15B: id/dur/amp/+C/+E)
+bool MWB143_Effect(void *player, int fxId, int seconds, int ampl) {
+    if (!player) return false;
+    uintptr_t s = MWBMainSlide();
+    char inst[16];
+    memset(inst, 0, sizeof(inst));
+    ((void (*)(void *, int, int, int, int, int))(s + V143_FXMAKE_VA))(inst, fxId, seconds * 20, ampl, 0, 1);
+    ((void (*)(void *, void *))(s + V143_FXAPPLY_VA))(player, inst);
+    return true;
+}
+// 1.4.3 one-shot: 传送 (同维度快路径 sub_100CCE7E4)
+bool MWB143_Teleport(void *player, float x, float y, float z) {
+    if (!player) return false;
+    uintptr_t s = MWBMainSlide();
+    float p[3] = {x, y, z};
+    ((void (*)(void *, void *, float *, int, float, float, float))(s + V143_TPFAST_VA))(
+        NULL, player, p, 3, x, y, z);
+    return true;
+}
+// 1.4.3 one-shot: 生存/创造 (0/1, 替代虚表方案)
+bool MWB143_SetGameType(void *player, int type) {
+    if (!player || type < 0 || type > 2) return false;
+    ((void (*)(void *, int))(MWBMainSlide() + V143_SETGAMETYPE2_VA))(player, type);
+    return true;
+}
+
 #pragma mark - 1.2.15 版本适配 (本机未安装, 只合入不验证)
-// 逆向结论: Actor+0x24E 无敌位, Abilities=Player+0x370(表基BSS步长0x18),
-// instabuild idx3 / flySpeed idx4 / walkSpeed idx5, Level+0xF8→+0x12c 时间
+// 逆向纠正: instabuild=idx2(旧idx3实为lightning); LevelData内联Level+0xF8不解引用
+// 能力表: 0=invulnerable 1=flying 2=instabuild 3=lightning 4=flySpeed 5=walkSpeed
+//         6=noclip 7=mayfly 8=worldbuilder 9=mute
 #define V1215_PLAYER_TICK   0x100376F78UL
 #define V1215_LEVEL_TIMETICK 0x1005D41A4UL
 #define V1215_SET_BOOL      0x100E97BF0UL
 #define V1215_SET_FLOAT     0x100E97C88UL
 #define V1215_ABIL_BASE     0x101F112D8UL
+#define V1215_ABIL_FLYING   1
+#define V1215_ABIL_INSTABUILD 2
+#define V1215_ABIL_FLYSPEED 4
+#define V1215_ABIL_WALKSPEED 5
+#define V1215_ABIL_NOCLIP   6
+#define V1215_ABIL_MAYFLY   7
 #define V1215_PLAYER_ABIL_OFF 0x370
 #define V1215_ACTOR_INVULN_OFF 0x24E
-#define V1215_LEVELDATA_OFF 0xF8
-#define V1215_LEVELDATA_TIME_OFF 0x12C
+#define V1215_LD_OFF        0xF8
+#define V1215_LD_TIME_OFF   0x12C
+#define V1215_LD_RAIN_OFF   0x188
+#define V1215_LD_LIGHT_OFF  0x18C
+#define V1215_GET_SELECT    0x100E9F314UL
+#define V1215_ST_FILL       0x100F11D64UL
+#define V1215_ST_BLANK      0x100F125A8UL
+#define V1215_CONT_ADD      0x100C36B50UL
+#define V1215_CONT_FLAG     0x101F14B50UL
+#define V1215_EQUIP_OFF     0x1820
+#define V1215_ENCH_APPLY    0x100F54D30UL
+#define V1215_FX_LOOKUP     0x100D4D6A4UL
+#define V1215_FX_MAKE       0x100D4F114UL
+#define V1215_FX_ADD        0x100DB8BE4UL
+#define V1215_TP_SLOT       208
+#define V1215_XP_PTS_SLOT   3024
+#define V1215_XP_LVL_SLOT   3032
+#define V1215_SET_SPAWN     0x100E9DB84UL
 
 typedef void (*V1215TickFn)(void *self);
 typedef void (*V1215SetBoolFn)(void *abil, void *entry, unsigned char v);
 typedef void (*V1215SetFloatFn)(void *abil, void *entry, float v);
 static V1215TickFn orig_1215_playerTick = NULL, orig_1215_timeTick = NULL;
+static void *gPlayer1215 = NULL;
 
 static void hooked_1215_playerTick(void *self) {
     orig_1215_playerTick(self);
+    gPlayer1215 = self;
     if (gInvincible) ((unsigned char *)self)[V1215_ACTOR_INVULN_OFF] = 1;
     void *abil = (char *)self + V1215_PLAYER_ABIL_OFF;
     uintptr_t slide = MWBMainSlide();
     V1215SetBoolFn setB = (V1215SetBoolFn)(slide + V1215_SET_BOOL);
     V1215SetFloatFn setF = (V1215SetFloatFn)(slide + V1215_SET_FLOAT);
-    if (gFastBreak) setB(abil, (void *)(slide + V1215_ABIL_BASE + 3 * 0x18), 1);
-    if (gSpeed) setF(abil, (void *)(slide + V1215_ABIL_BASE + 5 * 0x18), 0.25f);
+    if (gFastBreak) setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_INSTABUILD * 0x18), 1);
+    if (gFly) {
+        setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_FLYING * 0x18), 1);
+        setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_MAYFLY * 0x18), 1);
+    }
+    if (gNoclip) setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_NOCLIP * 0x18), 1);
+    if (gSpeed) setF(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_WALKSPEED * 0x18), 0.25f);
 }
 static void hooked_1215_timeTick(void *level) {
     orig_1215_timeTick(level);
     if (gTimeMode == 1 || gTimeMode == 2) {
-        void *ld = *(void **)((char *)level + V1215_LEVELDATA_OFF);
-        if (ld) *(int32_t *)((char *)ld + V1215_LEVELDATA_TIME_OFF) =
+        // LevelData内联, 直接加偏移 (旧代码多一次解引用是野指针bug)
+        *(int32_t *)((char *)level + V1215_LD_OFF + V1215_LD_TIME_OFF) =
             (gTimeMode == 1 ? 1000 : 13000);
     }
+    if (gWeatherMode == 1 || gWeatherMode == 2) {
+        char *ld = (char *)level + V1215_LD_OFF;
+        if (gWeatherMode == 1) { *(float *)(ld + V1215_LD_RAIN_OFF) = 0.0f; *(int *)(ld + V1215_LD_LIGHT_OFF) = 0; }
+        else { *(float *)(ld + V1215_LD_RAIN_OFF) = 1.0f; *(int *)(ld + V1215_LD_LIGHT_OFF) = 0; }
+    }
+}
+// 1.2.15 one-shot: 方块给予/附魔/药水/传送/XP/出生点 (静态结论, 待真机验)
+bool MWB1215_GiveBlock(void *player, int blkId, int count) {
+    if (!player || blkId < 0 || blkId > 255 || count < 1) return false;
+    uintptr_t s = MWBMainSlide();
+    char proto[120], one[120];
+    memset(proto, 0, sizeof(proto));
+    ((void (*)(void *))(s + V1215_ST_BLANK))(proto);
+    ((void (*)(void *, int, int, int))(s + V1215_ST_FILL))(proto, blkId, count, 0);
+    if (*(uint8_t *)(proto + 0x13) == 0) return false;
+    ((void (*)(void *, void *, void *))(s + V1215_CONT_ADD))(
+        (char *)player + V1215_EQUIP_OFF, (void *)(s + V1215_CONT_FLAG), proto);
+    (void)one;
+    return true;
+}
+bool MWB1215_EnchantHeld(void *player, int enchId, int level) {
+    if (!player) return false;
+    uintptr_t s = MWBMainSlide();
+    void *st = ((void *(*)(void *))(s + V1215_GET_SELECT))(player);
+    if (!st) return false;
+    ((void (*)(void *, int, int))(s + V1215_ENCH_APPLY))(st, enchId, level);
+    return true;
+}
+bool MWB1215_Effect(void *player, int fxId, int seconds, int ampl) {
+    if (!player) return false;
+    uintptr_t s = MWBMainSlide();
+    void *fx = ((void *(*)(int))(s + V1215_FX_LOOKUP))(fxId);
+    if (!fx) return false;
+    char inst[16];
+    memset(inst, 0, sizeof(inst));
+    ((void (*)(void *, void *, int, int, int, int))(s + V1215_FX_MAKE))(inst, fx, seconds * 20, ampl, 0, 1);
+    ((void (*)(void *, void *))(s + V1215_FX_ADD))(player, inst);
+    return true;
+}
+bool MWB1215_Teleport(void *player, float x, float y, float z) {
+    if (!player) return false;
+    float v[3] = {x, y, z};
+    ((void (*)(void *, float *, int, int, int))(*(void **)((char *)player + V1215_TP_SLOT)))(player, v, 1, 3, 1);
+    return true;
+}
+bool MWB1215_AddXP(void *player, int pts) {
+    if (!player || !pts) return false;
+    ((void (*)(void *, int))(*(void **)((char *)player + V1215_XP_PTS_SLOT)))(player, pts);
+    return true;
 }
 
-#pragma mark - 1.20.62 版本适配 (EnTT ECS, tick+时间先行)
-// 逆向结论: tick候选 @0x105D03F74, LevelData+0x388 dayTime/+0x370 gameTime,
-// getTime/setTime 仅8B只调不hook, abilities待运行时探测
+#pragma mark - 1.20.62 版本适配 (EnTT ECS, systemBody为主hook)
+// 逆向纠正: 旧tick@0x105D03F74打偏(事件路径非常驻); 换ECS system body@0x101F5CD20
+// +wrapper@0x101F5D8B4+abilWrite@0x1040AA2B0; abilities无固定偏移, 运行时探测
 #define V120_TICK_SENDINPUT_VA 0x105D03F74UL
+#define V120_SYS_BODY_VA    0x101F5CD20UL
+#define V120_SYS_WRAP_VA    0x101F5D8B4UL
+#define V120_ABILWRITE_VA   0x1040AA2B0UL
+#define V120_MOBGETBYID_VA  0x105D14BC8UL
 #define V120_LEVELDATA_TIME_OFF 0x388
+#define V120_LEVELDATA_GAME_OFF 0x370
 #define V120_GETTIME_VA 0x1026D2DD8UL
 #define V120_SETTIME_VA 0x106D30960UL
 #define V120_UNWRAP_VA  0x106D31750UL
 
 typedef void (*V120TickFn)(void *self);
+typedef void (*V120SysBodyFn)(void *registry, uint64_t entity);
+typedef void (*V120WrapFn)(void *actorLike);
+typedef void (*V120AbilWriteFn)(void *pkt, void *stream, void *ctx);
 typedef int (*V120GetTimeFn)(void *levelData);
 typedef void (*V120SetTimeFn)(void *levelData, int t);
 typedef void *(*V120UnwrapFn)(void *smartptr);
 static V120TickFn orig_120_tick = NULL;
+static V120SysBodyFn orig_120_sysBody = NULL;
+static V120WrapFn orig_120_wrapper = NULL;
+static V120AbilWriteFn orig_120_abilWrite = NULL;
 static void *gLevelData120 = NULL;
+static void *gActor120 = NULL;
 static int gTick120 = 0;
+static int gTick120b = 0;
 
 static void hooked_120_tick(void *self) {
     orig_120_tick(self);
@@ -1274,15 +1851,90 @@ static void hooked_120_tick(void *self) {
     }
 }
 
+// ECS system body: x0=registry, x1=entity (每tick跑, 本地受控才进body)
+static void hooked_120_sysBody(void *registry, uint64_t entity) {
+    orig_120_sysBody(registry, entity);
+    if (gMWBDebug && ((++gTick120b % 200) == 1)) {
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            int flag = gActor120 ? ((unsigned char *)gActor120)[0x1ED8] : -1;
+            NSString *line = [NSString stringWithFormat:@"%@ [120sys] #%d reg=%p ent=0x%llx actor=%p flag=%d\n",
+                              [NSDate date], gTick120b, registry, entity, gActor120, flag];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+    if (gLevelData120 && (gTimeMode == 1 || gTimeMode == 2)) {
+        V120SetTimeFn setTime = (V120SetTimeFn)(MWBMainSlide() + V120_SETTIME_VA);
+        setTime(gLevelData120, (gTimeMode == 1 ? TICK_TIME_DAY : TICK_TIME_NIGHT));
+    }
+}
+// wrapper: x0=Actor-like (+0x1ED8本地标志, +0xB90实体)
+static void hooked_120_wrapper(void *self) {
+    orig_120_wrapper(self);
+    gActor120 = self;
+}
+// abilWrite: 只记包指针 (读链回推用, 不改包)
+static void hooked_120_abilWrite(void *pkt, void *stream, void *ctx) {
+    orig_120_abilWrite(pkt, stream, ctx);
+    if (gMWBDebug && (gTick120b % 200) == 1) {
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ [120abil] pkt=%p stream=%p ctx=%p\n",
+                              [NSDate date], pkt, stream, ctx];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+}
+// 1.20 药水直调验有效性 (纯函数): 1=速度 8=跳跃 16=夜视
+void MWB120ProbeMobEffect(void) {
+    void *(*getById)(int) = (void *(*)(int))(MWBMainSlide() + V120_MOBGETBYID_VA);
+    void *e1 = getById(1), *e8 = getById(8), *e16 = getById(16);
+    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+    if (fh) {
+        [fh seekToEndOfFile];
+        NSString *line = [NSString stringWithFormat:@"%@ [120药水] speed=%p jump=%p nightvision=%p\n",
+                          [NSDate date], e1, e8, e16];
+        [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [fh closeFile];
+    }
+}
+
 #pragma mark - 0.10 生存/创造切换后端
-// 逆向结论: Minecraft::setIsCreativeMode @0x1000ce840 (MSFindSymbol),
-// 轻量版直接写 Player+5824 (创造=abil[0,2,3]置1, 生存=清零4B)
 void MWB010SetCreative(void *player, bool creative) {
     if (!player) player = gLocalPlayer;
     if (!player) return;
     char *a = (char *)player + PLAYER_ABILITIES_OFFSET;
     if (creative) { a[0] = 1; a[2] = 1; a[3] = 1; }
     else *(uint32_t *)a = 0;
+}
+
+// 0.10 gMinecraft 捕获 (Minecraft::tick 首参即this) + 完整版切换 + 传送直调
+static void *gMinecraft010 = NULL;
+typedef void (*MinecraftTick010Fn)(void *self, int a, int b);
+static MinecraftTick010Fn orig_mc010Tick = NULL;
+static void hooked_mc010Tick(void *self, int a, int b) {
+    orig_mc010Tick(self, a, b);
+    gMinecraft010 = self;
+}
+void MWB010SetCreativeFull(bool creative) {
+    void (*setC)(void *, bool) = (void (*)(void *, bool))MSFindSymbol(NULL, "__ZN9Minecraft17setIsCreativeModeEb");
+    if (setC && gMinecraft010) { setC(gMinecraft010, creative); return; }
+    MWB010SetCreative(NULL, creative);
+}
+bool MWB010Teleport(void *player, float x, float y, float z) {
+    typedef void (*TpFn)(void *, float, float, float);
+    TpFn tp = (TpFn)MSFindSymbol(NULL, "__ZN3Mob10teleportToEfff");
+    if (!tp || !player) player = gLocalPlayer;
+    if (!tp || !player) return false;
+    tp(player, x, y, z);
+    return true;
 }
 
 #pragma mark - 触摸模拟 (调试用, cycript 可调用)
@@ -1313,7 +1965,8 @@ void MWB010SetCreative(void *player, bool creative) {
             [stack removeLastObject];
             NSString *cls = NSStringFromClass([v class]);
             if ([cls containsString:@"GLKView"] || [cls containsString:@"EAGL"] ||
-                [cls containsString:@"Surface"] || [cls containsString:@"Render"]) {
+                [cls containsString:@"Surface"] || [cls containsString:@"Render"] ||
+                [cls containsString:@"MTKView"] || [cls containsString:@"Metal"]) {
                 return v;
             }
             for (UIView *sub in v.subviews) [stack addObject:sub];
@@ -1390,6 +2043,7 @@ void MWB010SetCreative(void *player, bool creative) {
 }
 
 // 直调式点击: began+ended 直接打到游戏 VC (主线程同步执行)
+// 1.20 教训: 设置类弹窗是独立 VC, 只打主 VC 够不着, 改为全窗口全 VC 广播
 + (void)tapGameAtX:(CGFloat)x y:(CGFloat)y {
     NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
     void (^log)(NSString *) = ^(NSString *m) {
@@ -1398,27 +2052,375 @@ void MWB010SetCreative(void *player, bool creative) {
         if (fh) { [fh seekToEndOfFile]; [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
     };
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIViewController *vc = [self findGameVC];
-        UIView *gameView = vc.view ?: [self findGameView];
-        UIWindow *window = gameView.window;
-        log([NSString stringWithFormat:@"直调点击 (%.0f,%.0f) vc=%@ view=%@",
-             x, y, NSStringFromClass([vc class]), NSStringFromClass([gameView class])]);
-        if (!vc || !gameView) { log(@"未找到游戏 VC/view, 放弃"); return; }
+        NSMutableArray *vcs = [NSMutableArray new];
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            if ([w isKindOfClass:NSClassFromString(@"MWBOverlayWindow")]) continue;
+            UIViewController *rvc = w.rootViewController;
+            while (rvc) {
+                NSString *cls = NSStringFromClass([rvc class]);
+                if (![cls containsString:@"MWB"] && ![cls containsString:@"EMI"]) [vcs addObject:rvc];
+                if (rvc.presentedViewController && rvc.presentedViewController != rvc)
+                    rvc = rvc.presentedViewController;
+                else break;
+            }
+            if (vcs.count == 0) {
+                UIViewController *fvc = [self findGameVC];
+                if (fvc) [vcs addObject:fvc];
+            }
+        }
+        UIView *gameView = [self findGameView];
+        UIWindow *window = gameView.window ?: [UIApplication sharedApplication].keyWindow;
+        log([NSString stringWithFormat:@"直调点击 (%.0f,%.0f) vc数=%lu view=%@",
+             x, y, (unsigned long)vcs.count, NSStringFromClass([gameView class])]);
+        if (vcs.count == 0 || !gameView) { log(@"未找到游戏 VC/view, 放弃"); return; }
         CGPoint pt = (CGPoint){x, y};
         UITouch *touch = [self createTouchAt:pt window:window view:gameView phase:UITouchPhaseBegan];
         NSSet *s = [NSSet setWithObject:touch];
-        [vc touchesBegan:s withEvent:nil];
+        for (UIViewController *vc in vcs) [vc touchesBegan:s withEvent:nil];
         log(@"直调 began 已调用");
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.08 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
             [touch setValue:@(UITouchPhaseEnded) forKey:@"_phase"];
-            [vc touchesEnded:s withEvent:nil];
+            for (UIViewController *vc in vcs) [vc touchesEnded:s withEvent:nil];
             log(@"直调 ended 已调用");
         });
     });
 }
 
+// cycript 直调开关 (确定性测试通道, 不依赖坐标点悬浮窗)
+// 用法: cycript -p PID -e "[MWBTouchHelper dbgInv:1]"
++ (void)dbgInv:(BOOL)v { gInvincible = v; }
++ (void)dbgFly:(BOOL)v { gFly = v; }
++ (void)dbgBreak:(BOOL)v { gFastBreak = v; }
++ (void)dbgSpeed:(BOOL)v { gSpeed = v; }
++ (void)dbgJump:(BOOL)v { gSuperJump = v; }
++ (void)dbgNoclip:(BOOL)v { gNoclip = v; }
++ (void)dbgNight:(BOOL)v { gNightVision = v; }
++ (void)dbgAura:(BOOL)v { gKillAura = v; }
++ (void)dbgMap:(BOOL)v { gMinimap = v; MWBMinimapShow(v); }
++ (void)dbgDebug:(BOOL)v { gMWBDebug = v; }
++ (void)dbgTime:(int)v { gTimeMode = v; }
++ (void)dbgWeather:(int)v { gWeatherMode = v; }
++ (void)dbgHeal { MWBHealNow(); }
++ (void)dbgEnchant { MWBEnchantHeld255(); }
++ (void)dbgGive117:(int)itemId {
+    if (gGV != (int)MWBGameV1_1_7) return;
+    for (int i = 0; i < 100 && !gPlayer117; i++) [NSThread sleepForTimeInterval:0.5];
+    if (gPlayer117) MWB117_Give(gPlayer117, itemId, 1);
+}
++ (void)dbgGive143:(int)itemId { if (gGV == (int)MWBGameV1_4_3 && gPlayer143) MWB143_Give(gPlayer143, itemId, 5); }
++ (void)dbgTeleport { MWBTeleportUp10(); }
++ (void)dbgFill { MWBFillStone5(); }
++ (void)dbgProbe120 { MWB120ProbeMobEffect(); }
+
 @end
+
+#pragma mark - 跨版本动作分发
+
+// flag文件通道 (绕过cycript两次调用上限: ssh touch /tmp/mwbcmd-<动作>[-<参数>] 即可触发)
+// 支持: inv-0/1 fly break speed jump noclip night aura map debug time-0/1/2 weather-0/1/2/3
+//       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5
+// 注意: 游戏调用必须在tick返回后异步执行 (tick内同步调容器函数会死锁, -19冻屏教训)
+static int gPendGive117 = -1, gPendGive143 = -1, gPendEffect143 = -1, gPendEffect1133 = -1;
+static BOOL gPendHeal = NO, gPendEnchant = NO, gPendTeleport = NO, gPendFill = NO;
+static void MWBFlushPending(void) {
+    NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+    if (lfh) {
+        [lfh seekToEndOfFile];
+        NSString *line = [NSString stringWithFormat:@"%@ [泻洪] heal=%d ench=%d g117=%d g143=%d e143=%d e1133=%d tp=%d fill=%d\n",
+                          [NSDate date], gPendHeal, gPendEnchant, gPendGive117, gPendGive143,
+                          gPendEffect143, gPendEffect1133, gPendTeleport, gPendFill];
+        [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [lfh closeFile];
+    }
+    if (gPendHeal) { gPendHeal = NO; MWBHealNow(); }
+    if (gPendEnchant) { gPendEnchant = NO; MWBEnchantHeld255(); }
+    if (gPendGive117 >= 0 && gPlayer117) { int id = gPendGive117; gPendGive117 = -1; MWB117_Give(gPlayer117, id, 1); }
+    if (gPendGive143 >= 0 && gPlayer143) { int id = gPendGive143; gPendGive143 = -1; MWB143_Give(gPlayer143, id, 5); }
+    if (gPendEffect143 >= 0 && gPlayer143) { int id = gPendEffect143; gPendEffect143 = -1; MWB143_Effect(gPlayer143, id, 600, 0); }
+    if (gPendEffect1133 >= 0 && gPlayer1133) {
+        int id = gPendEffect1133; gPendEffect1133 = -1;
+        BOOL ok = MWB1133_ApplyEffect(gPlayer1133, id, 0, 6000);
+        NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+        if (lfh) {
+            [lfh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ [1133药水应用] id=%d ok=%d\n",
+                              [NSDate date], id, ok];
+            [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [lfh closeFile];
+        }
+    }
+    if (gPendTeleport) { gPendTeleport = NO; MWBTeleportUp10(); }
+    if (gPendFill) { gPendFill = NO; MWBFillStone5(); }
+}
+static void MWBPollCmdFile(void) {
+    static int cooldown = 0;
+    if ((cooldown++ % 20) != 0) return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSArray *files = [fm contentsOfDirectoryAtPath:@"/tmp" error:nil];
+    for (NSString *f in files) {
+        if (![f hasPrefix:@"mwbcmd-"]) continue;
+        NSString *full = [@"/tmp" stringByAppendingPathComponent:f];
+        NSString *cmd = [f substringFromIndex:7];
+        [fm removeItemAtPath:full error:nil];
+        NSArray *parts = [cmd componentsSeparatedByString:@"-"];
+        NSString *act = parts[0];
+        int arg = parts.count > 1 ? [parts[1] intValue] : 0;
+        BOOL needFlush = NO;
+        if ([act isEqualToString:@"inv"]) gInvincible = arg ? YES : NO;
+        else if ([act isEqualToString:@"fly"]) gFly = arg ? YES : NO;
+        else if ([act isEqualToString:@"break"]) gFastBreak = arg ? YES : NO;
+        else if ([act isEqualToString:@"speed"]) gSpeed = arg ? YES : NO;
+        else if ([act isEqualToString:@"jump"]) gSuperJump = arg ? YES : NO;
+        else if ([act isEqualToString:@"noclip"]) gNoclip = arg ? YES : NO;
+        else if ([act isEqualToString:@"night"]) gNightVision = arg ? YES : NO;
+        else if ([act isEqualToString:@"aura"]) gKillAura = arg ? YES : NO;
+        else if ([act isEqualToString:@"map"]) { gMinimap = arg ? YES : NO; MWBMinimapShow(gMinimap); }
+        else if ([act isEqualToString:@"debug"]) gMWBDebug = arg ? YES : NO;
+        else if ([act isEqualToString:@"time"]) gTimeMode = arg;
+        else if ([act isEqualToString:@"weather"]) gWeatherMode = arg;
+        else if ([act isEqualToString:@"heal"]) { gPendHeal = YES; needFlush = YES; }
+        else if ([act isEqualToString:@"enchant"]) { gPendEnchant = YES; needFlush = YES; }
+        else if ([act isEqualToString:@"give117"]) { gPendGive117 = arg; needFlush = YES; }
+        else if ([act isEqualToString:@"give143"]) { gPendGive143 = arg; needFlush = YES; }
+        else if ([act isEqualToString:@"effect143"]) { gPendEffect143 = arg; needFlush = YES; }
+        else if ([act isEqualToString:@"teleport1133"]) { gPendTeleport = YES; needFlush = YES; }
+        else if ([act isEqualToString:@"fill5"]) { gPendFill = YES; needFlush = YES; }
+        else if ([act isEqualToString:@"fillnat5"] && gPlayer1133) {
+            // 自然方块铺石: 从脚下往下扫首个非air方块, 用它铺5³ (绕开注册表争议)
+            void *bs = MWB1133BlockSource();
+            void *air = *(void **)(MWBMainSlide() + V1133_BLOCKBASE_VA);
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            int n = -99;
+            if (bs && air && gPlayer1133) {
+                float px = *(float *)((char *)gPlayer1133 + 0x41C);
+                float py = *(float *)((char *)gPlayer1133 + 0x41C + 4);
+                float pz = *(float *)((char *)gPlayer1133 + 0x41C + 8);
+                int cx = (int)floorf(px), cy = (int)floorf(py), cz = (int)floorf(pz);
+                void *nat = NULL;
+                for (int y = cy - 1; y > cy - 25 && y >= 0; y--) {
+                    void *b = MWB1133GetOne(bs, cx, y, cz);
+                    if (b && b != air) { nat = b; break; }
+                }
+                if (lfh) { [lfh seekToEndOfFile];
+                    NSString *line = [NSString stringWithFormat:@"%@ [1133自然] nat=%p\n",
+                                      [NSDate date], nat];
+                    [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [lfh closeFile]; }
+                n = 0;
+                if (nat) {
+                    for (int y = cy - 2; y <= cy + 2; y++)
+                        for (int z = cz - 2; z <= cz + 2; z++)
+                            for (int x = cx - 2; x <= cx + 2; x++)
+                                n += MWB1133SetOne(bs, x, y, z, nat);
+                }
+            }
+            if (lfh) { [lfh seekToEndOfFile];
+                NSString *line = [NSString stringWithFormat:@"%@ [1133自然] 写入%d块\n",
+                                  [NSDate date], n];
+                [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [lfh closeFile]; }
+        }
+        else if ([act isEqualToString:@"scaninv117"] && gPlayer117) {
+            void *inv = (char *)gPlayer117 + 0x1288;
+            void **reg = (void **)(MWBMainSlide() + V117_ITEMREG_VA);
+            void *diamond = reg[264];
+            void *dirt = reg[3];
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                NSMutableString *m = [NSMutableString stringWithFormat:@"%@ [117背包扫描] inv=%p diamond=%p dirt=%p 命中:",
+                                      [NSDate date], inv, diamond, dirt];
+                for (int off = -0x200; off < 0x1000; off += 8) {
+                    void *v = *(void **)((char *)inv + off);
+                    if ((v == diamond || v == dirt) && off >= 0)
+                        [m appendFormat:@" +0x%x=%@前后: %02x%02x%02x%02x|%02x%02x%02x%02x)", off,
+                         v == diamond ? @"钻石" : @"泥土",
+                         ((uint8_t *)inv)[off-4], ((uint8_t *)inv)[off-3],
+                         ((uint8_t *)inv)[off-2], ((uint8_t *)inv)[off-1],
+                         ((uint8_t *)inv)[off+8], ((uint8_t *)inv)[off+9],
+                         ((uint8_t *)inv)[off+10], ((uint8_t *)inv)[off+11]];
+                }
+                [m appendString:@" 对象dump:"];
+                for (int off = 0; off < 0x200; off += 16)
+                    [m appendFormat:@" +%x=%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x", off,
+                     ((uint8_t *)inv)[off], ((uint8_t *)inv)[off+1], ((uint8_t *)inv)[off+2],
+                     ((uint8_t *)inv)[off+3], ((uint8_t *)inv)[off+4], ((uint8_t *)inv)[off+5],
+                     ((uint8_t *)inv)[off+6], ((uint8_t *)inv)[off+7], ((uint8_t *)inv)[off+8],
+                     ((uint8_t *)inv)[off+9], ((uint8_t *)inv)[off+10], ((uint8_t *)inv)[off+11],
+                     ((uint8_t *)inv)[off+12], ((uint8_t *)inv)[off+13], ((uint8_t *)inv)[off+14],
+                     ((uint8_t *)inv)[off+15]];
+                [m appendString:@"\n"];
+                [lfh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
+        else if ([act isEqualToString:@"held117"] && gPlayer117) {
+            void *held = ((void *(*)(void *))(MWBMainSlide() + V117_HELDITEM_VA))(gPlayer117);
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                NSMutableString *m = [NSMutableString stringWithFormat:@"%@ [117手持] held=%p 实例:",
+                                      [NSDate date], held];
+                if (held) {
+                    for (int i = 0; i < 0x70; i += 8)
+                        [m appendFormat:@" +%x=%02x%02x%02x%02x%02x%02x%02x%02x", i,
+                         ((uint8_t *)held)[i], ((uint8_t *)held)[i+1], ((uint8_t *)held)[i+2],
+                         ((uint8_t *)held)[i+3], ((uint8_t *)held)[i+4], ((uint8_t *)held)[i+5],
+                         ((uint8_t *)held)[i+6], ((uint8_t *)held)[i+7]];
+                }
+                [m appendString:@"\n"];
+                [lfh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
+        else if ([act isEqualToString:@"effect1133"]) { gPendEffect1133 = arg; needFlush = YES; }
+        else if ([act isEqualToString:@"attr1133"] && gPlayer1133) {
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                NSString *line = [NSString stringWithFormat:@"%@ [1133血属性] 已禁用(GetAttr待修) player=%p\n",
+                                  [NSDate date], gPlayer1133];
+                [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
+        else if ([act isEqualToString:@"blkreg1133"] && gPlayer1133) {
+            // 全只读验证: bs虚表/TEXT检查/getBlock(高空必回air)/脚下, 结果小整数一律不解引用
+            uintptr_t slide = MWBMainSlide();
+            uintptr_t lo = slide + 0x100000000UL, hi = lo + 0x4000000UL;
+            void **base = (void **)(slide + V1133_BLOCKBASE_VA);
+            void *bs = MWB1133BlockSource();
+            void *bsvt = NULL; int16_t h = -1;
+            if (bs && (uintptr_t)bs > 0x100000000UL) {
+                bsvt = *(void **)bs;
+                h = *(int16_t *)((char *)bs + 0x30);
+            }
+            float px = *(float *)((char *)gPlayer1133 + 0x41C);
+            float py = *(float *)((char *)gPlayer1133 + 0x41C + 4);
+            float pz = *(float *)((char *)gPlayer1133 + 0x41C + 8);
+            int cx = (int)floorf(px), cy = (int)floorf(py), cz = (int)floorf(pz);
+            void *air = base[0];
+            void *sky = NULL, *foot = NULL;
+            if (bs && bsvt && (uintptr_t)bsvt >= lo && (uintptr_t)bsvt < hi) {
+                MWBBlockPos ps = {cx, 300, cz}, pf = {cx, cy - 1, cz};
+                sky = MWB1133GetOne(bs, ps.x, ps.y, ps.z);
+                foot = MWB1133GetOne(bs, pf.x, pf.y, pf.z);
+            }
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                NSString *line = [NSString stringWithFormat:
+                                  @"%@ [1133只读] bs=%p bsvt=%p(T=%d) h=%d air=%p sky=%p(==air%d) foot=%p 玩家(%d,%d,%d)\n",
+                                  [NSDate date], bs, bsvt,
+                                  (bsvt && (uintptr_t)bsvt >= lo && (uintptr_t)bsvt < hi) ? 1 : 0,
+                                  h, air, sky, (sky && sky == air) ? 1 : 0, foot, cx, cy, cz];
+                [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
+        // tick返回后异步泻洪 (避免容器锁重入)
+        if (needFlush) dispatch_async(dispatch_get_main_queue(), ^{ MWBFlushPending(); });
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ [盒子指令] %@\n", [NSDate date], cmd];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    }
+    // tick返回后异步泻洪 (避免容器锁重入)
+    dispatch_async(dispatch_get_main_queue(), ^{ MWBFlushPending(); });
+}
+
+static void MWBHealNow(void) {
+    if (gGV == (int)MWBGameV1_13_3 && gPlayer1133) MWB1133_ApplyEffect(gPlayer1133, 6, 0, 40);
+    else if (gGV == (int)MWBGameV1_4_3 && gPlayer143) MWB143_Effect(gPlayer143, 6, 2, 0);
+    else if (gGV == (int)MWBGameV1_2_15 && gPlayer1215) MWB1215_Effect(gPlayer1215, 6, 2, 0);
+}
+static void MWBEnchantHeld255(void) {
+    if (gGV == (int)MWBGameV1_1_7 && gPlayer117) MWB117_EnchantMax(gPlayer117, 9, 255);
+    else if (gGV == (int)MWBGameV1_4_3 && gPlayer143) MWB143_EnchantMax(gPlayer143, 9, 255);
+    else if (gGV == (int)MWBGameV1_2_15 && gPlayer1215) MWB1215_EnchantHeld(gPlayer1215, 9, 255);
+}
+static void MWBTeleportUp10(void) {
+    if (gGV == (int)MWBGameV1_13_3 && gPlayer1133) MWB1133_TeleportUp10(gPlayer1133);
+}
+static void MWBFillStone5(void) {
+    if (gGV == (int)MWBGameV1_13_3 && gPlayer1133) MWB1133_FillStone(2);
+    else if (gGV == (int)MWBGameV0_10 && gLocalPlayer) {
+        void *ts = *(void **)((char *)gLocalPlayer + 0x48);
+        float px = *(float *)((char *)gLocalPlayer + 0x28);
+        float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
+        float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+        int cx = (int)floorf(px), cy = (int)floorf(py), cz = (int)floorf(pz);
+        int (*setTD)(void *, void *, void *, int) =
+            (int (*)(void *, void *, void *, int))MSFindSymbol(NULL, "__ZN10TileSource14setTileAndDataERK7TilePos8FullTilei");
+        if (!ts || !setTD) return;
+        for (int y = cy - 2; y <= cy + 2; y++)
+            for (int z = cz - 2; z <= cz + 2; z++)
+                for (int x = cx - 2; x <= cx + 2; x++) {
+                    MWBBlockPos p = {x, y, z};
+                    uint8_t ft[2] = {1, 0};  // 石头id1
+                    setTD(ts, &p, ft, 3);
+                }
+    }
+}
+// 小地图: 192x192 overlay (tag 0x6D62), 按48x48采样着色, 矿石标红
+static UIColor *MWBMapColor(int blockId) {
+    switch (blockId) {
+        case 0: return [UIColor blackColor];
+        case 1: return [UIColor grayColor];
+        case 2: return [UIColor greenColor];
+        case 3: return [UIColor brownColor];
+        case 8: case 9: return [UIColor blueColor];
+        case 12: return [UIColor yellowColor];
+        case 17: return [UIColor darkGrayColor];
+        case 18: return [UIColor colorWithRed:0.1 green:0.5 blue:0.1 alpha:1];
+        case 14: case 15: return [UIColor orangeColor];
+        case 56: return [UIColor cyanColor];
+        case 73: return [UIColor redColor];
+        default: return [UIColor darkGrayColor];
+    }
+}
+static void MWBMinimapShow(BOOL on) {
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if (![NSStringFromClass([w class]) containsString:@"MWBOverlay"]) continue;
+        UIView *old = [w viewWithTag:0x6D62];
+        if (!on) { [old removeFromSuperview]; return; }
+        if (old) return;
+        UIImageView *iv = [[UIImageView alloc] initWithFrame:(CGRect){{8, 90}, {192, 192}}];
+        iv.tag = 0x6D62;
+        iv.layer.borderWidth = 3;
+        iv.layer.borderColor = [UIColor blackColor].CGColor;
+        [w addSubview:iv];
+        return;
+    }
+}
+static void MWBMinimapRefresh(void) {
+    if (!gMinimap || gGV != (int)MWBGameV1_13_3) return;
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if (![NSStringFromClass([w class]) containsString:@"MWBOverlay"]) continue;
+        UIImageView *iv = (UIImageView *)[w viewWithTag:0x6D62];
+        if (!iv) return;
+        UIGraphicsImageRenderer *rr = [[UIGraphicsImageRenderer alloc] initWithSize:(CGSize){192, 192}];
+        UIImage *img = [rr imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
+            for (int z = 0; z < 48; z++)
+                for (int x = 0; x < 48; x++) {
+                    [MWBMapColor(gMiniMap1133[z * 48 + x]) setFill];
+                    CGContextFillRect(ctx.CGContext, (CGRect){{(CGFloat)(x * 4), (CGFloat)(z * 4)}, {4, 4}});
+                }
+        }];
+        dispatch_async(dispatch_get_main_queue(), ^{ iv.image = img; });
+        return;
+    }
+}
 
 #pragma mark - 安装
 
@@ -1445,6 +2447,7 @@ static void MWBInstall(void) {
     NSLog(@"[魔玩盒子] 插件已加载");
     // 版本自适应: 不依赖包名,运行时识别游戏版本再选注入方式,同一UI操作
     MWBGameVersion gv = [MWBVersion currentVersion];
+    gGV = (int)gv;
     NSLog(@"[魔玩盒子] 当前游戏版本: %@ 注入方式=%ld",
           [MWBVersion nameForVersion:gv], (long)[MWBVersion currentInjectStyle]);
 
@@ -1468,6 +2471,7 @@ static void MWBInstall(void) {
 
     MWB_HOOK("__ZN11LocalPlayer10normalTickEv", hooked_normalTick, orig_normalTick);
     MWB_HOOK("__ZN5Level4tickEv", hooked_levelTick, orig_levelTick);
+    MWB_HOOK("__ZN9Minecraft4tickEii", hooked_mc010Tick, orig_mc010Tick);
 
     // 1.13.3: 无符号,按静态VA+slide直接hook (函数2636B/2396B,跳板安全)
     if (gv == MWBGameV1_13_3) {
@@ -1488,8 +2492,10 @@ static void MWBInstall(void) {
         MSHookFunction((void *)(slide + V117_PLAYERTICK_VA), (void *)hooked_117_playerTick, (void **)&orig_117_playerTick);
         MSHookFunction((void *)(slide + V117_LEVELTICK_VA), (void *)hooked_117_levelTick, (void **)&orig_117_levelTick);
         MSHookFunction((void *)(slide + V117_JUMPPOWER_VA), (void *)hooked_117_jump, (void **)&orig_117_jump);
-        NSLog(@"[魔玩盒子] 1.1.7 hook: playerTick/levelTick/jump");
-        logFile(@"[117] hook 成功: playerTick+levelTick+jump");
+        MSHookFunction((void *)(slide + V117_GETBOOL_VA), (void *)hooked_117_getBool, (void **)&orig_117_getBool);
+        MSHookFunction((void *)(slide + V117_HURT_VA), (void *)hooked_117_hurt, (void **)&orig_117_hurt);
+        NSLog(@"[魔玩盒子] 1.1.7 hook: playerTick/levelTick/jump/getBool+hurt");
+        logFile(@"[117] hook 成功: playerTick+levelTick+jump+getBool+hurt");
     }
 
     // 1.4.3: getter 拦截模型 (无需 normalTick)
@@ -1512,12 +2518,15 @@ static void MWBInstall(void) {
         logFile(@"[1215] hook 成功: playerTick+timeTick");
     }
 
-    // 1.20.62: ECS tick + 时间先行 (abilities 待运行时探测)
+    // 1.20.62: ECS systemBody为主hook (旧sendInput打偏, 保留但不再依赖)
     if (gv == MWBGameV1_20_62) {
         uintptr_t s120 = MWBMainSlide();
         MSHookFunction((void *)(s120 + V120_TICK_SENDINPUT_VA), (void *)hooked_120_tick, (void **)&orig_120_tick);
-        NSLog(@"[魔玩盒子] 1.20.62 hook: tick");
-        logFile(@"[120] hook 成功: tick");
+        MSHookFunction((void *)(s120 + V120_SYS_BODY_VA), (void *)hooked_120_sysBody, (void **)&orig_120_sysBody);
+        MSHookFunction((void *)(s120 + V120_SYS_WRAP_VA), (void *)hooked_120_wrapper, (void **)&orig_120_wrapper);
+        MSHookFunction((void *)(s120 + V120_ABILWRITE_VA), (void *)hooked_120_abilWrite, (void **)&orig_120_abilWrite);
+        NSLog(@"[魔玩盒子] 1.20.62 hook: tick+sysBody+wrapper+abilWrite");
+        logFile(@"[120] hook 成功: tick+sysBody+wrapper+abilWrite");
     }
 
     [[NSNotificationCenter defaultCenter]

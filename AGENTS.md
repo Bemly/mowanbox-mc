@@ -20,6 +20,13 @@
   - 2026-10-19 全版本进世界实测 ✅（同一插件`2026.8.27-2+debug`，cycript直调进档，均无崩、TOOLBOX+E悬浮窗全在）：1.1.7 ✅进My World复活存活；1.4.3 ✅进My World复活存活（蜘蛛杀过一次）；1.13.3 ✅进My World复活存活；1.20.62 ✅过不支持设备弹窗+存档升级弹窗进樱花林世界（仅UI）；0.10为唯一全功能版，其余高版本hook待接。
   - 2026-10-19 六路子agent逆向+全版本功能合入（插件`2026.8.27-10+debug`）：0.10无附魔系统（附魔台0.12才进PE，做不到；另得setIsCreativeMode@0x1000ce840与hurt头abil[0]实锤）；1.1.7 Abilities API直调（Player+0x1258/setBool/setFloat，tick@0x100439DE0实锤流动，inv回读=1粘住，dayTime锁13000，但开着无敌死过一次、天空停留日落疑客户端/服务端两套时间，未全实锤）；1.4.3 getter拦截模型（getBool/canFly/getFloat/tickTime，进世界流动，深夜+满血骷髅 adjacent ✅）；1.13.3能力表纠正（Base+12+i*12，invulnerable=Player+2480单写，fly/mayfly/instabuild/walkSpeed/flySpeed全接，时间双实锤）；1.2.15合入未验（本机无安装：Actor+0x24E无敌、能力表BSS步长0x18、Level+0xF8→+0x12C）；1.20.62 tick@0x105D03F74装上无崩但进世界25秒+跳跃3次均不触发（打偏，下一轮换备选0x101F5CD20，abilities待运行时探测）。附魔255：仅1.1.7有路（0x100AE6028绕上限检查，未调），其余版本待真机跟。
   - 2026-10-19 Toolbox最新版(5.4.58)功能单扒全+1.13.3先锋版开接（插件`2026.8.27-13+debug`）：新增穿墙/夜视开关与晴/雨/雷按钮；天气走Level wrapper@0x101FB32F4（裸写setter只改数不下雨，wrapper带广播才下，日志rain=1.00+雨丝画面双实锤 ✅）；药水getById(1/8/16)全返回有效指针（应用待构造EffectInstance）；穿墙已写未验。
+  - 2026-10-20 八路agent全开+真机马拉松（插件`2026.8.27-34+debug`，c0bbe0a之后未推，待推）：
+    - 1.1.7 ✅无敌：子agent证hurt读Abilities map，改hook getBool单点拦截（28B安全），47k次hurt调用后满血 ✅；夜晚常量改18000（13000本来就是日落）；给予链全通但count/id难定界（实例dump：空手持+4也是1，泥土模板缺，钻石Item*背包扫不到，封存）；附魔255后端已合入未验。
+    - 1.4.3 ✅无敌（getBool拦截，夜雨2小时满血 ✅）；✅天气（LevelData+0x15C/160/164/168裸写即下雨，无需广播）；✅药水（effect143-16夜视图标亮）；给予/附魔/传送后端已合入（give跑通无崩但钻石不可见，count问题同1.1.7）。
+    - 1.13.3：时间/天气双✅；getPos槽+0x60 ✅（读数684.5,68.6与+0x41C一致，三pos之争终结：+0x41C是pos）；teleportTo槽+0x88调用无崩（位移待视觉确认）；KillAura实体遍历 ✅（Level+0x58，虚表探测到1实体）；药水instance构造 ✅（id/duration/show全落位）但addEffect槽+0x5F8调完无效果（槽错）；GetAttr直调因string ABI崩（-27 ips为证，已禁用）；WorldEdit：getBlock ✅（高空回air正确）、setBlock两崩（石头槽纠正base+0x38仍抛C++异常，停用待第三轮推导）；无敌单写阵亡（需hurt拦截，VA待找）。
+    - 1.20.62：tick换ECS system body@0x101F5CD20+wrapper@0x101F5D8B4+abilWrite三hook装上无崩；进世界卡Bedrock弹窗（不支持设备/ControlMode SELECT点不上，MTKView识别+全VC广播已修，SELECT仍需手动点一次）。
+    - 基础设施：flag文件通道（/tmp/mwbcmd-*，touch+chown mobile，tick内poll+tick后异步泻洪）；tick内同步调容器函数必死锁（-19冻屏，0 CPU）；栈ItemInstance被容器引用变野指针（堆分配）；cycript每进程约2次调用后wedge、脚本内sleep无用（时序走shell）；killall必须用SIGTERM（-9会在存档时杀坏世界，1.1.7世界丢过两次）。
+  - 待办：1.13.3 hurt拦截VA、setBlock第三轮推导、附魔/给予count定界、1.20手动过SELECT后验sysBody、小地图/矿物/光环UI、1.2.15（无安装）。
 
 ## Git 约定
 
