@@ -79,12 +79,21 @@ void MWB010RelightLoadedChunks(void) {
         MWBLogFile(@"[010] 锻造中止: 脚下区块校验失败 (chunk=%p)", selfChunk);
         return;
     }
-    uint8_t dark = *(uint8_t *)((char *)gLevel + 0x90);
-    uint8_t target = dark >= 15 ? 0 : 15 - dark;
+    // 目标不读亮度字节 (它滞后写入一拍): 白天15/夜晚4 (15-11, TICK_TIME_NIGHT=13000实测sky=11),
+    // 自然模式读实时字节 (本来就是对的)
+    uint8_t target;
+    if (gTimeMode == 1) target = 15;
+    else if (gTimeMode == 2) target = 4;
+    else { uint8_t dark = *(uint8_t *)((char *)gLevel + 0x90); target = dark >= 15 ? 0 : 15 - dark; }
     NSDate *t0 = [NSDate date];
+    void *myLevel = gLevel;  // 中途退世界则停手 (防野指针)
     int n = 0, cells = 0;
     for (int dz = -8; dz <= 8 && n < 512; dz++) {
         for (int dx = -8; dx <= 8 && n < 512; dx++) {
+            if (gLevel != myLevel || !MWBIsInWorld()) {
+                MWBLogFile(@"[010] 锻造中断 (世界已切换, 已锻%d块)", n);
+                return;
+            }
             int pos[2] = {pcx + dx, pcz + dz};  // ChunkPos{x,z}
             void *chunk = getChunk(cs, pos);
             if (!chunk) continue;
@@ -108,7 +117,7 @@ void MWB010RelightLoadedChunks(void) {
             }
         }
     }
-    MWBLogFile(@"[010] 锻造区块天光 %d块 %d格 (dark=%d->%d, %.1fs)", n, cells, dark, target, -[t0 timeIntervalSinceNow]);
+    MWBLogFile(@"[010] 锻造区块天光 %d块 %d格 (mode=%d->%d, %.1fs)", n, cells, gTimeMode, target, -[t0 timeIntervalSinceNow]);
 }
 // 时间跳变后全量重刷区块: 先重算存储光照, 再调 LevelRenderer::allChanged 让网格按新光照重建
 void MWB010RefreshChunks(void) {
@@ -142,8 +151,12 @@ static void hooked_levelTick(void *self) {
         *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
         *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
     }
-    // 自动重算已停用 (多次验证无效且卡顿, 切时间只改逻辑+天空, 和改前一致);
-    // 重算/重建只走手动 refresh flag, 供诊断时用
+    // 时间模式一切换立刻锻造+重建 (目标按模式定不读滞后字节, 中途退世界自动停)
+    static int s_lastTimeMode = -1;
+    if (gTimeMode != s_lastTimeMode) {
+        s_lastTimeMode = gTimeMode;
+        dispatch_async(dispatch_get_main_queue(), ^{ MWB010RefreshChunks(); });
+    }
 }
 #pragma mark - 0.10 生存/创造切换后端
 void MWB010SetCreative(void *player, bool creative) {
