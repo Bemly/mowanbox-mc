@@ -144,6 +144,7 @@
   - `NSAttributedString` 属性用 `NSFontAttributeName` 等常量（iOS 12 上为 NSString* 类型，正确）。
   - 不用废弃 API：`UIWebView`、`NSURLConnection`、`AssetsLibrary`、`ABAddressBook`、`UILocalNotification`、`sizeWithFont:`、`applicationFrame` 等。
 - 功能实现阶段：MCPE 0.10.0 是 C++ 二进制，游戏内函数多为 strip 状态，需在设备上用 `nm`/`strings`/class-dump（或 IDA/Ghidra 静态分析）定位时间、模式、生命值、移动速度等相关符号后再 hook。所有功能 hook 必须加空指针/版本判断，避免崩溃。
+- **单文件不超过 1000 行（只算手写代码；自动生成的资源字节数组头如字体/图片除外），超了必须按分类拆文件**：UI 套件 / 菜单 / 悬浮窗 / 各版本 hook（一版一文件，各带 `MWBInstallHooks*` 安装函数）/ 动作分发 / 调试 / EMI（数据/视图/窗口/管理）；跨文件接口集中到 `MWBCommon.h` / `EMI.h`，`%ctor` 只做版本分发。拆完必须 `make package` 通过 + 真机新鲜世界验证（菜单探针翻转+截图）无回归再提交推送。
 - 所有设备操作命令、路径、版本信息以本文件记录为准；若设备状态变化（重装/升级 MC），需同步更新本文件。
 
 ## 构建与部署命令
