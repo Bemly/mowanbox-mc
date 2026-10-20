@@ -27,6 +27,10 @@
     - 1.20.62：tick换ECS system body@0x101F5CD20+wrapper@0x101F5D8B4+abilWrite三hook装上无崩；进世界卡Bedrock弹窗（不支持设备/ControlMode SELECT点不上，MTKView识别+全VC广播已修，SELECT仍需手动点一次）。
     - 基础设施：flag文件通道（/tmp/mwbcmd-*，touch+chown mobile，tick内poll+tick后异步泻洪）；tick内同步调容器函数必死锁（-19冻屏，0 CPU）；栈ItemInstance被容器引用变野指针（堆分配）；cycript每进程约2次调用后wedge、脚本内sleep无用（时序走shell）；killall必须用SIGTERM（-9会在存档时杀坏世界，1.1.7世界丢过两次）。
   - 待办：1.13.3 hurt拦截VA、setBlock第三轮推导、附魔/给予count定界、1.20手动过SELECT后验sysBody、小地图/矿物/光环UI、1.2.15（无安装）。
+   - 2026-10-20(晚) 0.10.0 二进制(arm64, 从 `MCPE替身 0.10.max.ipa` 解出 `minecraftpe-arm64`)用 REA+IDA 复核：
+     - 符号表齐全(8000+函数, 未strip), AGENTS.md 全部核心符号地址逐一对上(normalTick@0x10017e9ec / Item::items@0x100346dc8 / Inventory::add@0x10010dd08 / Recipes构造@0x1001957a0 / teleportTo@0x100210a7c / setIsCreativeMode@0x1000ce840 / setTileAndData@0x1001031ac / Level::tick@0x1001103c4), imagebase=0x100000000。
+     - `LevelData` 序列化布局(`ExternalFileLevelStorage::writeLevelData@0x100154434` 逐字段核实): Time+0x98, RandomSeed+0x78, SpawnX/Y/Z+0x80/84/88, GameType+0xF4, Dimension+0xF0, spawnMobs+0xF8, Generator+0x108, LimitedWorldOriginX/Y/Z+0x8C/90/94。**无任何 rain/lightning/thunder 字段, 亦无 setRain/setter 符号 → 0.10.0 无动态天气系统**(雨/雪只是生物群系派生视觉: isInWaterOrRain/TerrainParticle/getTopRainTilePos 均读群系), 故 0.10 上"天气开关"做不了。
+     - 反应核可做(符号全): `NetherReactorTile::use@0x10015a344`(激活), `NetherReactorTileEntity::tick@0x100d47f0 / lightItUp@0x100d41b8(造下界尖塔) / spawnEnemy@0x100d5ec0(刷僵尸猪人)`。夜间亮度由 dayTime 自动派生(sky亮度存 Level+0x90,0..11), 时间开关已随之生效。
 
 ## Git 约定
 
