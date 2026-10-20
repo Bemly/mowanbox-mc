@@ -82,8 +82,10 @@ void MWB010RelightLoadedChunks(void) {
             void *chunk = getChunk(cs, pos);
             if (!chunk) continue;
             seen++;
+            // 轻校验: 虚表落在主镜像内即可 (C++虚表在__DATA段, 不在__TEXT, 不可用TEXT段卡);
+            // 查找口是渲染线程同款, 返回的非空即真区块
             void *cvt = *(void **)chunk;
-            if ((uintptr_t)cvt < s + 0x100000000UL || (uintptr_t)cvt >= s + 0x100400000UL) continue;
+            if ((uintptr_t)cvt < s + 0x100000000UL || (uintptr_t)cvt >= s + 0x100900000UL) continue;
             relight(chunk, ts);
             n++;
         }
