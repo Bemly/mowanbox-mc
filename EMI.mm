@@ -1488,9 +1488,8 @@ static NSArray *MWBGameRecipesForItem(int itemId) {
 #pragma mark - EMI 管理器
 
 @implementation MWBEMIManager {
-    EMIOverlayWindow *_emiWindow;
-    MWBEMIFloatButton *_floatBtn;
-    MWBEMIWindow *_window;
+    MWBEMIWindow *_window;               // 物品浏览器 (现挂在悬浮窗根视图上)
+    void (^_browserOnClose)(void);       // 浏览器关闭回调 (回退菜单到第 0 项)
 }
 + (instancetype)shared {
     static MWBEMIManager *inst;
@@ -1499,8 +1498,13 @@ static NSArray *MWBGameRecipesForItem(int itemId) {
     return inst;
 }
 + (void)install {
-    dispatch_async(dispatch_get_main_queue(), ^{ [[self shared] setup]; });
+    dispatch_async(dispatch_get_main_queue(), ^{ [[self shared] preload]; });
 }
+// 合并进悬浮窗: 在悬浮窗宿主视图上显示 EMI 物品浏览器 (不再自建窗口/悬浮按钮)
++ (void)presentBrowserInView:(UIView *)hostView onClose:(void (^)(void))onClose {
+    [[self shared] presentInView:hostView onClose:onClose];
+}
++ (void)dismissBrowser { [[self shared] dismissBrowser]; }
 // 调试用: cycript 调用 [MWBEMIManager scrollDebug:[NSNumber numberWithFloat:950]]
 + (void)scrollDebug:(NSNumber *)y {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -1523,8 +1527,8 @@ static NSArray *MWBGameRecipesForItem(int itemId) {
 + (void *)playerPointer {
     return gLocalPlayer;
 }
-- (void)setup {
-    if (_emiWindow) return;
+// 预加载: 纹理 + 给予 hook (不再自建窗口/悬浮按钮)
+- (void)preload {
     CGSize ss = [UIScreen mainScreen].bounds.size;
     kEMIScale = MIN(ss.width/1920.0, ss.height/1080.0);
     // 预加载贴图
@@ -1532,39 +1536,21 @@ static NSArray *MWBGameRecipesForItem(int itemId) {
     [MWBTextureAtlas itemsAtlas];
     // 安装物品给予 hook
     MWBInstallGiver();
-
-    _emiWindow = [[EMIOverlayWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-    _emiWindow.windowLevel = UIWindowLevelAlert + 101;
-    _emiWindow.backgroundColor = [UIColor clearColor];
-    _emiWindow.rootViewController = [[UIViewController alloc] init];
-    _emiWindow.rootViewController.view.backgroundColor = [UIColor clearColor];
-    _emiWindow.hidden = NO;
-
-    _floatBtn = [[MWBEMIFloatButton alloc] initWithFrame:(CGRect){{12,300},{52,52}}];
-    _floatBtn.autoresizingMask = UIViewAutoresizingFlexibleRightMargin;
-    __weak typeof(self) ws = self;
-    _floatBtn.onTap = ^{ [ws toggle]; };
-    [_emiWindow addSubview:_floatBtn];
-    NSLog(@"[EMI] 悬浮按钮已安装, scale=%.3f, 物品数=%d", kEMIScale, gItemCount);
+    NSLog(@"[EMI] 物品管理器已就绪(已合并进悬浮窗), scale=%.3f, 物品数=%d", kEMIScale, gItemCount);
 }
-- (void)toggle {
-    typeof(self) ss = self;
-    if (_window.superview) {
-        [_window hide]; _floatBtn.hidden = NO;
-        [UIView animateWithDuration:0.15 animations:^{ ss->_floatBtn.alpha = 1; }];
-    } else {
-        _window = [[MWBEMIWindow alloc] initWithFrame:_emiWindow.bounds];
-        _window.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
-        __weak typeof(self) ws = self;
-        _window.onClose = ^{
-            __strong typeof(ws) s = ws; if (!s) return;
-            [s->_window hide];
-            s->_floatBtn.hidden = NO;
-            [UIView animateWithDuration:0.15 animations:^{ s->_floatBtn.alpha = 1; }];
-        };
-        [_window showInView:_emiWindow];
-        [UIView animateWithDuration:0.15 animations:^{ ss->_floatBtn.alpha = 0; }
-                         completion:^(BOOL f){ ss->_floatBtn.hidden = YES; }];
-    }
+// 在悬浮窗宿主视图上显示物品浏览器 (覆盖在菜单之上)
+- (void)presentInView:(UIView *)hostView onClose:(void (^)(void))onClose {
+    if (!hostView || _window.superview) return;
+    _browserOnClose = [onClose copy];
+    _window = [[MWBEMIWindow alloc] initWithFrame:hostView.bounds];
+    _window.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    __weak typeof(self) ws = self;
+    _window.onClose = ^{ __strong typeof(ws) s = ws; if (!s) return; [s dismissBrowser]; };
+    [_window showInView:hostView];
+}
+- (void)dismissBrowser {
+    [_window hide];
+    _window = nil;
+    if (_browserOnClose) { void (^b)(void) = _browserOnClose; _browserOnClose = NULL; b(); }
 }
 @end

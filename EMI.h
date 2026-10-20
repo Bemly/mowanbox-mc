@@ -11,9 +11,15 @@ extern BOOL gMWBDebug;
 // LocalPlayer 指针 (由 Tweak.xm 的 normalTick hook 维护)
 extern void *gLocalPlayer;
 
-// EMI 物品管理器入口 (独立于 Toolbox 菜单)
+// EMI 物品管理器入口 (现在作为悬浮窗菜单的第 5 项, 不再自建窗口/悬浮按钮)
 @interface MWBEMIManager : NSObject
 + (void)install;
+@end
+
+// 合并进悬浮窗: 在宿主视图(悬浮窗根视图)上显示/隐藏 EMI 物品浏览器
+@interface MWBEMIManager (Unified)
++ (void)presentBrowserInView:(UIView *)hostView onClose:(void (^)(void))onClose;
++ (void)dismissBrowser;
 @end
 
 // 调试用: 直接给予物品 (cycript 可调用)

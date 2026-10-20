@@ -3,6 +3,7 @@
 #import <mach/mach.h>
 #import <substrate.h>
 #import "FusionPixel.h"
+#import "MWBAvatar.h"
 #import "EMI.h"
 #import "MWBVersion.h"
 
@@ -517,20 +518,22 @@ static void MWBApplySpeed(BOOL on) {
     [_sideNav addSubview:navEdge];
     navEdge.frame = (CGRect){{sideW-5,0},{5,_sideNav.bounds.size.height}};
 
-    // 4 个分类图标 (SVG path 与参考一致)
+    // 5 个分类图标 (SVG path 与参考一致): 工具/方块/控制/世界/物品(EMI)
     NSArray *icons = @[
         @[@"M10 8h18v7h-5v5l25 25 4-4 7 7-11 11-7-7 4-4-25-25h-5v5H8V10z",
           @"M48 7h9v9l-7 7-7-2-19 19-6 10-7 7-4-4 7-7 10-6 19-19-2-7z"],
         @[@"M5 7h25v22H5zm4 5v5h7v-5zm11 0v5h6v-5zM34 7h25v22H34zm4 5v5h7v-5zm11 0v5h6v-5zM5 34h25v22H5zm4 5v5h7v-5zm11 0v5h6v-5zM34 34h25v22H34zm4 5v5h7v-5zm11 0v5h6v-5z"],
         @[@"M18 17h28l8 7 6 22-5 10h-9L36 45h-8L18 56H9L4 46l6-22zm-2 10v7h-7v8h7v7h8v-7h7v-8h-7v-7zm27 5v7h7v-7zm8 9v7h7v-7z"],
         @[@"M27 5h9v12h-9zM8 14h9v9H8zm38 1h9v9h-9zM18 24h10v10H18zm19-2h10v10H37zM5 36h10v10H5zm49-4h8v11h-8zM26 39h12v12H26zm-13 10h9v10h-9zm32-9h10v11H45zM35 54h8v8h-8z"],
+        @[@"M32 6 L54 26 L32 58 L10 26 Z", @"M10 26 H54"],
     ];
     NSMutableArray *btns = [NSMutableArray new];
-    CGFloat btnPad = 18, btnTop = 34;
+    CGFloat btnPad = 18, btnTop = 24;
     CGFloat btnSize = sideW - btnPad*2;
-    for (int i = 0; i < 4; i++) {
+    CGFloat step = btnSize + 16;
+    for (int i = 0; i < 5; i++) {
         MWBSideButton *b = [[MWBSideButton alloc] initWithSVGPaths:icons[i]];
-        b.frame = (CGRect){{btnPad,btnTop + i*(btnSize+6)},{btnSize,btnSize}};
+        b.frame = (CGRect){{btnPad,btnTop + i*step},{btnSize,btnSize}};
         b.tag = i;
         b.active = (i == 0);
         [b addTarget:self action:@selector(switchPage:) forControlEvents:UIControlEventTouchUpInside];
@@ -730,6 +733,18 @@ static void MWBApplySpeed(BOOL on) {
 - (void)switchPage:(MWBSideButton *)sender {
     for (MWBSideButton *b in _sideButtons) b.active = NO;
     sender.active = YES;
+    // 第 5 项 (tag=4): EMI 物品管理器, 作为浮层覆盖在本菜单之上, 不占 _panel 页
+    if ((int)sender.tag == 4) {
+        __weak typeof(self) ws = self;
+        [MWBEMIManager presentBrowserInView:(self.superview ?: self.window)
+                                   onClose:^{
+            __strong typeof(ws) ss = ws; if (!ss) return;
+            if (ss->_sideButtons.count > 0) ss->_sideButtons[0].active = YES;
+            sender.active = NO;
+            [ss showPage:0];
+        }];
+        return;
+    }
     [self showPage:sender.tag];
 }
 
@@ -786,7 +801,7 @@ static void MWBApplySpeed(BOOL on) {
 @end
 @implementation MWBFloatingButton {
     UIView *_iconBox;
-    UILabel *_iconLabel;
+    UIImageView *_iconImg;   // 悬浮窗 logo 头像 (内嵌 PNG)
     UILabel *_textLabel;
 }
 - (instancetype)initWithFrame:(CGRect)frame {
@@ -799,17 +814,19 @@ static void MWBApplySpeed(BOOL on) {
         self.layer.shadowRadius = 0;
         self.layer.shadowOpacity = 0.55;
 
-        // T 图标方块
+        // 图标方块 (头像 logo)
         _iconBox = [[UIView alloc] init];
         _iconBox.backgroundColor = MWB_COLOR(0x41,0x50,0x2f);
         _iconBox.layer.borderWidth = 3;
         _iconBox.layer.borderColor = MWB_COLOR(0x27,0x2b,0x22).CGColor;
         [self addSubview:_iconBox];
-        _iconLabel = [[UILabel alloc] init];
-        _iconLabel.attributedText = MWBPixelText(@"T", MWBPixelFont(23), MWB_COLOR(0xdf,0xc5,0x5b),
-                                                 2, 2, MWB_COLOR(0x24,0x24,0x1d));
-        _iconLabel.textAlignment = NSTextAlignmentCenter;
-        [_iconBox addSubview:_iconLabel];
+        _iconImg = [[UIImageView alloc] init];
+        _iconImg.image = [UIImage imageWithData:[NSData dataWithBytes:kMWBAvatarPng length:kMWBAvatarPng_len]];
+        _iconImg.contentMode = UIViewContentModeScaleAspectFill;
+        _iconImg.clipsToBounds = YES;
+        _iconImg.userInteractionEnabled = NO;
+        _iconImg.backgroundColor = [UIColor clearColor];
+        [_iconBox addSubview:_iconImg];
 
         _textLabel = [[UILabel alloc] init];
         _textLabel.attributedText = MWBPixelText(@"TOOLBOX", MWBPixelFont(20), kInk,
@@ -830,7 +847,8 @@ static void MWBApplySpeed(BOOL on) {
     CGFloat h = self.bounds.size.height;
     CGFloat iconSize = 39;
     _iconBox.frame = (CGRect){{7,(h-iconSize)/2},{iconSize,iconSize}};
-    _iconLabel.frame = _iconBox.bounds;
+    _iconImg.frame = _iconBox.bounds;
+    _iconImg.layer.cornerRadius = iconSize / 2.0;   // 圆形头像
     [_textLabel sizeToFit];
     _textLabel.frame = (CGRect){{7+iconSize+11,0},{_textLabel.bounds.size.width,h}};
 }
