@@ -32,11 +32,12 @@
      - `LevelData` 序列化布局(`ExternalFileLevelStorage::writeLevelData@0x100154434` 逐字段核实): Time+0x98, RandomSeed+0x78, SpawnX/Y/Z+0x80/84/88, GameType+0xF4, Dimension+0xF0, spawnMobs+0xF8, Generator+0x108, LimitedWorldOriginX/Y/Z+0x8C/90/94。**无任何 rain/lightning/thunder 字段, 亦无 setRain/setter 符号 → 0.10.0 无动态天气系统**(雨/雪只是生物群系派生视觉: isInWaterOrRain/TerrainParticle/getTopRainTilePos 均读群系), 故 0.10 上"天气开关"做不了。
      - 反应核可做(符号全): `NetherReactorTile::use@0x10015a344`(激活), `NetherReactorTileEntity::tick@0x100d47f0 / lightItUp@0x100d41b8(造下界尖塔) / spawnEnemy@0x100d5ec0(刷僵尸猪人)`。夜间亮度由 dayTime 自动派生(sky亮度存 Level+0x90,0..11), 时间开关已随之生效。
    - 2026-10-20(晚) 0.10 新功能合入(插件`2026.8.27-36+debug`, 待真机验证):
-     - World 页新增难度行(和平/简单/普通/困难, tag 15-18, 0.10 调用 `Level::setDifficulty@0x10011524c`, 其他版本置灰)。
-     - World 页新增反应核行(点燃, tag 14, 仅 0.10): 运行时读三 Tile 单例 id(默认金41/圆石4/核247), 在玩家脚下搭 use 校验的 3x3x3 图案后直调 `NetherReactorTile::use`, 成功把玩家传送到 y+4; 日志记录图案 id、Level+0x15E4 门值与 use 返回值。
+     - World 页新增难度行(和平/简单/普通/困难, tag 15-18, 仅 0.10): 走 `ServerLevel::setDifficulty@0x1001b8f7c`(写 ServerLevel+0x14B8 并广播; `Level::setDifficulty@0x10011524c` 反编译只是 RET 空壳不可用; 经 `ServerLevel::tick→Level::tick` 调用链证实 gLevel 即 ServerLevel*, 可直调), 其他版本置灰。
+     - World 页新增反应核行(点燃, tag 14, 仅 0.10): 运行时读三 Tile 单例 id(默认金41/圆石4/核247, 与 `use` 反编译读 BSS+0x48 一致), 在玩家脚下搭 use 校验的 3x3x3 图案后直调 `NetherReactorTile::use`, 成功把玩家传送到 y+32(尖塔同步建到核上方+30, y+4 会埋住); 日志记录图案 id、Level+0x15E4 门值与 use 返回值。治疗按钮 0.10 走 `Mob::heal@0x10020e25c`(上限20, 只写血量不碰容器)。
      - 天气收尾: 0.10/1.1.7/1.20.62 没有可写天气通道, 晴/雨/雷按钮置灰且 `setWeather:` 直接返回; 天气只在 1.2.15/1.4.3/1.13.3 开放。
      - flag 通道新增 `reactor`、`diff-0/1/2/3`; cycript 新增 `dbgReactor`、`dbgDiff:`。
      - 其他可挖: 难度切换已核实符号(`Level::setDifficulty@0x10011524c` 与 `ServerLevel::setDifficulty@0x1001b8f7c`); Mob 生成链(`MobFactory::addMob@0x10024e25c` / `_spawnMobCluster@0x10024e470`)、爆炸链(`Level::explode@0x100112714` / `Explosion::explode@0x10020b4d0`)都带符号, 可作为下一批动作/刷怪功能逆向。
+     - 2026-10-20(晚) IDA 深挖 0.10 下一批功能(符号+反编译实锤, 待实现): `MobFactory::CreateMob` 实体 id 全映射(10鸡/11牛/12猪/13羊/14狼/15村民/16哞菇/32僵尸/33爬行者/34骷髅/35蜘蛛/36僵尸猪人/37史莱姆/38末影人/39蠹虫/1807村民/2848-2855 同 32-39/5898-5904 同 10-13+哞菇/22286狼) —— 可做"刷怪"按钮(CreateMob+addMob); 爆炸链 `Level::explode(Entity*,x,y,z,威力)` / `Explosion::explode` —— 可做定点爆炸; `Mob::heal(Mob*,int)` 已接治疗; `SetHealthPacket` 存在但单机直调 heal 更简单。
 
 ## Git 约定
 

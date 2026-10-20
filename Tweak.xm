@@ -851,7 +851,7 @@ static void MWBApplySpeed(BOOL on) {
 
 @end
 
-#pragma mark - 悬浮按钮 (T + TOOLBOX 像素样式)
+#pragma mark - 悬浮按钮 (头像 logo, 无文字)
 
 @interface MWBFloatingButton : UIView
 @property (nonatomic, copy) void (^onTap)(void);
@@ -859,23 +859,20 @@ static void MWBApplySpeed(BOOL on) {
 @implementation MWBFloatingButton {
     UIView *_iconBox;
     UIImageView *_iconImg;   // 悬浮窗 logo 头像 (内嵌 PNG)
-    UILabel *_textLabel;
 }
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
-        self.backgroundColor = kSidebar;
-        self.layer.borderWidth = 4;
-        self.layer.borderColor = MWB_COLOR(0x2b,0x29,0x2a).CGColor;
+        // 裸 logo: 无背景无边框, 只有圆形头像 + 柔和投影
+        self.backgroundColor = [UIColor clearColor];
+        self.layer.borderWidth = 0;
         self.layer.shadowColor = [UIColor blackColor].CGColor;
-        self.layer.shadowOffset = (CGSize){5, 5};
-        self.layer.shadowRadius = 0;
-        self.layer.shadowOpacity = 0.55;
+        self.layer.shadowOffset = (CGSize){0, 2};
+        self.layer.shadowRadius = 6;
+        self.layer.shadowOpacity = 0.4;
 
-        // 图标方块 (头像 logo)
         _iconBox = [[UIView alloc] init];
-        _iconBox.backgroundColor = MWB_COLOR(0x41,0x50,0x2f);
-        _iconBox.layer.borderWidth = 3;
-        _iconBox.layer.borderColor = MWB_COLOR(0x27,0x2b,0x22).CGColor;
+        _iconBox.backgroundColor = [UIColor clearColor];
+        _iconBox.layer.borderWidth = 0;
         [self addSubview:_iconBox];
         _iconImg = [[UIImageView alloc] init];
         _iconImg.image = [UIImage imageWithData:[NSData dataWithBytes:kMWBAvatarPng length:kMWBAvatarPng_len]];
@@ -884,11 +881,6 @@ static void MWBApplySpeed(BOOL on) {
         _iconImg.userInteractionEnabled = NO;
         _iconImg.backgroundColor = [UIColor clearColor];
         [_iconBox addSubview:_iconImg];
-
-        _textLabel = [[UILabel alloc] init];
-        _textLabel.attributedText = MWBPixelText(@"TOOLBOX", MWBPixelFont(20), kInk,
-                                                 2, 2, MWB_COLOR(0xdd,0xd6,0xd1));
-        [self addSubview:_textLabel];
 
         self.userInteractionEnabled = YES;
         [self addGestureRecognizer:[[UITapGestureRecognizer alloc]
@@ -901,13 +893,11 @@ static void MWBApplySpeed(BOOL on) {
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
-    CGFloat h = self.bounds.size.height;
-    CGFloat iconSize = 39;
-    _iconBox.frame = (CGRect){{7,(h-iconSize)/2},{iconSize,iconSize}};
+    // 纯 logo: 头像占满整个按钮, 圆形裁剪
+    _iconBox.frame = self.bounds;
     _iconImg.frame = _iconBox.bounds;
-    _iconImg.layer.cornerRadius = iconSize / 2.0;   // 圆形头像
-    [_textLabel sizeToFit];
-    _textLabel.frame = (CGRect){{7+iconSize+11,0},{_textLabel.bounds.size.width,h}};
+    CGFloat side = MIN(_iconBox.bounds.size.width, _iconBox.bounds.size.height);
+    _iconImg.layer.cornerRadius = side / 2.0;   // 圆形头像
 }
 - (void)handleTap { if (self.onTap) self.onTap(); }
 - (void)handlePan:(UIPanGestureRecognizer *)pan {
@@ -919,25 +909,6 @@ static void MWBApplySpeed(BOOL on) {
     c.y = MAX(h/2+20, MIN(self.superview.bounds.size.height-h/2, c.y));
     self.center = c;
     [pan setTranslation:CGPointZero inView:self.superview];
-}
-- (void)drawRect:(CGRect)rect {
-    CGContextRef ctx = UIGraphicsGetCurrentContext();
-    CGFloat w=rect.size.width, h=rect.size.height, b=4;
-    // inset 4px 4px 0 light, inset -4px -4px 0 dark
-    CGContextSetFillColorWithColor(ctx, kSidebarLight.CGColor);
-    CGContextFillRect(ctx, (CGRect){{b,b},{w-2*b,b}});
-    CGContextFillRect(ctx, (CGRect){{b,b},{b,h-2*b}});
-    CGContextSetFillColorWithColor(ctx, kSidebarDark.CGColor);
-    CGContextFillRect(ctx, (CGRect){{b,h-2*b},{w-2*b,b}});
-    CGContextFillRect(ctx, (CGRect){{w-2*b,b},{b,h-2*b}});
-    // 图标方块内阴影
-    CGFloat ix=7, iy=(h-39)/2, is=39;
-    CGContextSetFillColorWithColor(ctx, MWB_COLOR(0x75,0x83,0x53).CGColor);
-    CGContextFillRect(ctx, (CGRect){{ix+3,iy+3},{is-6,3}});
-    CGContextFillRect(ctx, (CGRect){{ix+3,iy+3},{3,is-6}});
-    CGContextSetFillColorWithColor(ctx, MWB_COLOR(0x25,0x30,0x20).CGColor);
-    CGContextFillRect(ctx, (CGRect){{ix+3,iy+is-6},{is-6,3}});
-    CGContextFillRect(ctx, (CGRect){{ix+is-6,iy+3},{3,is-6}});
 }
 @end
 
@@ -964,7 +935,7 @@ static void MWBApplySpeed(BOOL on) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     CGFloat sw = self.view.bounds.size.width;
-    _floatButton = [[MWBFloatingButton alloc] initWithFrame:(CGRect){{sw-22-200,22},{200,58}}];
+    _floatButton = [[MWBFloatingButton alloc] initWithFrame:(CGRect){{sw-22-64,22},{64,64}}];
     _floatButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     __weak MWBViewController *ws = self;
     _floatButton.onTap = ^{ [ws toggleMenu]; };
@@ -2422,6 +2393,13 @@ static void MWBPollCmdFile(void) {
 }
 
 static void MWBHealNow(void) {
+    if (gGV == (int)MWBGameV0_10 && gLocalPlayer) {
+        // 0.10: Mob::heal 直接回满 (上限 20, 反编译确认只写血量不碰容器, tick 外调安全)
+        typedef void (*Heal010Fn)(void *, int);
+        Heal010Fn heal = (Heal010Fn)MSFindSymbol(NULL, "__ZN3Mob4healEi");
+        if (heal) heal(gLocalPlayer, 20);
+        return;
+    }
     if (gGV == (int)MWBGameV1_13_3 && gPlayer1133) MWB1133_ApplyEffect(gPlayer1133, 6, 0, 40);
     else if (gGV == (int)MWBGameV1_4_3 && gPlayer143) MWB143_Effect(gPlayer143, 6, 2, 0);
     else if (gGV == (int)MWBGameV1_2_15 && gPlayer1215) MWB1215_Effect(gPlayer1215, 6, 2, 0);
@@ -2454,14 +2432,15 @@ static void MWBFillStone5(void) {
                 }
     }
 }
-// 难度: 0.10 通过 Level::setDifficulty 直接切换 (0=和平 1=简单 2=普通 3=困难)
+// 难度: 0.10 走 ServerLevel::setDifficulty (Level::setDifficulty 只是 RET 空壳, 真逻辑写 ServerLevel+0x14B8 并广播;
+// 经 ServerLevel::tick→Level::tick 调用链证实, hooked Level::tick 拿到的 gLevel 即 ServerLevel*, 可直接调)
 static void MWBSetDifficulty010(int difficulty) {
     if (gGV != (int)MWBGameV0_10 || !gLevel) return;
     if (difficulty < 0 || difficulty > 3) return;
     typedef void (*SetDifficultyFn)(void *, int);
     SetDifficultyFn setDifficulty =
-        (SetDifficultyFn)MSFindSymbol(NULL, "__ZN5Level13setDifficultyEi");
-    if (!setDifficulty) setDifficulty = (SetDifficultyFn)(MWBMainSlide() + 0x10011524cUL);
+        (SetDifficultyFn)MSFindSymbol(NULL, "__ZN11ServerLevel13setDifficultyEi");
+    if (!setDifficulty) setDifficulty = (SetDifficultyFn)(MWBMainSlide() + 0x1001b8f7cUL);
     if (setDifficulty) setDifficulty(gLevel, difficulty);
 }
 
@@ -2524,8 +2503,8 @@ static void MWB010SpawnReactor(void) {
         [fh closeFile];
     }
     if (launched == 1) {
-        // 激活后把玩家挪到尖塔上方, 避免被转化的方块埋住
-        MWB010Teleport(gLocalPlayer, (float)cx, (float)(y + 4), (float)cz);
+        // 激活后把玩家挪到尖塔上方: lightItUp 同步把尖塔建到核上方 +30, y+4 会埋进尖塔, 改 y+32 落到塔顶
+        MWB010Teleport(gLocalPlayer, (float)cx, (float)(y + 32), (float)cz);
     }
 }
 // 小地图: 192x192 overlay (tag 0x6D62), 按48x48采样着色, 矿石标红
