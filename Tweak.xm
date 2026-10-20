@@ -628,6 +628,11 @@ static void MWBApplySpeed(BOOL on) {
         UIView *row = [[UIView alloc] init];
         row.backgroundColor = [UIColor clearColor];
         [row addSubview:l]; [row addSubview:t];
+        // 整行可点: 行内空白/文字区本是死的, 手指落点稍偏就没反应;
+        // 由行统一接管, 开关本身设为不拦截避免双重触发
+        t.userInteractionEnabled = NO;
+        [row addGestureRecognizer:[[UITapGestureRecognizer alloc]
+            initWithTarget:t action:@selector(toggle)]];
         row.frame = (CGRect){{33,ry},{pw-66-33,77}};
         l.frame = (CGRect){{0,0},{MIN(445,row.bounds.size.width-180),77}};
         t.frame = (CGRect){{row.bounds.size.width-152,0},{152,77}};
@@ -674,6 +679,10 @@ static void MWBApplySpeed(BOOL on) {
         MWBPixelToggle *t = r[1];
         UIView *row = [[UIView alloc] init];
         [row addSubview:l]; [row addSubview:t];
+        // 整行可点: 同上 (Controls页)
+        t.userInteractionEnabled = NO;
+        [row addGestureRecognizer:[[UITapGestureRecognizer alloc]
+            initWithTarget:t action:@selector(toggle)]];
         row.frame = (CGRect){{33,ry},{pw-66-33,77}};
         l.frame = (CGRect){{0,0},{MIN(445,row.bounds.size.width-180),77}};
         t.frame = (CGRect){{row.bounds.size.width-152,0},{152,77}};
@@ -2471,6 +2480,58 @@ static void MWBPollCmdFile(void) {
                 [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
                 [lfh closeFile];
             }
+        }
+        else if ([act isEqualToString:@"hitmenu"]) {
+            // 菜单命中探针(调试): 打开菜单(Game页)并实测第一颗开关中心/边缘点的命中链
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIWindow *w = nil;
+                for (UIWindow *ww in [UIApplication sharedApplication].windows)
+                    if ([NSStringFromClass([ww class]) containsString:@"MWBOverlay"]) { w = ww; break; }
+                NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+                NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+                void (^log)(NSString *) = ^(NSString *s){
+                    NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], s];
+                    if (lfh) { [lfh seekToEndOfFile]; [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; }
+                };
+                if (!w) { log(@"[hitmenu] 无悬浮窗"); if (lfh) [lfh closeFile]; return; }
+                UIViewController *vc = w.rootViewController;
+                if (![vc isKindOfClass:[MWBViewController class]]) { log(@"[hitmenu] rootVC类型不对"); if (lfh) [lfh closeFile]; return; }
+                MWBViewController *mvc = (MWBViewController *)vc;
+                if (!mvc.menu.superview) [mvc toggleMenu];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    MWBOptionsMenu *menu = mvc.menu;
+                    if (!menu.superview || menu.pages.count < 1) { log(@"[hitmenu] 菜单未开"); if (lfh) [lfh closeFile]; return; }
+                    MWBPixelToggle *first = nil;
+                    for (UIView *sv in ((UIView *)menu.pages[0]).subviews) {
+                        for (UIView *ssv in sv.subviews)
+                            if ([ssv isKindOfClass:[MWBPixelToggle class]]) { first = (MWBPixelToggle *)ssv; break; }
+                        if (first) break;
+                    }
+                    if (!first) { log(@"[hitmenu] 未找到开关"); if (lfh) [lfh closeFile]; return; }
+                    CGRect tf = [first.superview convertRect:first.frame toView:w];
+                    CGPoint c = (CGPoint){CGRectGetMidX(tf), CGRectGetMidY(tf)};
+                    CGPoint e = (CGPoint){CGRectGetMinX(tf)+6, CGRectGetMidY(tf)};
+                    UIView *hc = [w hitTest:c withEvent:nil];
+                    UIView *he = [w hitTest:e withEvent:nil];
+                    log([NSString stringWithFormat:
+                        @"[hitmenu] page=%ld toggle=%@ center=(%.0f,%.0f)->%@ edge=(%.0f,%.0f)->%@ panelDelay=%d",
+                        (long)menu.currentPage, NSStringFromCGRect(tf),
+                        c.x, c.y, NSStringFromClass([hc class]),
+                        e.x, e.y, NSStringFromClass([he class]),
+                        (int)[[menu valueForKey:@"_panel"] delaysContentTouches]]);
+                    // 翻转自验证: 直调开关两次(净效果为零), 确认行点链路通到 gVar
+                    {
+                        BOOL b0 = gInvincible;
+                        [first toggle];
+                        BOOL b1 = gInvincible;
+                        [first toggle];
+                        BOOL b2 = gInvincible;
+                        log([NSString stringWithFormat:@"[hitmenu] 翻转验证 inv=%d->%d->%d 手势数=%lu",
+                             b0, b1, b2, (unsigned long)[first.superview.gestureRecognizers count]]);
+                    }
+                    if (lfh) [lfh closeFile];
+                });
+            });
         }
         // tick返回后异步泻洪 (避免容器锁重入)
         if (needFlush) dispatch_async(dispatch_get_main_queue(), ^{ MWBFlushPending(); });
