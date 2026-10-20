@@ -205,6 +205,48 @@ void MWBPollCmdFile(void) {
             // 手动全量重刷区块 (时间跳变后地面光跟不上时用, 正常由模式切换边沿自动触发)
             dispatch_async(dispatch_get_main_queue(), ^{ MWB010RefreshChunks(); });
         }
+        else if ([act isEqualToString:@"lightinfo"] && gLevel && gLocalPlayer) {
+            // 光照三层探针: 存储值(区块+0xc078/+0x10078) vs 实时亮度(Level+0x90) vs 逻辑时间
+            // 存储下标公式照抄 TileSource::getRawBrightness 反编译
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                void *ts = *(void **)((char *)gLocalPlayer + 0x48);
+                void *cs = ts ? *(void **)((char *)ts + 32) : NULL;
+                typedef void *(*GetChunkFn)(void *, void *);
+                GetChunkFn getChunk = (cs && *(void **)cs) ?
+                    (GetChunkFn)*(void **)((char *)*(void **)cs + 0x10) : NULL;
+                float px = *(float *)((char *)gLocalPlayer + 0x28);
+                float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
+                float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+                int bx = (int)floorf(px), by = (int)floorf(py), bz = (int)floorf(pz);
+                NSMutableString *m = [NSMutableString stringWithFormat:@"%@ [010光] 玩家(%d,%d,%d) ",
+                    [NSDate date], bx, by, bz];
+                int64_t dt = *(int64_t *)((char *)gLevel + LEVEL_TIME_OFFSET);
+                uint8_t dark = *(uint8_t *)((char *)gLevel + 0x90);
+                [m appendFormat:@"dt=%lld dark=%d ", (long long)dt, dark];
+                // 脚下与头顶两格的存储天光/方块光
+                for (int k = 0; k < 2; k++) {
+                    int x = bx, y = by + (k == 0 ? 0 : 10), z = bz;
+                    if (y < 0) y = 0; if (y > 127) y = 127;
+                    int pos[2] = {x >> 4, z >> 4};
+                    void *chunk = getChunk ? getChunk(cs, pos) : NULL;
+                    int sky = -1, blk = -1;
+                    if (chunk) {
+                        unsigned long off = (unsigned long)((((z & 15) << 7) | ((x & 15) << 11) | (y & 0xfe)) >> 1);
+                        uint8_t sb = *(uint8_t *)((char *)chunk + 0xc078 + off);
+                        uint8_t bb = *(uint8_t *)((char *)chunk + 0x10078 + off);
+                        sky = (y & 1) ? (sb >> 4) : (sb & 0xf);
+                        blk = (y & 1) ? (bb >> 4) : (bb & 0xf);
+                    }
+                    [m appendFormat:@"%@存储天光=%d块光=%d ", k == 0 ? @"脚下" : @"头顶", sky, blk];
+                }
+                [m appendString:@"\n"];
+                [lfh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
         else if ([act isEqualToString:@"held117"] && gPlayer117) {
             void *held = ((void *(*)(void *))(MWBMainSlide() + V117_HELDITEM_VA))(gPlayer117);
             NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];

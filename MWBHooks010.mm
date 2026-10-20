@@ -128,16 +128,8 @@ static void hooked_levelTick(void *self) {
         *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
         *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
     }
-    // 时间模式一切换就刷新一次 (含切回自然); 强制模式等30tick让亮度字节先落位,
-    // 否则重算/重建会把旧亮度烘焙进去 (夜晚转白天仍漆黑的根因)
-    static int s_lastTimeMode = -1;
-    static int s_wait = 0;
-    if (gTimeMode != s_lastTimeMode) {
-        s_lastTimeMode = gTimeMode;
-        s_wait = (gTimeMode == 0) ? 1 : 30;
-    } else if (s_wait > 0 && --s_wait == 0) {
-        dispatch_async(dispatch_get_main_queue(), ^{ MWB010RefreshChunks(); });
-    }
+    // 自动重算已停用 (多次验证无效且卡顿, 切时间只改逻辑+天空, 和改前一致);
+    // 重算/重建只走手动 refresh flag, 供诊断时用
 }
 #pragma mark - 0.10 生存/创造切换后端
 void MWB010SetCreative(void *player, bool creative) {
