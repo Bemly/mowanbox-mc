@@ -374,11 +374,25 @@ static int  gGV          = 0;   // 当前游戏版本 (MWBGameVersion 数值, %c
 static int  gTimeMode    = 0;  // 0=不修改 1=白天 2=夜晚
 static int  gWeatherMode = 0;  // 0=不修改 1=晴 2=雨 3=雷
 
+// 0.10 没有动态天气系统, 只有写过天气通道的版本才开放天气按钮
+static BOOL MWBWeatherSupported(void) {
+    return gGV == (int)MWBGameV1_2_15 || gGV == (int)MWBGameV1_4_3 || gGV == (int)MWBGameV1_13_3;
+}
+
+// 反应核点燃与难度切换目前只接了 0.10 后端
+static BOOL MWB010Only(void) {
+    return gGV == (int)MWBGameV0_10;
+}
+
 // 跨版本动作分发 (定义在版本段之后, 这里前置声明)
 static void MWBHealNow(void);
 static void MWBEnchantHeld255(void);
 static void MWBTeleportUp10(void);
 static void MWBFillStone5(void);
+static void MWB010SpawnReactor(void);
+static void MWBSetDifficulty010(int difficulty);
+static BOOL MWBWeatherSupported(void);
+static BOOL MWB010Only(void);
 static void MWBMinimapShow(BOOL on);
 static void MWBMinimapRefresh(void);
 void MWB1133_KillAuraTick(void);
@@ -683,6 +697,7 @@ static void MWBApplySpeed(BOOL on) {
     nightBtn.frame = (CGRect){{pw-33-130,CGRectGetMaxY(h3.frame)+30},{120,60}};
     [p3 addSubview:nightBtn];
     // 天气: 晴 / 雨 / 雷 三个像素按钮 (tag 3/4/5)
+    // 0.10/1.1.7/1.20.62 没有可写天气通道, 按钮置灰, 只读不点
     UILabel *wxLabel = [self makeRowLabel:@"天气"];
     wxLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+20},{200,60}};
     [p3 addSubview:wxLabel];
@@ -694,6 +709,10 @@ static void MWBApplySpeed(BOOL on) {
         wxBtn.tag = 3 + i;
         [wxBtn addTarget:self action:@selector(setWeather:) forControlEvents:UIControlEventTouchUpInside];
         wxBtn.frame = (CGRect){{pw-33-400+i*135,CGRectGetMaxY(dayBtn.frame)+20},{120,60}};
+        if (!MWBWeatherSupported()) {
+            wxBtn.alpha = 0.35;
+            wxBtn.userInteractionEnabled = NO;
+        }
         [p3 addSubview:wxBtn];
     }
     // 动作: 治疗 / 附魔255 / 传送+10 / 铺石块 (tag 10-13)
@@ -710,7 +729,40 @@ static void MWBApplySpeed(BOOL on) {
         actBtn.frame = (CGRect){{pw-33-430+i*105,CGRectGetMaxY(dayBtn.frame)+100},{95,56}};
         [p3 addSubview:actBtn];
     }
-    p3.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(dayBtn.frame)+186}};
+    p3.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(dayBtn.frame)+318}};
+    NSArray *diffTitles = @[@"和平", @"简单", @"普通", @"困难"];
+    // 难度: 和平 / 简单 / 普通 / 困难 四个像素按钮 (tag 15-18, 目前只接了 0.10 后端)
+    UILabel *diffLabel = [self makeRowLabel:@"难度"];
+    diffLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+164},{200,60}};
+    [p3 addSubview:diffLabel];
+    for (int i = 0; i < 4; i++) {
+        MWBPixelButton *diffBtn = [[MWBPixelButton alloc] init];
+        [diffBtn setAttributedTitle:MWBPixelText(diffTitles[i], MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
+                                                3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
+        diffBtn.tag = 15 + i;
+        [diffBtn addTarget:self action:@selector(setDifficulty:) forControlEvents:UIControlEventTouchUpInside];
+        diffBtn.frame = (CGRect){{pw-33-430+i*105,CGRectGetMaxY(dayBtn.frame)+164},{95,56}};
+        if (!MWB010Only()) {
+            diffBtn.alpha = 0.35;
+            diffBtn.userInteractionEnabled = NO;
+        }
+        [p3 addSubview:diffBtn];
+    }
+    // 反应核: 点燃 (tag 14, 目前只接了 0.10 后端)
+    UILabel *reactorLabel = [self makeRowLabel:@"反应核"];
+    reactorLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+228},{200,60}};
+    [p3 addSubview:reactorLabel];
+    MWBPixelButton *reactorBtn = [[MWBPixelButton alloc] init];
+    [reactorBtn setAttributedTitle:MWBPixelText(@"点燃", MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
+                                               3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
+    reactorBtn.tag = 14;
+    [reactorBtn addTarget:self action:@selector(doAction:) forControlEvents:UIControlEventTouchUpInside];
+    reactorBtn.frame = (CGRect){{pw-33-430,CGRectGetMaxY(dayBtn.frame)+228},{95,56}};
+    if (!MWB010Only()) {
+        reactorBtn.alpha = 0.35;
+        reactorBtn.userInteractionEnabled = NO;
+    }
+    [p3 addSubview:reactorBtn];
     [pages addObject:p3];
 
     self.pages = pages;
@@ -783,13 +835,18 @@ static void MWBApplySpeed(BOOL on) {
     NSLog(@"[魔玩盒子] 调试模式 %@", gMWBDebug ? @"已开启" : @"已关闭");
 }
 - (void)setTime:(MWBPixelButton *)sender { gTimeMode = (int)sender.tag; }
-- (void)setWeather:(MWBPixelButton *)sender { gWeatherMode = (int)sender.tag - 2; }
+- (void)setWeather:(MWBPixelButton *)sender {
+    if (!MWBWeatherSupported()) return;
+    gWeatherMode = (int)sender.tag - 2;
+}
+- (void)setDifficulty:(MWBPixelButton *)sender { MWBSetDifficulty010((int)sender.tag - 15); }
 - (void)doAction:(MWBPixelButton *)sender {
     int tag = (int)sender.tag;
     if (tag == 10) MWBHealNow();
     else if (tag == 11) MWBEnchantHeld255();
     else if (tag == 12) MWBTeleportUp10();
     else if (tag == 13) MWBFillStone5();
+    else if (tag == 14) MWB010SpawnReactor();
 }
 
 @end
@@ -2129,6 +2186,8 @@ bool MWB010Teleport(void *player, float x, float y, float z) {
 + (void)dbgGive143:(int)itemId { if (gGV == (int)MWBGameV1_4_3 && gPlayer143) MWB143_Give(gPlayer143, itemId, 5); }
 + (void)dbgTeleport { MWBTeleportUp10(); }
 + (void)dbgFill { MWBFillStone5(); }
++ (void)dbgReactor { MWB010SpawnReactor(); }
++ (void)dbgDiff:(int)difficulty { MWBSetDifficulty010(difficulty); }
 + (void)dbgProbe120 { MWB120ProbeMobEffect(); }
 
 @end
@@ -2137,18 +2196,19 @@ bool MWB010Teleport(void *player, float x, float y, float z) {
 
 // flag文件通道 (绕过cycript两次调用上限: ssh touch /tmp/mwbcmd-<动作>[-<参数>] 即可触发)
 // 支持: inv-0/1 fly break speed jump noclip night aura map debug time-0/1/2 weather-0/1/2/3
-//       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5
+//       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5 reactor diff-0/1/2/3
 // 注意: 游戏调用必须在tick返回后异步执行 (tick内同步调容器函数会死锁, -19冻屏教训)
 static int gPendGive117 = -1, gPendGive143 = -1, gPendEffect143 = -1, gPendEffect1133 = -1;
-static BOOL gPendHeal = NO, gPendEnchant = NO, gPendTeleport = NO, gPendFill = NO;
+static int gPendDiff010 = -1;
+static BOOL gPendHeal = NO, gPendEnchant = NO, gPendTeleport = NO, gPendFill = NO, gPendReactor = NO;
 static void MWBFlushPending(void) {
     NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
     NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
     if (lfh) {
         [lfh seekToEndOfFile];
-        NSString *line = [NSString stringWithFormat:@"%@ [泻洪] heal=%d ench=%d g117=%d g143=%d e143=%d e1133=%d tp=%d fill=%d\n",
+        NSString *line = [NSString stringWithFormat:@"%@ [泻洪] heal=%d ench=%d g117=%d g143=%d e143=%d e1133=%d tp=%d fill=%d reactor=%d diff=%d\n",
                           [NSDate date], gPendHeal, gPendEnchant, gPendGive117, gPendGive143,
-                          gPendEffect143, gPendEffect1133, gPendTeleport, gPendFill];
+                          gPendEffect143, gPendEffect1133, gPendTeleport, gPendFill, gPendReactor, gPendDiff010];
         [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
         [lfh closeFile];
     }
@@ -2172,6 +2232,8 @@ static void MWBFlushPending(void) {
     }
     if (gPendTeleport) { gPendTeleport = NO; MWBTeleportUp10(); }
     if (gPendFill) { gPendFill = NO; MWBFillStone5(); }
+    if (gPendReactor) { gPendReactor = NO; MWB010SpawnReactor(); }
+    if (gPendDiff010 >= 0) { int difficulty = gPendDiff010; gPendDiff010 = -1; MWBSetDifficulty010(difficulty); }
 }
 static void MWBPollCmdFile(void) {
     static int cooldown = 0;
@@ -2206,6 +2268,8 @@ static void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"effect143"]) { gPendEffect143 = arg; needFlush = YES; }
         else if ([act isEqualToString:@"teleport1133"]) { gPendTeleport = YES; needFlush = YES; }
         else if ([act isEqualToString:@"fill5"]) { gPendFill = YES; needFlush = YES; }
+        else if ([act isEqualToString:@"reactor"]) { gPendReactor = YES; needFlush = YES; }
+        else if ([act isEqualToString:@"diff"]) { gPendDiff010 = arg; needFlush = YES; }
         else if ([act isEqualToString:@"fillnat5"] && gPlayer1133) {
             // 自然方块铺石: 从脚下往下扫首个非air方块, 用它铺5³ (绕开注册表争议)
             void *bs = MWB1133BlockSource();
@@ -2388,6 +2452,80 @@ static void MWBFillStone5(void) {
                     uint8_t ft[2] = {1, 0};  // 石头id1
                     setTD(ts, &p, ft, 3);
                 }
+    }
+}
+// 难度: 0.10 通过 Level::setDifficulty 直接切换 (0=和平 1=简单 2=普通 3=困难)
+static void MWBSetDifficulty010(int difficulty) {
+    if (gGV != (int)MWBGameV0_10 || !gLevel) return;
+    if (difficulty < 0 || difficulty > 3) return;
+    typedef void (*SetDifficultyFn)(void *, int);
+    SetDifficultyFn setDifficulty =
+        (SetDifficultyFn)MSFindSymbol(NULL, "__ZN5Level13setDifficultyEi");
+    if (!setDifficulty) setDifficulty = (SetDifficultyFn)(MWBMainSlide() + 0x10011524cUL);
+    if (setDifficulty) setDifficulty(gLevel, difficulty);
+}
+
+// 0.10 一键反应核: 在玩家脚下按游戏校验图案搭平台+核, 再直调 NetherReactorTile::use 激活
+static void MWB010SpawnReactor(void) {
+    if (gGV != (int)MWBGameV0_10 || !gLocalPlayer) return;
+    uintptr_t slide = MWBMainSlide();
+    void *ts = *(void **)((char *)gLocalPlayer + 0x48);
+    int (*setTD)(void *, void *, void *, int) =
+        (int (*)(void *, void *, void *, int))MSFindSymbol(NULL, "__ZN10TileSource14setTileAndDataERK7TilePos8FullTilei");
+    if (!ts || !setTD) return;
+
+    // use 按 3x3x3 校验图案; 索引 = 层*9 + x*3 + z, y 为核所在层
+    // 底层: 四角 A、其余 B; 中层: 四角 B、中心核 C; 顶层: 十字 B
+    uint8_t idA = 41, idB = 4, idC = 247;
+    void *tileA = *(void **)(slide + 0x10034D708UL);
+    void *tileB = *(void **)(slide + 0x10034D558UL);
+    void *tileC = *(void **)(slide + 0x10034D860UL);
+    if (tileA) idA = *(uint8_t *)((char *)tileA + 0x48);
+    if (tileB) idB = *(uint8_t *)((char *)tileB + 0x48);
+    if (tileC) idC = *(uint8_t *)((char *)tileC + 0x48);
+    uint8_t bottom[9] = {idA, idB, idA, idB, idB, idB, idA, idB, idA};
+    uint8_t middle[9] = {idB, 0, idB, 0, idC, 0, idB, 0, idB};
+    uint8_t top[9] = {0, idB, 0, idB, idB, idB, 0, idB, 0};
+
+    float px = *(float *)((char *)gLocalPlayer + 0x28);
+    float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
+    float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+    int cx = (int)floorf(px), cy = (int)floorf(py), cz = (int)floorf(pz);
+    int y = cy;
+    if (y < 2) y = 2;
+    if (y > 100) y = 100;
+    for (int lx = 0; lx < 3; lx++) {
+        for (int lz = 0; lz < 3; lz++) {
+            MWBBlockPos p = {cx - 1 + lx, y - 1, cz - 1 + lz};
+            uint8_t ft[2] = {bottom[lx * 3 + lz], 0};
+            setTD(ts, &p, ft, 3);
+            p = (MWBBlockPos){cx - 1 + lx, y, cz - 1 + lz};
+            ft[0] = middle[lx * 3 + lz];
+            setTD(ts, &p, ft, 3);
+            p = (MWBBlockPos){cx - 1 + lx, y + 1, cz - 1 + lz};
+            ft[0] = top[lx * 3 + lz];
+            setTD(ts, &p, ft, 3);
+        }
+    }
+
+    // use 在函数体内没有使用 this, 传 NULL 即可; 失败只返回 0, 不会崩溃
+    typedef int (*ReactorUseFn)(void *, void *, int, int, int);
+    ReactorUseFn useReactor = (ReactorUseFn)(slide + 0x10015a344UL);
+    void *maybeLevel = *(void **)((char *)gLocalPlayer + 0x58);
+    int launchGate = maybeLevel ? *(int *)((char *)maybeLevel + 0x15E4) : -1;
+    int launched = useReactor(NULL, gLocalPlayer, cx, y, cz);
+    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+    if (fh) {
+        [fh seekToEndOfFile];
+        NSString *line = [NSString stringWithFormat:@"%@ [010反应核] 图案=%d/%d/%d y=%d gate=%d use=%d\n",
+                          [NSDate date], idA, idB, idC, y, launchGate, launched];
+        [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [fh closeFile];
+    }
+    if (launched == 1) {
+        // 激活后把玩家挪到尖塔上方, 避免被转化的方块埋住
+        MWB010Teleport(gLocalPlayer, (float)cx, (float)(y + 4), (float)cz);
     }
 }
 // 小地图: 192x192 overlay (tag 0x6D62), 按48x48采样着色, 矿石标红
