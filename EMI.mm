@@ -446,8 +446,8 @@ static CGFloat kEMIScale;
         _content.frame = (CGRect){{(w-cs)/2,(h-cs)/2},{cs,cs}};
     }
 }
-- (void)handleSingle { if (self.onTap) self.onTap(); }
-- (void)handleDouble { if (self.onDoubleTap) self.onDoubleTap(); }
+- (void)handleSingle { MWBPlayClick(); if (self.onTap) self.onTap(); }
+- (void)handleDouble { MWBPlayClick(); if (self.onDoubleTap) self.onDoubleTap(); }
 - (void)handleLong:(UILongPressGestureRecognizer *)g {
     if (g.state == UIGestureRecognizerStateBegan && self.onLongPress) self.onLongPress();
 }
@@ -511,6 +511,11 @@ static CGFloat kEMIScale;
 }
 - (void)tabPress { self.transform = CGAffineTransformMakeTranslation(2*kEMIScale, 2*kEMIScale); }
 - (void)tabRelease { self.transform = CGAffineTransformIdentity; }
+// 分类标签统一 MC 点击音
+- (void)sendAction:(SEL)action to:(id)target forEvent:(UIEvent *)event {
+    MWBPlayClick();
+    [super sendAction:action to:target forEvent:event];
+}
 @end
 
 #pragma mark - 物品数据

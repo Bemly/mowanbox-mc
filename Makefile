@@ -10,7 +10,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = mowanbox
 mowanbox_FILES = Tweak.xm EMI.mm MWBVersion.mm
-mowanbox_FRAMEWORKS = UIKit CoreGraphics Foundation QuartzCore ImageIO
+mowanbox_FRAMEWORKS = UIKit CoreGraphics Foundation QuartzCore ImageIO AVFoundation
 mowanbox_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
 
 include $(THEOS_MAKE_PATH)/tweak.mk

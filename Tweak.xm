@@ -1,5 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <CoreText/CoreText.h>
+#import <AVFoundation/AVFoundation.h>
 #import <mach/mach.h>
 #import <substrate.h>
 #import "FusionPixel.h"
@@ -58,6 +59,42 @@ static void MWBRegisterFont(void) {
         if (cgFont) { CTFontManagerRegisterGraphicsFont(cgFont, NULL); CGFontRelease(cgFont); }
         CGDataProviderRelease(provider);
     });
+}
+
+// MC 原版开关音效: click.m4a, 运行时从游戏 bundle 加载 (不打包版权素材, 与贴图同路)
+static AVAudioPlayer *gMWBClickPlayer = nil;
+static void MWBEnsureClickLoaded(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSURL *url = [[NSBundle mainBundle] URLForResource:@"click" withExtension:@"m4a"];
+        NSString *msg = nil;
+        if (url) {
+            NSError *err = nil;
+            gMWBClickPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:url error:&err];
+            if (gMWBClickPlayer) {
+                gMWBClickPlayer.volume = 1.0;
+                [gMWBClickPlayer prepareToPlay];
+                msg = [NSString stringWithFormat:@"[魔玩盒子] 点击音已加载(%.2fs)", gMWBClickPlayer.duration];
+            } else {
+                msg = [NSString stringWithFormat:@"[魔玩盒子] 点击音加载失败: %@", err.localizedDescription];
+            }
+        } else {
+            msg = @"[魔玩盒子] 未找到 click.m4a";
+        }
+        NSLog(@"%@", msg);
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], msg];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    });
+}
+void MWBPlayClick(void) {
+    MWBEnsureClickLoaded();
+    if (gMWBClickPlayer) { gMWBClickPlayer.currentTime = 0; [gMWBClickPlayer play]; }
 }
 
 // 创建带像素阴影的属性字符串
@@ -205,7 +242,7 @@ static UIBezierPath *MWBPathFromSVG(NSString *d) {
     _i.frame = (CGRect){{pad,pad},{cellW,h - pad*2}};
     _b.frame = (CGRect){{pad + cellW + 4,pad},{cellW,h - pad*2}};
 }
-- (void)toggle { self.on = !_on; [self sendActionsForControlEvents:UIControlEventValueChanged]; }
+- (void)toggle { MWBPlayClick(); self.on = !_on; [self sendActionsForControlEvents:UIControlEventValueChanged]; }
 - (void)setOn:(BOOL)on { _on = on; [self applyStyle]; }
 - (void)applyStyle {
     if (_on) {
@@ -245,6 +282,11 @@ static UIBezierPath *MWBPathFromSVG(NSString *d) {
         self.backgroundColor = MWB_COLOR(0xb3,0xa8,0xa3);
         self.transform = CGAffineTransformIdentity;
     }
+}
+// 像素按钮统一 MC 点击音
+- (void)sendAction:(SEL)action to:(id)target forEvent:(UIEvent *)event {
+    MWBPlayClick();
+    [super sendAction:action to:target forEvent:event];
 }
 - (void)drawRect:(CGRect)rect {
     CGContextRef ctx = UIGraphicsGetCurrentContext();
@@ -310,6 +352,11 @@ static UIBezierPath *MWBPathFromSVG(NSString *d) {
     [super setHighlighted:highlighted];
     if (highlighted) self.transform = CGAffineTransformMakeTranslation(2, 2);
     else self.transform = CGAffineTransformIdentity;
+}
+// 侧栏图标统一 MC 点击音
+- (void)sendAction:(SEL)action to:(id)target forEvent:(UIEvent *)event {
+    MWBPlayClick();
+    [super sendAction:action to:target forEvent:event];
 }
 - (void)drawRect:(CGRect)rect {
     CGContextRef ctx = UIGraphicsGetCurrentContext();
@@ -2778,6 +2825,8 @@ static void MWBInstall(void) {
         w.hidden = NO;
         gWindow = w;
         NSLog(@"[魔玩盒子] 像素风 UI 已安装");
+        // 预加载 MC 原版点击音 (静默解码, 点按时直接播)
+        MWBEnsureClickLoaded();
         // 安装 EMI 物品管理器 (独立悬浮按钮)
         [MWBEMIManager install];
     });

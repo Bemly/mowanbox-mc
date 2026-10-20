@@ -11,6 +11,9 @@ extern BOOL gMWBDebug;
 // LocalPlayer 指针 (由 Tweak.xm 的 normalTick hook 维护)
 extern void *gLocalPlayer;
 
+// MC 原版点击音 (Tweak.xm 实现, 运行时从游戏 bundle 加载 click.m4a)
+void MWBPlayClick(void);
+
 // EMI 物品管理器入口 (现在作为悬浮窗菜单的第 5 项, 不再自建窗口/悬浮按钮)
 @interface MWBEMIManager : NSObject
 + (void)install;
