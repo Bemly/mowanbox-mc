@@ -1031,6 +1031,7 @@ static void hooked_normalTick(void *self) {
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) { [fh seekToEndOfFile]; [fh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
     }
+    MWBPollCmdFile();   // 0.10 也接 flag 文件通道 (time/reactor/diff/mob/explode)
 }
 
 typedef void (*LevelTickFn)(void *self);
