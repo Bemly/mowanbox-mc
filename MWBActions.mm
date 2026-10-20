@@ -60,7 +60,9 @@ void MWBPollCmdFile(void) {
         if (![f hasPrefix:@"mwbcmd-"]) continue;
         NSString *full = [@"/tmp" stringByAppendingPathComponent:f];
         NSString *cmd = [f substringFromIndex:7];
-        [fm removeItemAtPath:full error:nil];
+        NSError *rmErr = nil;  // 双tick源会同时看到同一文件, 只有真正删掉它的才执行 (去重)
+        [fm removeItemAtPath:full error:&rmErr];
+        if (rmErr) continue;
         NSArray *parts = [cmd componentsSeparatedByString:@"-"];
         NSString *act = parts[0];
         int arg = parts.count > 1 ? [parts[1] intValue] : 0;

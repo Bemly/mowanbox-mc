@@ -53,12 +53,11 @@ static void hooked_010_setLevel(void *self, void *level) {
     gRendererLevel010 = level;
     MWBLogFile(@"[010] 捕获渲染器 %p (level=%p)", self, level);
 }
-// 时间跳变后重算已加载区块的存储光照: 香草只在地形生成时算一次
-// (全二进制仅 RandomLevelSource::postProcess 一处调用), 时间变了不管;
-// 网格烘焙读的是这份存储值 (TileSource::getBrightness 直接返回, 不减实时亮度),
-// 所以光重建网格没用, 必须先逐块重算存储光照再重建。
-// 枚举走渲染线程同款虚表查找口 (slot+0x10, getRawBrightness 每天每帧都在调,
-// 只返回已加载、不生成新区块, 天然线程安全), 以玩家为中心半径8, 不碰内部表布局。
+// 时间跳变后锻造已加载区块的存储天光 (IDA 定案):
+// 香草存储天光恒为几何量 (种子恒15, 全二进制无按时间重算的调用),
+// 网格烘焙读存储且渲染链无实时因子, 故只能把"当前亮度"直接锻进存储值:
+// 目标值 = 15 - Level+0x90 (白天15/夜晚4), 逐列高度图以上逐格比对写入,
+// 再 allChanged 重建。自然模式同样锻一次 (之后随自然漂移, 与香草一致)。
 void MWB010RelightLoadedChunks(void) {
     if (!gLocalPlayer || !gLevel) return;
     void *ts = *(void **)((char *)gLocalPlayer + 0x48);
@@ -67,34 +66,49 @@ void MWB010RelightLoadedChunks(void) {
     if (!cs) return;
     typedef void *(*GetChunkFn)(void *, void *);
     GetChunkFn getChunk = (GetChunkFn)*(void **)((char *)*(void **)cs + 0x10);
-    typedef void (*RelightFn)(void *, void *);
-    RelightFn relight = (RelightFn)MSFindSymbol(NULL, "__ZN10LevelChunk22updateLightsAndHeightsER10TileSource");
-    if (!getChunk || !relight) return;
+    if (!getChunk) return;
     float px = *(float *)((char *)gLocalPlayer + 0x28);
     float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
     int pcx = ((int)floorf(px)) >> 4, pcz = ((int)floorf(pz)) >> 4;
-    // 结构校验: 脚下区块的存储坐标必须==请求坐标 (LevelChunk+0x20/+0x24, getRawBrightness 同款读法);
-    // 若查找口不是 getExistingChunk 直接放弃, 不调重算 (防错调崩溃)
+    // 结构校验: 脚下区块的存储坐标必须==请求坐标 (LevelChunk+0x20/+0x24);
+    // 若查找口不是 getExistingChunk 直接放弃 (防错调崩溃)
     int selfPos[2] = {pcx, pcz};
     void *selfChunk = getChunk(cs, selfPos);
     if (!selfChunk || *(int *)((char *)selfChunk + 0x20) != pcx ||
         *(int *)((char *)selfChunk + 0x24) != pcz) {
-        MWBLogFile(@"[010] 重算中止: 脚下区块校验失败 (chunk=%p)", selfChunk);
+        MWBLogFile(@"[010] 锻造中止: 脚下区块校验失败 (chunk=%p)", selfChunk);
         return;
     }
+    uint8_t dark = *(uint8_t *)((char *)gLevel + 0x90);
+    uint8_t target = dark >= 15 ? 0 : 15 - dark;
     NSDate *t0 = [NSDate date];
-    int n = 0, seen = 0;
+    int n = 0, cells = 0;
     for (int dz = -8; dz <= 8 && n < 512; dz++) {
         for (int dx = -8; dx <= 8 && n < 512; dx++) {
-            int pos[2] = {pcx + dx, pcz + dz};  // ChunkPos{x,z} (getExistingChunk 反编译)
+            int pos[2] = {pcx + dx, pcz + dz};  // ChunkPos{x,z}
             void *chunk = getChunk(cs, pos);
             if (!chunk) continue;
-            seen++;
-            relight(chunk, ts);
             n++;
+            // 高度图 +0x14478 (256字节, 索引 x|z<<4); 天光数组 +0xc078
+            for (int lz = 0; lz < 16; lz++) {
+                for (int lx = 0; lx < 16; lx++) {
+                    int h = *(uint8_t *)((char *)chunk + 0x14478 + (lx | (lz << 4)));
+                    if (h < 0) h = 0; if (h > 126) continue;
+                    int wx = (pos[0] << 4) + lx, wz = (pos[1] << 4) + lz;
+                    for (int y = h + 1; y <= 127; y++) {
+                        unsigned long off = (unsigned long)((((wz & 15) << 7) | ((wx & 15) << 11) | (y & 0xfe)) >> 1);
+                        uint8_t *bp = (uint8_t *)chunk + 0xc078 + off;
+                        uint8_t cur = (y & 1) ? (*bp >> 4) : (*bp & 0xf);
+                        if (cur == target) continue;
+                        if (y & 1) *bp = (*bp & 0x0f) | (target << 4);
+                        else *bp = (*bp & 0xf0) | target;
+                        cells++;
+                    }
+                }
+            }
         }
     }
-    MWBLogFile(@"[010] 重算区块光照 %d块 (命中%d, %.1fs)", n, seen, -[t0 timeIntervalSinceNow]);
+    MWBLogFile(@"[010] 锻造区块天光 %d块 %d格 (dark=%d->%d, %.1fs)", n, cells, dark, target, -[t0 timeIntervalSinceNow]);
 }
 // 时间跳变后全量重刷区块: 先重算存储光照, 再调 LevelRenderer::allChanged 让网格按新光照重建
 void MWB010RefreshChunks(void) {
