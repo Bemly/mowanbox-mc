@@ -173,6 +173,34 @@ void MWBPollCmdFile(void) {
                 [lfh closeFile];
             }
         }
+        else if ([act isEqualToString:@"dayinfo2"] && gLevel && gLocalPlayer) {
+            // 时间链探针: gLevel(逻辑tick写的那只) vs 渲染链(TileSource+24指向的Level)是否同一对象
+            // (kuna 反编译 TileSource::getRawBrightness: Level*=TileSource+24, 昼夜开关=TileSource+0x11)
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                void *ts = *(void **)((char *)gLocalPlayer + 0x48);
+                void *tsLevel = ts ? *(void **)((char *)ts + 24) : NULL;
+                int tsFlag = ts ? *(uint8_t *)((char *)ts + 0x11) : -1;
+                NSMutableString *m = [NSMutableString stringWithFormat:@"%@ [010链] gLevel=%p ts=%p tsFlag=%d tsLevel=%p 同体=%d ",
+                    [NSDate date], gLevel, ts, tsFlag, tsLevel,
+                    (gLevel && gLevel == tsLevel) ? 1 : 0];
+                int64_t dt = *(int64_t *)((char *)gLevel + LEVEL_TIME_OFFSET);
+                int64_t ov = *(int64_t *)((char *)gLevel + LEVEL_TIME_OVERRIDE_OFF);
+                uint8_t sky = *(uint8_t *)((char *)gLevel + 0x90);
+                [m appendFormat:@"gL(dt=%lld ov=%lld sky=%d)", (long long)dt, (long long)ov, sky];
+                if (tsLevel && tsLevel != gLevel) {
+                    int64_t tdt = *(int64_t *)((char *)tsLevel + LEVEL_TIME_OFFSET);
+                    int64_t tov = *(int64_t *)((char *)tsLevel + LEVEL_TIME_OVERRIDE_OFF);
+                    uint8_t tsky = *(uint8_t *)((char *)tsLevel + 0x90);
+                    [m appendFormat:@" tsL(dt=%lld ov=%lld sky=%d)", (long long)tdt, (long long)tov, tsky];
+                }
+                [m appendString:@"\n"];
+                [lfh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
         else if ([act isEqualToString:@"held117"] && gPlayer117) {
             void *held = ((void *(*)(void *))(MWBMainSlide() + V117_HELDITEM_VA))(gPlayer117);
             NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
@@ -303,8 +331,7 @@ void MWBPollCmdFile(void) {
             [fh closeFile];
         }
     }
-    // tick返回后异步泻洪 (避免容器锁重入)
-    dispatch_async(dispatch_get_main_queue(), ^{ MWBFlushPending(); });
+    // (泻洪只在本轮真有指令时触发, 见循环内 needFlush 分支; 无条件尾调用会每20tick空转一次刷屏日志, 已删)
 }
 
 void MWBHealNow(void) {
