@@ -564,6 +564,8 @@ static void MWBApplySpeed(BOOL on) {
     _panel.backgroundColor = kPanelBG;
     _panel.alwaysBounceVertical = YES;
     _panel.showsVerticalScrollIndicator = NO;
+    // 按钮按下立刻响应: 关掉滚动视图的触摸延迟, 否则手指稍抖就被当成滚动吃掉点击
+    _panel.delaysContentTouches = NO;
     [self addSubview:_panel];
 
     [self buildPages];
@@ -937,6 +939,13 @@ static void MWBApplySpeed(BOOL on) {
     _iconImg.layer.cornerRadius = side / 2.0;   // 圆形头像
 }
 - (void)handleTap { if (self.onTap) self.onTap(); }
+// 圆形命中: 显示是圆, 触摸也只认圆内 (透明角不触发)
+- (BOOL)pointInside:(CGPoint)point withEvent:(UIEvent *)event {
+    CGFloat r = MIN(self.bounds.size.width, self.bounds.size.height) / 2.0;
+    CGFloat dx = point.x - self.bounds.size.width / 2.0;
+    CGFloat dy = point.y - self.bounds.size.height / 2.0;
+    return (dx * dx + dy * dy) <= r * r;
+}
 - (void)handlePan:(UIPanGestureRecognizer *)pan {
     CGPoint t = [pan translationInView:self.superview];
     CGPoint c = self.center;

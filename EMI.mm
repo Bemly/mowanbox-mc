@@ -1116,6 +1116,13 @@ static NSArray *MWBGameRecipesForItem(int itemId) {
     return self;
 }
 
+// 背景点透: 透明边距不吞触摸, 与悬浮窗 overlay 一致 (面板/格子照常响应)
+- (UIView *)hitTest:(CGPoint)point withEvent:(UIEvent *)event {
+    UIView *hit = [super hitTest:point withEvent:event];
+    if (hit == self) return nil;
+    return hit;
+}
+
 - (void)buildWindow {
     CGFloat s = kEMIScale;
     CGFloat winW = 1879*s, winH = 923*s;
@@ -1164,6 +1171,8 @@ static NSArray *MWBGameRecipesForItem(int itemId) {
     _gridScroll.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
     _gridScroll.backgroundColor = [UIColor clearColor];
     _gridScroll.showsVerticalScrollIndicator = NO;
+    // 格子点击立刻响应: 同悬浮窗菜单, 关滚动触摸延迟
+    _gridScroll.delaysContentTouches = NO;
     [_gridWrap addSubview:_gridScroll];
 
     [self buildItemGrid];
