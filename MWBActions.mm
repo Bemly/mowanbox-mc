@@ -201,6 +201,10 @@ void MWBPollCmdFile(void) {
                 [lfh closeFile];
             }
         }
+        else if ([act isEqualToString:@"refresh"]) {
+            // 手动全量重刷区块 (时间跳变后地面光跟不上时用, 正常由模式切换边沿自动触发)
+            dispatch_async(dispatch_get_main_queue(), ^{ MWB010RefreshChunks(); });
+        }
         else if ([act isEqualToString:@"held117"] && gPlayer117) {
             void *held = ((void *(*)(void *))(MWBMainSlide() + V117_HELDITEM_VA))(gPlayer117);
             NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];

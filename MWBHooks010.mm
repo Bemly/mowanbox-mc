@@ -40,6 +40,31 @@ static void hooked_normalTick(void *self) {
 
 typedef void (*LevelTickFn)(void *self);
 static LevelTickFn orig_levelTick = NULL;
+
+// 0.10 渲染器捕获 (LevelRenderer::setLevel 在世界加载时调, 932B, hook 安全)
+static void *gRenderer010 = NULL;
+static void *gRendererLevel010 = NULL;
+typedef void (*SetLevelFn)(void *self, void *level);
+static SetLevelFn orig_010_setLevel = NULL;
+static void hooked_010_setLevel(void *self, void *level) {
+    orig_010_setLevel(self, level);
+    gRenderer010 = self;
+    gRendererLevel010 = level;
+    MWBLogFile(@"[010] 捕获渲染器 %p (level=%p)", self, level);
+}
+// 时间跳变后全量重刷区块: 地面光照烘焙在区块网格里, 只写 dayTime 不会重算,
+// 必须调 LevelRenderer::allChanged 让所有区块按当前亮度重建 (相当于自然过夜的重刷路径)
+void MWB010RefreshChunks(void) {
+    if (!gRenderer010 || !gLevel) return;
+    if (gRendererLevel010 && gRendererLevel010 != gLevel) return;  // 世界已切换, 旧指针不用
+    void *vt = *(void **)gRenderer010;
+    uintptr_t s = MWBMainSlide();
+    if ((uintptr_t)vt < s + 0x100000000UL || (uintptr_t)vt >= s + 0x100400000UL) return;  // 虚表不在TEXT段, 不调
+    void (*allChanged)(void *) = (void (*)(void *))MSFindSymbol(NULL, "__ZN13LevelRenderer10allChangedEv");
+    if (!allChanged) return;
+    allChanged(gRenderer010);
+    MWBLogFile(@"[010] 已刷新区块 (allChanged renderer=%p)", gRenderer010);
+}
 static void hooked_levelTick(void *self) {
     orig_levelTick(self);
     MWBMarkWorldTick();
@@ -51,6 +76,12 @@ static void hooked_levelTick(void *self) {
     } else if (gTimeMode == 2) {
         *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
         *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
+    }
+    // 时间模式一切换就全量刷新一次 (含切回自然), 让地面光跟上天空; 只在变化边沿触发
+    static int s_lastTimeMode = -1;
+    if (gTimeMode != s_lastTimeMode) {
+        s_lastTimeMode = gTimeMode;
+        dispatch_async(dispatch_get_main_queue(), ^{ MWB010RefreshChunks(); });
     }
 }
 #pragma mark - 0.10 生存/创造切换后端
@@ -117,4 +148,5 @@ void MWBInstallHooks010(void) {
     MWB_HOOK("__ZN11LocalPlayer10normalTickEv", hooked_normalTick, orig_normalTick);
     MWB_HOOK("__ZN5Level4tickEv", hooked_levelTick, orig_levelTick);
     MWB_HOOK("__ZN9Minecraft4tickEii", hooked_mc010Tick, orig_mc010Tick);
+    MWB_HOOK("__ZN13LevelRenderer8setLevelEP5Level", hooked_010_setLevel, orig_010_setLevel);
 }
