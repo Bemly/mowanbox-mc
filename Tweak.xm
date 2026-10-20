@@ -391,6 +391,8 @@ static void MWBTeleportUp10(void);
 static void MWBFillStone5(void);
 static void MWB010SpawnReactor(void);
 static void MWBSetDifficulty010(int difficulty);
+static void MWB010SpawnMob(int typeId);
+static void MWB010Explode(void);
 static BOOL MWBWeatherSupported(void);
 static BOOL MWB010Only(void);
 static void MWBMinimapShow(BOOL on);
@@ -729,7 +731,7 @@ static void MWBApplySpeed(BOOL on) {
         actBtn.frame = (CGRect){{pw-33-430+i*105,CGRectGetMaxY(dayBtn.frame)+100},{95,56}};
         [p3 addSubview:actBtn];
     }
-    p3.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(dayBtn.frame)+318}};
+    p3.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(dayBtn.frame)+368}};
     NSArray *diffTitles = @[@"和平", @"简单", @"普通", @"困难"];
     // 难度: 和平 / 简单 / 普通 / 困难 四个像素按钮 (tag 15-18, 目前只接了 0.10 后端)
     UILabel *diffLabel = [self makeRowLabel:@"难度"];
@@ -763,6 +765,36 @@ static void MWBApplySpeed(BOOL on) {
         reactorBtn.userInteractionEnabled = NO;
     }
     [p3 addSubview:reactorBtn];
+    // 爆炸: 定点爆炸 (tag 24, 目前只接了 0.10 后端)
+    MWBPixelButton *explodeBtn = [[MWBPixelButton alloc] init];
+    [explodeBtn setAttributedTitle:MWBPixelText(@"爆炸", MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
+                                               3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
+    explodeBtn.tag = 24;
+    [explodeBtn addTarget:self action:@selector(doAction:) forControlEvents:UIControlEventTouchUpInside];
+    explodeBtn.frame = (CGRect){{pw-33-430+105,CGRectGetMaxY(dayBtn.frame)+228},{95,56}};
+    if (!MWB010Only()) {
+        explodeBtn.alpha = 0.35;
+        explodeBtn.userInteractionEnabled = NO;
+    }
+    [p3 addSubview:explodeBtn];
+    // 刷怪: 僵尸 / 爬行者 / 骷髅 / 猪人 (tag 20-23, 目前只接了 0.10 后端)
+    UILabel *mobLabel = [self makeRowLabel:@"刷怪"];
+    mobLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+292},{200,60}};
+    [p3 addSubview:mobLabel];
+    NSArray *mobTitles = @[@"僵尸", @"爬行者", @"骷髅", @"猪人"];
+    for (int i = 0; i < 4; i++) {
+        MWBPixelButton *mobBtn = [[MWBPixelButton alloc] init];
+        [mobBtn setAttributedTitle:MWBPixelText(mobTitles[i], MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
+                                               3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
+        mobBtn.tag = 20 + i;
+        [mobBtn addTarget:self action:@selector(doAction:) forControlEvents:UIControlEventTouchUpInside];
+        mobBtn.frame = (CGRect){{pw-33-430+i*105,CGRectGetMaxY(dayBtn.frame)+292},{95,56}};
+        if (!MWB010Only()) {
+            mobBtn.alpha = 0.35;
+            mobBtn.userInteractionEnabled = NO;
+        }
+        [p3 addSubview:mobBtn];
+    }
     [pages addObject:p3];
 
     self.pages = pages;
@@ -847,6 +879,11 @@ static void MWBApplySpeed(BOOL on) {
     else if (tag == 12) MWBTeleportUp10();
     else if (tag == 13) MWBFillStone5();
     else if (tag == 14) MWB010SpawnReactor();
+    else if (tag >= 20 && tag <= 23) {
+        int mobIds[4] = {32, 33, 34, 36};  // 僵尸/爬行者/骷髅/僵尸猪人
+        MWB010SpawnMob(mobIds[tag - 20]);
+    }
+    else if (tag == 24) MWB010Explode();
 }
 
 @end
@@ -2159,6 +2196,8 @@ bool MWB010Teleport(void *player, float x, float y, float z) {
 + (void)dbgFill { MWBFillStone5(); }
 + (void)dbgReactor { MWB010SpawnReactor(); }
 + (void)dbgDiff:(int)difficulty { MWBSetDifficulty010(difficulty); }
++ (void)dbgMob:(int)typeId { MWB010SpawnMob(typeId); }
++ (void)dbgExplode { MWB010Explode(); }
 + (void)dbgProbe120 { MWB120ProbeMobEffect(); }
 
 @end
@@ -2167,19 +2206,19 @@ bool MWB010Teleport(void *player, float x, float y, float z) {
 
 // flag文件通道 (绕过cycript两次调用上限: ssh touch /tmp/mwbcmd-<动作>[-<参数>] 即可触发)
 // 支持: inv-0/1 fly break speed jump noclip night aura map debug time-0/1/2 weather-0/1/2/3
-//       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5 reactor diff-0/1/2/3
+//       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5 reactor diff-0/1/2/3 mob-32 explode
 // 注意: 游戏调用必须在tick返回后异步执行 (tick内同步调容器函数会死锁, -19冻屏教训)
 static int gPendGive117 = -1, gPendGive143 = -1, gPendEffect143 = -1, gPendEffect1133 = -1;
-static int gPendDiff010 = -1;
-static BOOL gPendHeal = NO, gPendEnchant = NO, gPendTeleport = NO, gPendFill = NO, gPendReactor = NO;
+static int gPendDiff010 = -1, gPendMob010 = -1;
+static BOOL gPendHeal = NO, gPendEnchant = NO, gPendTeleport = NO, gPendFill = NO, gPendReactor = NO, gPendExplode = NO;
 static void MWBFlushPending(void) {
     NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
     NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
     if (lfh) {
         [lfh seekToEndOfFile];
-        NSString *line = [NSString stringWithFormat:@"%@ [泻洪] heal=%d ench=%d g117=%d g143=%d e143=%d e1133=%d tp=%d fill=%d reactor=%d diff=%d\n",
+        NSString *line = [NSString stringWithFormat:@"%@ [泻洪] heal=%d ench=%d g117=%d g143=%d e143=%d e1133=%d tp=%d fill=%d reactor=%d diff=%d mob=%d expl=%d\n",
                           [NSDate date], gPendHeal, gPendEnchant, gPendGive117, gPendGive143,
-                          gPendEffect143, gPendEffect1133, gPendTeleport, gPendFill, gPendReactor, gPendDiff010];
+                          gPendEffect143, gPendEffect1133, gPendTeleport, gPendFill, gPendReactor, gPendDiff010, gPendMob010, gPendExplode];
         [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
         [lfh closeFile];
     }
@@ -2205,6 +2244,8 @@ static void MWBFlushPending(void) {
     if (gPendFill) { gPendFill = NO; MWBFillStone5(); }
     if (gPendReactor) { gPendReactor = NO; MWB010SpawnReactor(); }
     if (gPendDiff010 >= 0) { int difficulty = gPendDiff010; gPendDiff010 = -1; MWBSetDifficulty010(difficulty); }
+    if (gPendMob010 >= 0) { int typeId = gPendMob010; gPendMob010 = -1; MWB010SpawnMob(typeId); }
+    if (gPendExplode) { gPendExplode = NO; MWB010Explode(); }
 }
 static void MWBPollCmdFile(void) {
     static int cooldown = 0;
@@ -2241,6 +2282,8 @@ static void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"fill5"]) { gPendFill = YES; needFlush = YES; }
         else if ([act isEqualToString:@"reactor"]) { gPendReactor = YES; needFlush = YES; }
         else if ([act isEqualToString:@"diff"]) { gPendDiff010 = arg; needFlush = YES; }
+        else if ([act isEqualToString:@"mob"]) { gPendMob010 = arg; needFlush = YES; }
+        else if ([act isEqualToString:@"explode"]) { gPendExplode = YES; needFlush = YES; }
         else if ([act isEqualToString:@"fillnat5"] && gPlayer1133) {
             // 自然方块铺石: 从脚下往下扫首个非air方块, 用它铺5³ (绕开注册表争议)
             void *bs = MWB1133BlockSource();
@@ -2506,6 +2549,56 @@ static void MWB010SpawnReactor(void) {
         // 激活后把玩家挪到尖塔上方: lightItUp 同步把尖塔建到核上方 +30, y+4 会埋进尖塔, 改 y+32 落到塔顶
         MWB010Teleport(gLocalPlayer, (float)cx, (float)(y + 32), (float)cz);
     }
+}
+
+// 0.10 刷怪: MobFactory::CreateMob 建怪 + addMob 入世界 (id 见 AGENTS 实体映射表)
+static void MWB010SpawnMob(int typeId) {
+    if (gGV != (int)MWBGameV0_10 || !gLocalPlayer) return;
+    if (!((typeId >= 10 && typeId <= 16) || (typeId >= 32 && typeId <= 39) ||
+          typeId == 1807 || (typeId >= 2848 && typeId <= 2855) ||
+          (typeId >= 5898 && typeId <= 5904) || typeId == 22286)) return;
+    uintptr_t slide = MWBMainSlide();
+    void *ts = *(void **)((char *)gLocalPlayer + 0x48);
+    if (!ts) return;
+    // MobFactory 取自 TileSource 链 (spawnEnemy 反编译同款写法: *(*(ts+24)+5680))
+    void *inner = *(void **)((char *)ts + 24);
+    void *mf = inner ? *(void **)((char *)inner + 5680) : NULL;
+    typedef void *(*CreateMobFn)(int, void *, float *, void *);
+    typedef int (*AddMobFn)(void *, void *, int);
+    CreateMobFn createMob = (CreateMobFn)MSFindSymbol(NULL, "__ZN10MobFactory9CreateMobEiR10TileSourceRK4Vec3PS2_");
+    if (!createMob) createMob = (CreateMobFn)(slide + 0x10024dea0UL);
+    AddMobFn addMob = (AddMobFn)MSFindSymbol(NULL, "__ZN10MobFactory6addMobER3Mobb");
+    if (!addMob) addMob = (AddMobFn)(slide + 0x10024e25cUL);
+    if (!createMob || !addMob || !mf) return;
+    float px = *(float *)((char *)gLocalPlayer + 0x28);
+    float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
+    float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+    float pos[3] = {px + 2.0f, py + 1.0f, pz};
+    void *mob = createMob(typeId, ts, pos, NULL);
+    int ok = mob ? addMob(mf, mob, 1) : -1;
+    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+    if (fh) {
+        [fh seekToEndOfFile];
+        NSString *line = [NSString stringWithFormat:@"%@ [010刷怪] id=%d mob=%p add=%d\n",
+                          [NSDate date], typeId, mob, ok];
+        [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+        [fh closeFile];
+    }
+}
+
+// 0.10 定点爆炸: Level::explode 在玩家脚下引爆 (威力 4.0 约 TNT 当量, 会伤及玩家, 建议开无敌再玩)
+static void MWB010Explode(void) {
+    if (gGV != (int)MWBGameV0_10 || !gLevel || !gLocalPlayer) return;
+    typedef void (*ExplodeFn)(void *, void *, float, float, float, float);
+    ExplodeFn explode = (ExplodeFn)MSFindSymbol(NULL, "__ZN5Level7explodeEP6Entityffff");
+    if (!explode) explode = (ExplodeFn)(MWBMainSlide() + 0x100112714UL);
+    if (!explode) return;
+    float px = *(float *)((char *)gLocalPlayer + 0x28);
+    float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
+    float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+    explode(gLevel, gLocalPlayer, px, py, pz, 4.0f);
+    NSLog(@"[魔玩盒子] 定点爆炸 (%.0f,%.0f,%.0f)", px, py, pz);
 }
 // 小地图: 192x192 overlay (tag 0x6D62), 按48x48采样着色, 矿石标红
 static UIColor *MWBMapColor(int blockId) {

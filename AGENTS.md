@@ -38,6 +38,7 @@
      - flag 通道新增 `reactor`、`diff-0/1/2/3`; cycript 新增 `dbgReactor`、`dbgDiff:`。
      - 其他可挖: 难度切换已核实符号(`Level::setDifficulty@0x10011524c` 与 `ServerLevel::setDifficulty@0x1001b8f7c`); Mob 生成链(`MobFactory::addMob@0x10024e25c` / `_spawnMobCluster@0x10024e470`)、爆炸链(`Level::explode@0x100112714` / `Explosion::explode@0x10020b4d0`)都带符号, 可作为下一批动作/刷怪功能逆向。
      - 2026-10-20(晚) IDA 深挖 0.10 下一批功能(符号+反编译实锤, 待实现): `MobFactory::CreateMob` 实体 id 全映射(10鸡/11牛/12猪/13羊/14狼/15村民/16哞菇/32僵尸/33爬行者/34骷髅/35蜘蛛/36僵尸猪人/37史莱姆/38末影人/39蠹虫/1807村民/2848-2855 同 32-39/5898-5904 同 10-13+哞菇/22286狼) —— 可做"刷怪"按钮(CreateMob+addMob); 爆炸链 `Level::explode(Entity*,x,y,z,威力)` / `Explosion::explode` —— 可做定点爆炸; `Mob::heal(Mob*,int)` 已接治疗; `SetHealthPacket` 存在但单机直调 heal 更简单。
+   - 2026-10-20(晚) 真机验证熔断(插件-37/-38, 0.10.0)：连续3次点进世界均在 Streaming 线程 SIGABRT（`Thread 5 Streaming 1` abort，堆栈只有游戏地形流式帧、无 mowanbox 参与；崩溃日志 `minecraftpe-2026-10-20-19{4050,4351,4532}.ips`），-34 对照组同签名复现 → 非本次回归；当天 15:14（动手前）已有同类崩溃。崩溃会把正在加载世界的 level.dat 回写成 325 字节 stub，已确认 `3W8AALGCCwA=`（19:43）与 `DZQAAKoGCwA=`（19:45）被 stub 化，其余 4 世界完好。**即起停止一切进世界点击**，保住剩余存档；待查 Streaming abort 根因（IDA 可反流式加载链）后再恢复真机验证。
 
 ## Git 约定
 
