@@ -1,0 +1,345 @@
+/* MWBUI.mm — 像素风 UI 套件实现 (配色/字体/像素视图/SVG/开关/按钮/侧栏图标/点击音) */
+#import <UIKit/UIKit.h>
+#import <CoreText/CoreText.h>
+#import <AVFoundation/AVFoundation.h>
+#import "MWBCommon.h"
+#import "MWBUI.h"
+#import "FusionPixel.h"
+
+#pragma mark - 像素配色 (与参考 CSS 变量一一对应)
+
+
+UIColor *kTopBar;          // #777078 顶栏
+UIColor *kSidebar;         // #a69d99 侧栏
+UIColor *kSidebarLight;    // #c3bbb6
+UIColor *kSidebarDark;     // #655f5f
+UIColor *kInk;             // #343132
+UIColor *kWhiteText;       // #eeeae6
+UIColor *kPanelBG;         // rgba(15,16,14,0.66)
+UIColor *kField;           // #302d2e
+UIColor *kControl;         // #c5bcba
+UIColor *kControlLight;    // #eee9e5
+UIColor *kControlDark;     // #6b6668
+
+UIFont *MWBPixelFont(CGFloat size) {
+    UIFont *f = [UIFont fontWithName:@"Fusion-Pixel-8px-Prop-zh_hans-Regular" size:size];
+    if (!f) f = [UIFont fontWithName:@"Fusion Pixel 8px Prop zh_hans" size:size];
+    return f ?: [UIFont systemFontOfSize:size];
+}
+
+// 注册内嵌的 Pixelify Sans 字体
+void MWBRegisterFont(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        kTopBar        = MWB_COLOR(0x77,0x70,0x78);
+        kSidebar       = MWB_COLOR(0xa6,0x9d,0x99);
+        kSidebarLight  = MWB_COLOR(0xc3,0xbb,0xb6);
+        kSidebarDark   = MWB_COLOR(0x65,0x5f,0x5f);
+        kInk           = MWB_COLOR(0x34,0x31,0x32);
+        kWhiteText     = MWB_COLOR(0xee,0xea,0xe6);
+        kPanelBG       = [UIColor colorWithRed:15/255.0 green:16/255.0 blue:14/255.0 alpha:0.66];
+        kField         = MWB_COLOR(0x30,0x2d,0x2e);
+        kControl       = MWB_COLOR(0xc5,0xbc,0xba);
+        kControlLight  = MWB_COLOR(0xee,0xe9,0xe5);
+        kControlDark   = MWB_COLOR(0x6b,0x66,0x68);
+
+        CGDataProviderRef provider = CGDataProviderCreateWithData(NULL, kFusionPixelFont, kFusionPixelFont_len, NULL);
+        CGFontRef cgFont = CGFontCreateWithDataProvider(provider);
+        if (cgFont) { CTFontManagerRegisterGraphicsFont(cgFont, NULL); CGFontRelease(cgFont); }
+        CGDataProviderRelease(provider);
+    });
+}
+
+// MC 原版开关音效: click.m4a, 运行时从游戏 bundle 加载 (不打包版权素材, 与贴图同路)
+static AVAudioPlayer *gMWBClickPlayer = nil;
+void MWBEnsureClickLoaded(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSURL *url = [[NSBundle mainBundle] URLForResource:@"click" withExtension:@"m4a"];
+        NSString *msg = nil;
+        if (url) {
+            NSError *err = nil;
+            gMWBClickPlayer = [[AVAudioPlayer alloc] initWithContentsOfURL:url error:&err];
+            if (gMWBClickPlayer) {
+                gMWBClickPlayer.volume = 1.0;
+                [gMWBClickPlayer prepareToPlay];
+                msg = [NSString stringWithFormat:@"[魔玩盒子] 点击音已加载(%.2fs)", gMWBClickPlayer.duration];
+            } else {
+                msg = [NSString stringWithFormat:@"[魔玩盒子] 点击音加载失败: %@", err.localizedDescription];
+            }
+        } else {
+            msg = @"[魔玩盒子] 未找到 click.m4a";
+        }
+        NSLog(@"%@", msg);
+        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) {
+            [fh seekToEndOfFile];
+            NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], msg];
+            [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+            [fh closeFile];
+        }
+    });
+}
+void MWBPlayClick(void) {
+    MWBEnsureClickLoaded();
+    if (gMWBClickPlayer) { gMWBClickPlayer.currentTime = 0; [gMWBClickPlayer play]; }
+}
+
+// 创建带像素阴影的属性字符串
+NSAttributedString *MWBPixelText(NSString *text, UIFont *font, UIColor *color,
+                                        CGFloat shadowX, CGFloat shadowY, UIColor *shadowColor) {
+    NSShadow *s = [[NSShadow alloc] init];
+    s.shadowColor = shadowColor;
+    s.shadowOffset = (CGSize){shadowX, shadowY};
+    s.shadowBlurRadius = 0;
+    return [[NSAttributedString alloc] initWithString:text attributes:@{
+        NSFontAttributeName: font,
+        NSForegroundColorAttributeName: color,
+        NSShadowAttributeName: s,
+    }];
+}
+
+#pragma mark - 像素边框视图 (模拟 CSS border + inset box-shadow)
+
+@implementation MWBPixelView {
+    CALayer *_top, *_left, *_bottom, *_right;
+}
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        _outerWidth = 4; _insetWidth = 4;
+        _outerColor = MWB_COLOR(0x2b,0x29,0x2a);
+        _insetLight = kSidebarLight;
+        _insetDark = kSidebarDark;
+        self.layer.magnificationFilter = kCAFilterNearest;
+    }
+    return self;
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat w = self.bounds.size.width, h = self.bounds.size.height;
+    CGFloat o = _outerWidth, i = _insetWidth;
+    self.layer.borderWidth = o;
+    self.layer.borderColor = _outerColor.CGColor;
+    if (!_top) {
+        _top = [CALayer layer]; _left = [CALayer layer];
+        _bottom = [CALayer layer]; _right = [CALayer layer];
+        [self.layer addSublayer:_top]; [self.layer addSublayer:_left];
+        [self.layer addSublayer:_bottom]; [self.layer addSublayer:_right];
+    }
+    _top.frame = (CGRect){{o,o},{w - 2*o,i}}; _top.backgroundColor = _insetLight.CGColor;
+    _left.frame = (CGRect){{o,o},{i,h - 2*o}}; _left.backgroundColor = _insetLight.CGColor;
+    _bottom.frame = (CGRect){{o,h - o - i},{w - 2*o,i}}; _bottom.backgroundColor = _insetDark.CGColor;
+    _right.frame = (CGRect){{w - o - i,o},{i,h - 2*o}}; _right.backgroundColor = _insetDark.CGColor;
+}
+@end
+
+#pragma mark - SVG path 解析 (支持 M/L/H/V/Z 及小写相对命令)
+
+UIBezierPath *MWBPathFromSVG(NSString *d) {
+    UIBezierPath *p = [UIBezierPath bezierPath];
+    CGFloat x = 0, y = 0, sx = 0, sy = 0;
+    __block NSUInteger i = 0, n = d.length;
+    static NSCharacterSet *numStart;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ numStart = [NSCharacterSet characterSetWithCharactersInString:@"-0123456789."]; });
+
+    CGFloat (^readNum)(void) = ^CGFloat{
+        while (i < n) { unichar c=[d characterAtIndex:i]; if(c==' '||c==','||c=='\n') i++; else break; }
+        CGFloat sign=1, num=0, frac=0, div=1; BOOL dot=NO;
+        if (i<n && [d characterAtIndex:i]=='-') { sign=-1; i++; }
+        while (i<n) {
+            unichar c=[d characterAtIndex:i];
+            if (c>='0'&&c<='9') { if(dot){frac=frac*10+(c-'0');div*=10;} else num=num*10+(c-'0'); i++; }
+            else if (c=='.'&&!dot) { dot=YES; i++; } else break;
+        }
+        return sign*(num+frac/div);
+    };
+    BOOL (^atNum)(void) = ^{ while(i<n){unichar c=[d characterAtIndex:i]; if(c==' '||c==',')i++; else break;} return i<n && [numStart characterIsMember:[d characterAtIndex:i]]; };
+
+    while (i < n) {
+        while (i<n) { unichar c=[d characterAtIndex:i]; if(c==' '||c==','||c=='\n')i++; else break; }
+        if (i>=n) break;
+        unichar cmd = [d characterAtIndex:i];
+        if (![[NSCharacterSet letterCharacterSet] characterIsMember:cmd]) break;
+        i++;
+        switch (cmd) {
+            case 'M': x=readNum(); y=readNum(); sx=x; sy=y; [p moveToPoint:(CGPoint){x,y}];
+                      while(atNum()){ x=readNum(); y=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'L': while(atNum()){ x=readNum(); y=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'H': while(atNum()){ x=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'V': while(atNum()){ y=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'm': x+=readNum(); y+=readNum(); sx=x; sy=y; [p moveToPoint:(CGPoint){x,y}]; break;
+            case 'l': while(atNum()){ x+=readNum(); y+=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'h': while(atNum()){ x+=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'v': while(atNum()){ y+=readNum(); [p addLineToPoint:(CGPoint){x,y}]; } break;
+            case 'Z': case 'z': [p closePath]; x=sx; y=sy; break;
+            default: break;
+        }
+    }
+    return p;
+}
+
+#pragma mark - 像素开关 (两格 i/b 样式)
+
+@implementation MWBPixelToggle {
+    UIView *_i, *_b;  // 左格 / 右格
+}
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.backgroundColor = MWB_COLOR(0x9c,0x96,0x95);
+        self.layer.borderWidth = 5;
+        self.layer.borderColor = MWB_COLOR(0x68,0x63,0x66).CGColor;
+        // 外框内阴影
+        UIView *hl = [[UIView alloc] init]; hl.backgroundColor = MWB_COLOR(0xc7,0xc0,0xbd);
+        UIView *sh = [[UIView alloc] init]; sh.backgroundColor = MWB_COLOR(0x4f,0x4c,0x4e);
+        hl.autoresizingMask = UIViewAutoresizingFlexibleRightMargin|UIViewAutoresizingFlexibleBottomMargin;
+        sh.autoresizingMask = UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleLeftMargin;
+        [self addSubview:hl]; [self addSubview:sh];
+        objc_setAssociatedObject(hl, "isHL", @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+        _i = [[UIView alloc] init]; _b = [[UIView alloc] init];
+        _i.layer.borderWidth = 4; _b.layer.borderWidth = 4;
+        [self addSubview:_i]; [self addSubview:_b];
+        [self addTarget:self action:@selector(toggle) forControlEvents:UIControlEventTouchUpInside];
+        [self applyStyle];
+    }
+    return self;
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat w=self.bounds.size.width, h=self.bounds.size.height, pad=7;
+    // 内阴影条
+    for (UIView *v in self.subviews) {
+        if (v == _i || v == _b) continue;
+        if ([objc_getAssociatedObject(v, "isHL") boolValue]) v.frame = (CGRect){{5,5},{w-10,4}};
+        else v.frame = (CGRect){{5,h-9},{w-10,4}};
+    }
+    CGFloat cellW = (w - pad*2 - 4) / 2;
+    _i.frame = (CGRect){{pad,pad},{cellW,h - pad*2}};
+    _b.frame = (CGRect){{pad + cellW + 4,pad},{cellW,h - pad*2}};
+}
+- (void)toggle { MWBPlayClick(); self.on = !_on; [self sendActionsForControlEvents:UIControlEventValueChanged]; }
+- (void)setOn:(BOOL)on { _on = on; [self applyStyle]; }
+- (void)applyStyle {
+    if (_on) {
+        _i.backgroundColor = MWB_COLOR(0xe7,0xdd,0xdc);
+        _i.layer.borderColor = MWB_COLOR(0xa5,0x9f,0xa0).CGColor;
+        _b.backgroundColor = MWB_COLOR(0xff,0xfd,0xfd);
+        _b.layer.borderColor = MWB_COLOR(0xc6,0xbe,0xc0).CGColor;
+    } else {
+        _i.backgroundColor = MWB_COLOR(0xc6,0xbd,0xbb);
+        _i.layer.borderColor = MWB_COLOR(0x70,0x6b,0x6c).CGColor;
+        _b.backgroundColor = MWB_COLOR(0x77,0x71,0x73);
+        _b.layer.borderColor = MWB_COLOR(0x4d,0x4a,0x4b).CGColor;
+    }
+}
+@end
+
+#pragma mark - 像素按钮 (Back / 分类按钮)
+
+@implementation MWBPixelButton
+- (instancetype)initWithFrame:(CGRect)frame {
+    if ((self = [super initWithFrame:frame])) {
+        self.layer.borderWidth = 4;
+        self.layer.borderColor = MWB_COLOR(0x31,0x2e,0x2f).CGColor;
+        self.backgroundColor = MWB_COLOR(0xb3,0xa8,0xa3);
+        self.adjustsImageWhenHighlighted = NO;
+    }
+    return self;
+}
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    if (highlighted) {
+        self.backgroundColor = MWB_COLOR(0x77,0x70,0x6e);
+        self.transform = CGAffineTransformMakeTranslation(2, 2);
+    } else {
+        self.backgroundColor = MWB_COLOR(0xb3,0xa8,0xa3);
+        self.transform = CGAffineTransformIdentity;
+    }
+}
+// 像素按钮统一 MC 点击音
+- (void)sendAction:(SEL)action to:(id)target forEvent:(UIEvent *)event {
+    MWBPlayClick();
+    [super sendAction:action to:target forEvent:event];
+}
+- (void)drawRect:(CGRect)rect {
+    CGContextRef ctx = UIGraphicsGetCurrentContext();
+    CGFloat w=rect.size.width, h=rect.size.height, b=4;
+    // 内阴影: 左上浅色, 右下深色
+    CGContextSetFillColorWithColor(ctx, MWB_COLOR(0xd5,0xce,0xca).CGColor);
+    CGContextFillRect(ctx, (CGRect){{b,b},{w-2*b,b}}); // top
+    CGContextFillRect(ctx, (CGRect){{b,b},{b,h-2*b}}); // left
+    CGContextSetFillColorWithColor(ctx, MWB_COLOR(0x77,0x70,0x6e).CGColor);
+    CGContextFillRect(ctx, (CGRect){{b,h-2*b},{w-2*b,b}}); // bottom
+    CGContextFillRect(ctx, (CGRect){{w-2*b,b},{b,h-2*b}}); // right
+}
+@end
+
+#pragma mark - 侧栏图标按钮
+
+@implementation MWBSideButton {
+    NSMutableArray<CAShapeLayer *> *_shapeLayers;
+}
+- (instancetype)initWithSVGPaths:(NSArray<NSString *> *)paths {
+    if ((self = [super init])) {
+        self.backgroundColor = MWB_COLOR(0xad,0xa4,0xa0);
+        self.layer.borderWidth = 0;
+        _shapeLayers = [NSMutableArray new];
+        for (NSString *svg in paths) {
+            CAShapeLayer *s = [CAShapeLayer layer];
+            s.path = [MWBPathFromSVG(svg) CGPath];
+            s.fillColor = MWB_COLOR(0x4b,0x47,0x49).CGColor;
+            s.strokeColor = MWB_COLOR(0x2f,0x2d,0x2e).CGColor;
+            s.lineWidth = 2;
+            s.lineJoin = kCALineJoinMiter;
+            [self.layer addSublayer:s];
+            [_shapeLayers addObject:s];
+        }
+    }
+    return self;
+}
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    CGFloat w=self.bounds.size.width, h=self.bounds.size.height, pad=w*0.13;
+    CGFloat s = MIN(w,h) - pad*2;
+    CGFloat ox = (w-s)/2, oy=(h-s)/2;
+    // 缩放 64x64 viewBox 到实际尺寸
+    CGAffineTransform t = CGAffineTransformMakeScale(s/64.0, s/64.0);
+    for (CAShapeLayer *layer in _shapeLayers) {
+        CGPathRef scaled = CGPathCreateCopyByTransformingPath(layer.path, &t);
+        layer.path = scaled;
+        CGPathRelease(scaled);
+        layer.frame = (CGRect){{ox,oy},{s,s}};
+        layer.bounds = (CGRect){{0,0},{s,s}};
+        layer.position = (CGPoint){w/2, h/2};
+    }
+}
+- (void)setActive:(BOOL)active {
+    _active = active;
+    self.backgroundColor = active ? MWB_COLOR(0xb8,0xaf,0xab) : MWB_COLOR(0xad,0xa4,0xa0);
+}
+- (void)setHighlighted:(BOOL)highlighted {
+    [super setHighlighted:highlighted];
+    if (highlighted) self.transform = CGAffineTransformMakeTranslation(2, 2);
+    else self.transform = CGAffineTransformIdentity;
+}
+// 侧栏图标统一 MC 点击音
+- (void)sendAction:(SEL)action to:(id)target forEvent:(UIEvent *)event {
+    MWBPlayClick();
+    [super sendAction:action to:target forEvent:event];
+}
+- (void)drawRect:(CGRect)rect {
+    CGContextRef ctx = UIGraphicsGetCurrentContext();
+    CGFloat w=rect.size.width, h=rect.size.height;
+    // 左边 4px #6a6463, 右边 4px #d3ccc7, 上边 4px #cabfba, 下边 5px #565253
+    CGContextSetFillColorWithColor(ctx, MWB_COLOR(0x6a,0x64,0x63).CGColor);
+    CGContextFillRect(ctx, (CGRect){{0,0},{4,h}});
+    CGContextSetFillColorWithColor(ctx, MWB_COLOR(0xd3,0xcc,0xc7).CGColor);
+    CGContextFillRect(ctx, (CGRect){{w-4,0},{4,h}});
+    CGContextSetFillColorWithColor(ctx, MWB_COLOR(0xca,0xbf,0xba).CGColor);
+    CGContextFillRect(ctx, (CGRect){{0,0},{w,4}});
+    CGContextSetFillColorWithColor(ctx, MWB_COLOR(0x56,0x52,0x53).CGColor);
+    CGContextFillRect(ctx, (CGRect){{0,h-5},{w,5}});
+}
+@end

@@ -97,8 +97,15 @@
   - Xcode 15.2 + iPhoneOS 17.2 SDK（Theos 自动通过 `xcrun` 找到，无需手动放 SDK）。
   - 签名用 macOS 自带 `codesign -s - --force`（ad-hoc），不依赖 ldid；Makefile 里设 `TARGET_CODESIGN`。
   - 打包用 Theos 自带的 `dm.pl`（纯 Perl），不依赖系统 dpkg-deb。`make package` 即可产出 deb。
-- **关键文件**：
-  - `Tweak.xm`：插件源码（Logos + ObjC）。
+- **关键文件**（2026-10-20 已按分类拆分，超 1k 行大文件不再有；跨文件接口集中在 `MWBCommon.h` / `EMI.h`）：
+  - `Tweak.xm`：主入口（全局状态定义 + `%ctor` 版本分发 + 各版本安装调用）。
+  - `MWBUI.h/.mm`：像素风 UI 套件（配色/字体/开关/按钮/侧栏图标/点击音）。
+  - `MWBMenu.h/.mm`：选项菜单（左侧分类导航 + 右侧设置页）。
+  - `MWBFloat.h/.mm`：单一悬浮窗（头像按钮 + 透传窗口 + 主控制器 + 安装入口 + 进世界判定）。
+  - `MWBHooks010/1133/117/143/1215/120.mm`：各版本 hook + 后端（各带 `MWBInstallHooks*` 安装函数）。
+  - `MWBActions.mm`：跨版本动作分发（治疗/附魔/传送/铺石/天气/难度/反应核/刷怪/爆炸）+ flag 通道 + 小地图 + 文件日志。
+  - `MWBDebug.mm`：触摸模拟 + cycript 调试入口 + 菜单命中探针（`hitmenu`）。
+  - `EMI.mm`（管理器+给予后端）、`EMIItems.mm`（物品表/变体/配方）、`EMIViews.mm`（纹理/立方体/图标/格子/标签）、`EMIWindow.mm`（面板+主窗口+快捷栏）。
   - `Makefile`：Theos 构建配置。
   - `control`：deb 包元数据（Sileo 显示用）。
   - `mowanbox.plist`：Substrate Filter，决定注入哪个进程。
