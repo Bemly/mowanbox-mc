@@ -13,6 +13,7 @@
 #define ABIL_MAY_FLY 2
 #define ABIL_INSTABUILD 3
 #define LEVEL_TIME_OFFSET 5512
+#define LEVEL_TIME_OVERRIDE_OFF 0x15F0   // 天空覆写(>=0 时亮度/天色只认它,不认 dayTime;-1=跟随 dayTime)
 #define ENTITY_VELOCITY_Y_OFFSET 112
 #define TICK_TIME_DAY 1000
 #define TICK_TIME_NIGHT 13000

@@ -44,8 +44,14 @@ static void hooked_levelTick(void *self) {
     orig_levelTick(self);
     MWBMarkWorldTick();
     gLevel = self;
-    if (gTimeMode == 1) *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_DAY;
-    else if (gTimeMode == 2) *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
+    // 白天/夜晚: 写 dayTime 的同时清掉天空覆写 (+0x15F0>=0 时渲染只认覆写, 逻辑只认 dayTime)
+    if (gTimeMode == 1) {
+        *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_DAY;
+        *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
+    } else if (gTimeMode == 2) {
+        *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
+        *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
+    }
 }
 #pragma mark - 0.10 生存/创造切换后端
 void MWB010SetCreative(void *player, bool creative) {

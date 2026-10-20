@@ -157,6 +157,22 @@ void MWBPollCmdFile(void) {
                 [lfh closeFile];
             }
         }
+        else if ([act isEqualToString:@"dayinfo"] && gLevel) {
+            // 时间三值探针: 逻辑时间 / 天空覆写 / 亮度字节 (0.10 白天不亮诊断用)
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                int64_t dt = *(int64_t *)((char *)gLevel + LEVEL_TIME_OFFSET);
+                int64_t ov = *(int64_t *)((char *)gLevel + LEVEL_TIME_OVERRIDE_OFF);
+                uint8_t sky = *(uint8_t *)((char *)gLevel + 0x90);
+                NSString *line = [NSString stringWithFormat:
+                    @"%@ [010时间] dayTime=%lld override=%lld sky=%d mode=%d\n",
+                    [NSDate date], (long long)dt, (long long)ov, sky, gTimeMode];
+                [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
         else if ([act isEqualToString:@"held117"] && gPlayer117) {
             void *held = ((void *(*)(void *))(MWBMainSlide() + V117_HELDITEM_VA))(gPlayer117);
             NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
