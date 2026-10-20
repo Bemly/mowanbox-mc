@@ -431,10 +431,14 @@
     gMWBDebug = t.on;
     NSLog(@"[魔玩盒子] 调试模式 %@", gMWBDebug ? @"已开启" : @"已关闭");
 }
-- (void)setTime:(MWBPixelButton *)sender { gTimeMode = (int)sender.tag; }
+- (void)setTime:(MWBPixelButton *)sender {
+    gTimeMode = (int)sender.tag;
+    [self close];   // 时间是纯视觉效果, 关菜单直接看结果 (开着会被半透明面板压暗误判)
+}
 - (void)setWeather:(MWBPixelButton *)sender {
     if (!MWBWeatherSupported()) return;
     gWeatherMode = (int)sender.tag - 2;
+    [self close];   // 同上
 }
 - (void)setDifficulty:(MWBPixelButton *)sender { MWBSetDifficulty010((int)sender.tag - 15); }
 - (void)doAction:(MWBPixelButton *)sender {

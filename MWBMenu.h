@@ -8,5 +8,6 @@
 @property (nonatomic) NSInteger currentPage;
 - (void)showInView:(UIView *)view;
 - (void)hide;
+- (void)close;
 - (void)showPage:(NSInteger)idx;
 @end
