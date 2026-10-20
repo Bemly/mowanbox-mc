@@ -1,6 +1,7 @@
 /* MWBHooks010.mm — 0.10 hook (normalTick/levelTick/加速常量) */
 #import "MWBCommon.h"
 #import <mach/mach.h>
+#import <math.h>
 
 #pragma mark - C++ 游戏函数 hook
 
@@ -55,46 +56,39 @@ static void hooked_010_setLevel(void *self, void *level) {
 // 时间跳变后重算已加载区块的存储光照: 香草只在地形生成时算一次
 // (全二进制仅 RandomLevelSource::postProcess 一处调用), 时间变了不管;
 // 网格烘焙读的是这份存储值 (TileSource::getBrightness 直接返回, 不减实时亮度),
-// 所以光重建网格没用, 必须先逐块重算存储光照再重建
+// 所以光重建网格没用, 必须先逐块重算存储光照再重建。
+// 枚举走渲染线程同款虚表查找口 (slot+0x10, getRawBrightness 每天每帧都在调,
+// 只返回已加载、不生成新区块, 天然线程安全), 以玩家为中心半径8, 不碰内部表布局。
 void MWB010RelightLoadedChunks(void) {
     if (!gLocalPlayer || !gLevel) return;
     void *ts = *(void **)((char *)gLocalPlayer + 0x48);
     if (!ts) return;
     void *cs = *(void **)((char *)ts + 32);  // ChunkSource (getRawBrightness 同款取法)
     if (!cs) return;
-    // 类型确认: MainChunkSource 的虚表+0x10 必须是 getExistingChunk, 否则不动 (防走错布局崩溃)
-    void *slot10 = *(void **)((char *)*(void **)cs + 0x10);
-    void *expect = MSFindSymbol(NULL, "__ZN15MainChunkSource16getExistingChunkERK8ChunkPos");
-    if (!expect || slot10 != expect) {
-        MWBLogFile(@"[010] 跳过重算: ChunkSource非MainChunkSource (slot=%p)", slot10);
-        return;
-    }
+    typedef void *(*GetChunkFn)(void *, void *);
+    GetChunkFn getChunk = (GetChunkFn)*(void **)((char *)*(void **)cs + 0x10);
     typedef void (*RelightFn)(void *, void *);
     RelightFn relight = (RelightFn)MSFindSymbol(NULL, "__ZN10LevelChunk22updateLightsAndHeightsER10TileSource");
-    if (!relight) return;
-    // 已加载表: 桶数组+0x20/桶数+0x28, 节点{next@0,hash@8,x@16,z@20,chunk@32} (getExistingChunk 反编译)
-    long nb = (long)*(void **)((char *)cs + 0x20);
-    long count = *(long *)((char *)cs + 0x28);
-    if (!nb || count <= 0 || count >= 4096) return;
+    if (!getChunk || !relight) return;
+    float px = *(float *)((char *)gLocalPlayer + 0x28);
+    float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+    int pcx = ((int)floorf(px)) >> 4, pcz = ((int)floorf(pz)) >> 4;
     uintptr_t s = MWBMainSlide();
     NSDate *t0 = [NSDate date];
-    int n = 0;
-    for (long b = 0; b < count && n < 1024; b++) {
-        void *node = *(void **)(nb + b * 8);
-        int guard = 0;
-        while (node && guard++ < 4096 && n < 1024) {
-            void *chunk = *(void **)((char *)node + 32);
-            if (chunk) {
-                void *cvt = *(void **)chunk;
-                if ((uintptr_t)cvt >= s + 0x100000000UL && (uintptr_t)cvt < s + 0x100400000UL) {
-                    relight(chunk, ts);
-                    n++;
-                }
-            }
-            node = *(void **)node;
+    int n = 0, seen = 0;
+    for (int dz = -8; dz <= 8 && n < 512; dz++) {
+        for (int dx = -8; dx <= 8 && n < 512; dx++) {
+            int pos[2] = {pcx + dx, pcz + dz};  // ChunkPos{x,z} (getExistingChunk 反编译)
+            void *chunk = getChunk(cs, pos);
+            if (!chunk) continue;
+            seen++;
+            void *cvt = *(void **)chunk;
+            if ((uintptr_t)cvt < s + 0x100000000UL || (uintptr_t)cvt >= s + 0x100400000UL) continue;
+            relight(chunk, ts);
+            n++;
         }
     }
-    MWBLogFile(@"[010] 重算区块光照 %d块 (%.1fs)", n, -[t0 timeIntervalSinceNow]);
+    MWBLogFile(@"[010] 重算区块光照 %d块 (命中%d, %.1fs)", n, seen, -[t0 timeIntervalSinceNow]);
 }
 // 时间跳变后全量重刷区块: 先重算存储光照, 再调 LevelRenderer::allChanged 让网格按新光照重建
 void MWB010RefreshChunks(void) {
@@ -103,11 +97,18 @@ void MWB010RefreshChunks(void) {
     void *vt = *(void **)gRenderer010;
     uintptr_t s = MWBMainSlide();
     if ((uintptr_t)vt < s + 0x100000000UL || (uintptr_t)vt >= s + 0x100400000UL) return;  // 虚表不在TEXT段, 不调
-    void (*allChanged)(void *) = (void (*)(void *))MSFindSymbol(NULL, "__ZN13LevelRenderer10allChangedEv");
-    if (!allChanged) return;
-    MWB010RelightLoadedChunks();  // 先重算存储光照, 否则重建用的还是旧光照
-    allChanged(gRenderer010);
-    MWBLogFile(@"[010] 已刷新区块 (allChanged renderer=%p)", gRenderer010);
+    // 重算放后台 (地形生成调同款函数本就是后台线程干的活, 主线程几百块会卡几秒),
+    // 建完回主线程重建网格; 回来时若已退世界则跳过 (防野指针)
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        MWB010RelightLoadedChunks();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!MWBIsInWorld()) return;
+            void (*allChanged)(void *) = (void (*)(void *))MSFindSymbol(NULL, "__ZN13LevelRenderer10allChangedEv");
+            if (!allChanged) return;
+            allChanged(gRenderer010);
+            MWBLogFile(@"[010] 已刷新区块 (allChanged renderer=%p)", gRenderer010);
+        });
+    });
 }
 static void hooked_levelTick(void *self) {
     orig_levelTick(self);
