@@ -53,11 +53,13 @@ static void hooked_010_setLevel(void *self, void *level) {
     gRendererLevel010 = level;
     MWBLogFile(@"[010] 捕获渲染器 %p (level=%p)", self, level);
 }
-// 时间跳变后锻造已加载区块的存储天光 (IDA 定案):
+// 时间跳变后锻造已加载区块的存储天光 + 逐块伪造通知重建 (IDA 定案):
 // 香草存储天光恒为几何量 (种子恒15, 全二进制无按时间重算的调用),
-// 网格烘焙读存储且渲染链无实时因子, 故只能把"当前亮度"直接锻进存储值:
-// 目标值 = 15 - Level+0x90 (白天15/夜晚4), 逐列高度图以上逐格比对写入,
-// 再 allChanged 重建。自然模式同样锻一次 (之后随自然漂移, 与香草一致)。
+// 网格烘焙读存储且渲染链无实时因子, 故只能把"当前亮度"直接锻进存储值。
+// 重建不用 allChanged (实测无效): 复刻 setTileAndData 的通知段
+// (监听链 ts+56, 虚表+0x30, 新=空气旧=石头 flag=3),
+// 只发通知不写世界, 走方块变化那条必定重建的路。
+// setTileAndData 反编译铁证: v42!=v39 才通知, 同值重写直接返回, 故必须伪造。
 void MWB010RelightLoadedChunks(void) {
     if (!gLocalPlayer || !gLevel) return;
     void *ts = *(void **)((char *)gLocalPlayer + 0x48);
@@ -87,7 +89,8 @@ void MWB010RelightLoadedChunks(void) {
     else { uint8_t dark = *(uint8_t *)((char *)gLevel + 0x90); target = dark >= 15 ? 0 : 15 - dark; }
     NSDate *t0 = [NSDate date];
     void *myLevel = gLevel;  // 中途退世界则停手 (防野指针)
-    int n = 0, cells = 0;
+    uintptr_t s = MWBMainSlide();
+    int n = 0, cells = 0, notified = 0;
     for (int dz = -8; dz <= 8 && n < 512; dz++) {
         for (int dx = -8; dx <= 8 && n < 512; dx++) {
             if (gLevel != myLevel || !MWBIsInWorld()) {
@@ -99,10 +102,12 @@ void MWB010RelightLoadedChunks(void) {
             if (!chunk) continue;
             n++;
             // 高度图 +0x14478 (256字节, 索引 x|z<<4); 天光数组 +0xc078
+            int chunkCells = 0, topH = 0;
             for (int lz = 0; lz < 16; lz++) {
                 for (int lx = 0; lx < 16; lx++) {
                     int h = *(uint8_t *)((char *)chunk + 0x14478 + (lx | (lz << 4)));
                     if (h < 0) h = 0; if (h > 126) continue;
+                    if (h > topH) topH = h;
                     int wx = (pos[0] << 4) + lx, wz = (pos[1] << 4) + lz;
                     for (int y = h + 1; y <= 127; y++) {
                         unsigned long off = (unsigned long)((((wz & 15) << 7) | ((wx & 15) << 11) | (y & 0xfe)) >> 1);
@@ -111,32 +116,42 @@ void MWB010RelightLoadedChunks(void) {
                         if (cur == target) continue;
                         if (y & 1) *bp = (*bp & 0x0f) | (target << 4);
                         else *bp = (*bp & 0xf0) | target;
-                        cells++;
+                        cells++; chunkCells++;
                     }
                 }
             }
+            // 有改动才伪造一次"挖掉石头"通知 (监听链 ts+56, 虚表+0x30),
+            // 只发通知不写世界, 走方块变化那条必定重建的路
+            if (chunkCells > 0) {
+                int wpos[3] = {(pos[0] << 4) + 8, topH > 126 ? 126 : topH, (pos[1] << 4) + 8};
+                uint8_t nft[2] = {0, 0}, oft[2] = {1, 0};  // 新=空气 旧=石头 (复刻真实挖掉)
+                void *lhead = *(void **)((char *)ts + 56);
+                int lguard = 0;
+                while (lhead && lguard++ < 64) {
+                    void *lis = *(void **)((char *)lhead + 16);
+                    if (lis) {
+                        void *vt = *(void **)lis;
+                        if ((uintptr_t)vt >= s + 0x100000000UL && (uintptr_t)vt < s + 0x100900000UL) {
+                            typedef void (*NotifyFn)(void *, void *, void *, void *, void *, int);
+                            NotifyFn nf = (NotifyFn)*(void **)((char *)vt + 48);
+                            nf(lis, ts, wpos, nft, oft, 3);
+                        }
+                    }
+                    lhead = *(void **)lhead;
+                }
+                notified++;
+            }
         }
     }
-    MWBLogFile(@"[010] 锻造区块天光 %d块 %d格 (mode=%d->%d, %.1fs)", n, cells, gTimeMode, target, -[t0 timeIntervalSinceNow]);
+    MWBLogFile(@"[010] 锻造天光 %d块 %d格通知%d (mode=%d->%d, %.1fs)", n, cells, notified, gTimeMode, target, -[t0 timeIntervalSinceNow]);
 }
-// 时间跳变后全量重刷区块: 先重算存储光照, 再调 LevelRenderer::allChanged 让网格按新光照重建
+// 时间跳变刷新: 后台锻造+逐块伪造通知 (重建走方块变化通道);
+ // allChanged 实测无效已删, 回主线程只记日志
 void MWB010RefreshChunks(void) {
-    if (!gRenderer010 || !gLevel) return;
-    if (gRendererLevel010 && gRendererLevel010 != gLevel) return;  // 世界已切换, 旧指针不用
-    void *vt = *(void **)gRenderer010;
-    uintptr_t s = MWBMainSlide();
-    if ((uintptr_t)vt < s + 0x100000000UL || (uintptr_t)vt >= s + 0x100400000UL) return;  // 虚表不在TEXT段, 不调
-    // 重算放后台 (地形生成调同款函数本就是后台线程干的活, 主线程几百块会卡几秒),
-    // 建完回主线程重建网格; 回来时若已退世界则跳过 (防野指针)
+    if (!gLevel) return;
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         MWB010RelightLoadedChunks();
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (!MWBIsInWorld()) return;
-            void (*allChanged)(void *) = (void (*)(void *))MSFindSymbol(NULL, "__ZN13LevelRenderer10allChangedEv");
-            if (!allChanged) return;
-            allChanged(gRenderer010);
-            MWBLogFile(@"[010] 已刷新区块 (allChanged renderer=%p)", gRenderer010);
-        });
+        MWBLogFile(@"[010] 本轮刷新收尾 (inWorld=%d)", (int)MWBIsInWorld());
     });
 }
 static void hooked_levelTick(void *self) {
