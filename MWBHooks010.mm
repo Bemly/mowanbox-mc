@@ -52,8 +52,51 @@ static void hooked_010_setLevel(void *self, void *level) {
     gRendererLevel010 = level;
     MWBLogFile(@"[010] 捕获渲染器 %p (level=%p)", self, level);
 }
-// 时间跳变后全量重刷区块: 地面光照烘焙在区块网格里, 只写 dayTime 不会重算,
-// 必须调 LevelRenderer::allChanged 让所有区块按当前亮度重建 (相当于自然过夜的重刷路径)
+// 时间跳变后重算已加载区块的存储光照: 香草只在地形生成时算一次
+// (全二进制仅 RandomLevelSource::postProcess 一处调用), 时间变了不管;
+// 网格烘焙读的是这份存储值 (TileSource::getBrightness 直接返回, 不减实时亮度),
+// 所以光重建网格没用, 必须先逐块重算存储光照再重建
+void MWB010RelightLoadedChunks(void) {
+    if (!gLocalPlayer || !gLevel) return;
+    void *ts = *(void **)((char *)gLocalPlayer + 0x48);
+    if (!ts) return;
+    void *cs = *(void **)((char *)ts + 32);  // ChunkSource (getRawBrightness 同款取法)
+    if (!cs) return;
+    // 类型确认: MainChunkSource 的虚表+0x10 必须是 getExistingChunk, 否则不动 (防走错布局崩溃)
+    void *slot10 = *(void **)((char *)*(void **)cs + 0x10);
+    void *expect = MSFindSymbol(NULL, "__ZN15MainChunkSource16getExistingChunkERK8ChunkPos");
+    if (!expect || slot10 != expect) {
+        MWBLogFile(@"[010] 跳过重算: ChunkSource非MainChunkSource (slot=%p)", slot10);
+        return;
+    }
+    typedef void (*RelightFn)(void *, void *);
+    RelightFn relight = (RelightFn)MSFindSymbol(NULL, "__ZN10LevelChunk22updateLightsAndHeightsER10TileSource");
+    if (!relight) return;
+    // 已加载表: 桶数组+0x20/桶数+0x28, 节点{next@0,hash@8,x@16,z@20,chunk@32} (getExistingChunk 反编译)
+    long nb = (long)*(void **)((char *)cs + 0x20);
+    long count = *(long *)((char *)cs + 0x28);
+    if (!nb || count <= 0 || count >= 4096) return;
+    uintptr_t s = MWBMainSlide();
+    NSDate *t0 = [NSDate date];
+    int n = 0;
+    for (long b = 0; b < count && n < 1024; b++) {
+        void *node = *(void **)(nb + b * 8);
+        int guard = 0;
+        while (node && guard++ < 4096 && n < 1024) {
+            void *chunk = *(void **)((char *)node + 32);
+            if (chunk) {
+                void *cvt = *(void **)chunk;
+                if ((uintptr_t)cvt >= s + 0x100000000UL && (uintptr_t)cvt < s + 0x100400000UL) {
+                    relight(chunk, ts);
+                    n++;
+                }
+            }
+            node = *(void **)node;
+        }
+    }
+    MWBLogFile(@"[010] 重算区块光照 %d块 (%.1fs)", n, -[t0 timeIntervalSinceNow]);
+}
+// 时间跳变后全量重刷区块: 先重算存储光照, 再调 LevelRenderer::allChanged 让网格按新光照重建
 void MWB010RefreshChunks(void) {
     if (!gRenderer010 || !gLevel) return;
     if (gRendererLevel010 && gRendererLevel010 != gLevel) return;  // 世界已切换, 旧指针不用
@@ -62,6 +105,7 @@ void MWB010RefreshChunks(void) {
     if ((uintptr_t)vt < s + 0x100000000UL || (uintptr_t)vt >= s + 0x100400000UL) return;  // 虚表不在TEXT段, 不调
     void (*allChanged)(void *) = (void (*)(void *))MSFindSymbol(NULL, "__ZN13LevelRenderer10allChangedEv");
     if (!allChanged) return;
+    MWB010RelightLoadedChunks();  // 先重算存储光照, 否则重建用的还是旧光照
     allChanged(gRenderer010);
     MWBLogFile(@"[010] 已刷新区块 (allChanged renderer=%p)", gRenderer010);
 }
@@ -77,10 +121,14 @@ static void hooked_levelTick(void *self) {
         *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
         *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
     }
-    // 时间模式一切换就全量刷新一次 (含切回自然), 让地面光跟上天空; 只在变化边沿触发
+    // 时间模式一切换就刷新一次 (含切回自然); 强制模式等30tick让亮度字节先落位,
+    // 否则重算/重建会把旧亮度烘焙进去 (夜晚转白天仍漆黑的根因)
     static int s_lastTimeMode = -1;
+    static int s_wait = 0;
     if (gTimeMode != s_lastTimeMode) {
         s_lastTimeMode = gTimeMode;
+        s_wait = (gTimeMode == 0) ? 1 : 30;
+    } else if (s_wait > 0 && --s_wait == 0) {
         dispatch_async(dispatch_get_main_queue(), ^{ MWB010RefreshChunks(); });
     }
 }
