@@ -404,6 +404,16 @@ static void MWBPollCmdFile(void);
 void *gLocalPlayer = NULL;       // LocalPlayer* (EMI 也用)
 static void *gLevel       = NULL;
 
+// 进世界判定: 世界 tick 每帧打时间戳, 进菜单时检查新鲜度
+// (主菜单/加载界面不跑世界 tick, 点悬浮窗只 toast 不开菜单)
+static NSTimeInterval gLastWorldTick = 0;
+static inline void MWBMarkWorldTick(void) {
+    gLastWorldTick = [[NSDate date] timeIntervalSince1970];
+}
+static inline BOOL MWBIsInWorld(void) {
+    return ([[NSDate date] timeIntervalSince1970] - gLastWorldTick) < 3.0;
+}
+
 #define PLAYER_ABILITIES_OFFSET   5824
 #define ABIL_INVULNERABLE 0
 #define ABIL_FLYING 1
@@ -993,6 +1003,11 @@ static void MWBApplySpeed(BOOL on) {
         _floatButton.hidden = NO;
         [UIView animateWithDuration:0.15 animations:^{ self->_floatButton.alpha = 1; }];
     } else {
+        // 主菜单/加载界面没有世界 tick, 只留悬浮窗, 点了也不开菜单
+        if (!MWBIsInWorld()) {
+            NSLog(@"[魔玩盒子] 主菜单点悬浮窗: 世界外不开菜单");
+            [self showToast:@"请先进入世界"]; return;
+        }
         _menu = [[MWBOptionsMenu alloc] initWithFrame:self.view.bounds];
         _menu.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
         __weak MWBViewController *ws = self;
@@ -1006,6 +1021,23 @@ static void MWBApplySpeed(BOOL on) {
         [UIView animateWithDuration:0.15 animations:^{ self->_floatButton.alpha = 0; } completion:^(BOOL f){ self->_floatButton.hidden = YES; }];
     }
 }
+// 轻提示 (世界外点悬浮窗时用)
+- (void)showToast:(NSString *)msg {
+    UILabel *t = [[UILabel alloc] init];
+    t.attributedText = MWBPixelText(msg, MWBPixelFont(28), kWhiteText, 2, 2, [UIColor blackColor]);
+    [t sizeToFit];
+    CGFloat w = t.bounds.size.width + 40, h = t.bounds.size.height + 24;
+    t.frame = (CGRect){{(self.view.bounds.size.width-w)/2,(self.view.bounds.size.height-h)/2},{w,h}};
+    t.textAlignment = NSTextAlignmentCenter;
+    t.backgroundColor = [UIColor colorWithWhite:0 alpha:0.75];
+    t.layer.cornerRadius = 8; t.clipsToBounds = YES;
+    t.alpha = 0;
+    [self.view addSubview:t];
+    [UIView animateWithDuration:0.2 animations:^{ t.alpha = 1; } completion:^(BOOL f){
+        [UIView animateWithDuration:0.3 delay:0.9 options:0 animations:^{ t.alpha = 0; }
+                         completion:^(BOOL f2){ [t removeFromSuperview]; }];
+    }];
+}
 @end
 
 #pragma mark - C++ 游戏函数 hook
@@ -1015,6 +1047,7 @@ static NormalTickFn orig_normalTick = NULL;
 static int gTickCount = 0;
 static void hooked_normalTick(void *self) {
     orig_normalTick(self);
+    MWBMarkWorldTick();
     gLocalPlayer = self;
     gTickCount++;
     char *abil = (char *)self + PLAYER_ABILITIES_OFFSET;
@@ -1047,6 +1080,7 @@ typedef void (*LevelTickFn)(void *self);
 static LevelTickFn orig_levelTick = NULL;
 static void hooked_levelTick(void *self) {
     orig_levelTick(self);
+    MWBMarkWorldTick();
     gLevel = self;
     if (gTimeMode == 1) *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_DAY;
     else if (gTimeMode == 2) *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
@@ -1100,6 +1134,7 @@ static void MWB1133LogAbilities(void *player, NSFileHandle *fh) {
 
 static void hooked_1133_playerTick(void *self) {
     orig_1133_playerTick(self);
+    MWBMarkWorldTick();
     gPlayer1133 = self;
     gTick1133++;
     // 无敌: entry[8]invulnerable 值=Player+2480 (Base2376+12+8*12, 逆向分队实锤)
@@ -1148,6 +1183,7 @@ static void hooked_1133_playerTick(void *self) {
 
 static void hooked_1133_levelTick(void *self) {
     orig_1133_levelTick(self);
+    MWBMarkWorldTick();
     gLevel1133 = self;
     if (gTimeMode == 1) *(int32_t *)((char *)self + V1133_LEVEL_DAYTIME_OFF) = TICK_TIME_DAY;
     else if (gTimeMode == 2) *(int32_t *)((char *)self + V1133_LEVEL_DAYTIME_OFF) = TICK_TIME_NIGHT;
@@ -1500,6 +1536,7 @@ static int gTick117 = 0;
 
 static void hooked_117_playerTick(void *self) {
     orig_117_playerTick(self);
+    MWBMarkWorldTick();
     gPlayer117 = self;
     MWBPollCmdFile();
     gTick117++;
@@ -1536,6 +1573,7 @@ static void hooked_117_playerTick(void *self) {
 }
 static void hooked_117_levelTick(void *self) {
     orig_117_levelTick(self);
+    MWBMarkWorldTick();
     if (gTimeMode == 1) *(int32_t *)((char *)self + V117_LEVEL_DAYTIME_OFF) = TICK_TIME_DAY;
     else if (gTimeMode == 2) *(int32_t *)((char *)self + V117_LEVEL_DAYTIME_OFF) = V117_NIGHT_TRUE;
     static int s_lv117 = 0;
@@ -1683,6 +1721,7 @@ static float hooked_143_getFloat(void *abil, void *entry) {
 }
 static void hooked_143_tickTime(void *level) {
     orig_143_tickTime(level);
+    MWBMarkWorldTick();
     MWBPollCmdFile();
     if (gTimeMode == 1 || gTimeMode == 2) {
         void *ld = *(void **)((char *)level + 0xf8);
@@ -1813,6 +1852,7 @@ static void *gPlayer1215 = NULL;
 
 static void hooked_1215_playerTick(void *self) {
     orig_1215_playerTick(self);
+    MWBMarkWorldTick();
     gPlayer1215 = self;
     if (gInvincible) ((unsigned char *)self)[V1215_ACTOR_INVULN_OFF] = 1;
     void *abil = (char *)self + V1215_PLAYER_ABIL_OFF;
@@ -1829,6 +1869,7 @@ static void hooked_1215_playerTick(void *self) {
 }
 static void hooked_1215_timeTick(void *level) {
     orig_1215_timeTick(level);
+    MWBMarkWorldTick();
     if (gTimeMode == 1 || gTimeMode == 2) {
         // LevelData内联, 直接加偏移 (旧代码多一次解引用是野指针bug)
         *(int32_t *)((char *)level + V1215_LD_OFF + V1215_LD_TIME_OFF) =
@@ -1917,6 +1958,7 @@ static int gTick120b = 0;
 
 static void hooked_120_tick(void *self) {
     orig_120_tick(self);
+    MWBMarkWorldTick();
     gTick120++;
     if (!gLevelData120 && self) {
         V120UnwrapFn unwrap = (V120UnwrapFn)(MWBMainSlide() + V120_UNWRAP_VA);
