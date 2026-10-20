@@ -73,7 +73,15 @@ void MWB010RelightLoadedChunks(void) {
     float px = *(float *)((char *)gLocalPlayer + 0x28);
     float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
     int pcx = ((int)floorf(px)) >> 4, pcz = ((int)floorf(pz)) >> 4;
-    uintptr_t s = MWBMainSlide();
+    // 结构校验: 脚下区块的存储坐标必须==请求坐标 (LevelChunk+0x20/+0x24, getRawBrightness 同款读法);
+    // 若查找口不是 getExistingChunk 直接放弃, 不调重算 (防错调崩溃)
+    int selfPos[2] = {pcx, pcz};
+    void *selfChunk = getChunk(cs, selfPos);
+    if (!selfChunk || *(int *)((char *)selfChunk + 0x20) != pcx ||
+        *(int *)((char *)selfChunk + 0x24) != pcz) {
+        MWBLogFile(@"[010] 重算中止: 脚下区块校验失败 (chunk=%p)", selfChunk);
+        return;
+    }
     NSDate *t0 = [NSDate date];
     int n = 0, seen = 0;
     for (int dz = -8; dz <= 8 && n < 512; dz++) {
@@ -82,10 +90,6 @@ void MWB010RelightLoadedChunks(void) {
             void *chunk = getChunk(cs, pos);
             if (!chunk) continue;
             seen++;
-            // 轻校验: 虚表落在主镜像内即可 (C++虚表在__DATA段, 不在__TEXT, 不可用TEXT段卡);
-            // 查找口是渲染线程同款, 返回的非空即真区块
-            void *cvt = *(void **)chunk;
-            if ((uintptr_t)cvt < s + 0x100000000UL || (uintptr_t)cvt >= s + 0x100900000UL) continue;
             relight(chunk, ts);
             n++;
         }
