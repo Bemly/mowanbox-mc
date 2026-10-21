@@ -110,6 +110,8 @@ bool MWB1215_AddXP(void *player, int pts);
 void MWB120ProbeMobEffect(void);
 
 // ---- 0.10 后端 (定义在 MWBHooks010.mm) ----
+void *MWB010Minecraft(void);   // MinecraftClient::tick 捕获的 MC (只读探针用, 可为 NULL)
+extern int gMcTick010Count;    // MinecraftClient::tick 调用计数 (client tick 存活探针)
 void MWB010SetCreative(void *player, bool creative);
 void MWB010SetCreativeFull(bool creative);
 bool MWB010Teleport(void *player, float x, float y, float z);

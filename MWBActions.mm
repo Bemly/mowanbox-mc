@@ -5,13 +5,14 @@
 #import "MWBUI.h"
 #import "MWBMenu.h"
 #import "MWBFloat.h"
+#import <dlfcn.h>   // cmp010 探针 dladdr 符号反查用
 
 #pragma mark - 跨版本动作分发
 
 // flag文件通道 (绕过cycript两次调用上限: ssh touch /tmp/mwbcmd-<动作>[-<参数>] 即可触发)
 // 支持: inv-0/1 fly break speed jump noclip night aura map debug time-0/1/2 weather-0/1/2/3
 //       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5 reactor diff-0/1/2/3 mob-32 explode
-//       dayinfo(0.10时间三值) light010(0.10门控+光照表只读) hitmenu blkreg1133 scaninv117 held117
+//       dayinfo(0.10时间三值) light010(0.10门控+光照表只读) cmp010(0.10重算链三方对比) hitmenu blkreg1133 scaninv117 held117
 // 注意: 游戏调用必须在tick返回后异步执行 (tick内同步调容器函数会死锁, -19冻屏教训)
 static int gPendGive117 = -1, gPendGive143 = -1, gPendEffect143 = -1, gPendEffect1133 = -1;
 static int gPendDiff010 = -1, gPendMob010 = -1;
@@ -168,8 +169,8 @@ void MWBPollCmdFile(void) {
                 int64_t ov = *(int64_t *)((char *)gLevel + LEVEL_TIME_OVERRIDE_OFF);
                 uint8_t sky = *(uint8_t *)((char *)gLevel + 0x90);
                 NSString *line = [NSString stringWithFormat:
-                    @"%@ [010时间] dayTime=%lld override=%lld sky=%d mode=%d\n",
-                    [NSDate date], (long long)dt, (long long)ov, sky, gTimeMode];
+                    @"%@ [010时间] dayTime=%lld override=%lld sky=%d mode=%d mctick=%d\n",
+                    [NSDate date], (long long)dt, (long long)ov, sky, gTimeMode, gMcTick010Count];
                 [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
                 [lfh closeFile];
             }
@@ -201,6 +202,55 @@ void MWBPollCmdFile(void) {
                 NSString *line = [NSString stringWithFormat:
                     @"%@ [010光照] gate=%d rate=%.3f tbl=%p [0]=%08x [15]=%08x [16]=%08x [128]=%08x [240]=%08x [255]=%08x\n",
                     [NSDate date], gate, rate, tbl, t0, t15, t16, t128, t240, t255];
+                [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
+        else if ([act isEqualToString:@"cmp010"]) {
+            // 重算链三方指针对比 (0.10 光照表冻结诊断: gate开但表不动, 看 MC链v27 与 gLevel 是否同体)
+            // MinecraftClient::tick 门内: v11=MC+0x178; P=*v11; V=*P(虚表); slot=*(V+0x158); v18=*v11; v27=*(v18+0xa0)
+            // 全只读 + dladdr 符号反查, 不调任何游戏函数
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                void *mc = MWB010Minecraft();
+                void *v11 = mc ? *(void **)((char *)mc + 0x178) : NULL;
+                void *P = v11 ? *(void **)v11 : NULL;
+                void *V = P ? *(void **)P : NULL;
+                void *slot = V ? *(void **)((char *)V + 0x158) : NULL;
+                const char *sname = "?";
+                Dl_info info;
+                if (slot && dladdr(slot, &info) && info.dli_sname) sname = info.dli_sname;
+                void *v18 = v11 ? *(void **)v11 : NULL;
+                void *v27 = v18 ? *(void **)((char *)v18 + 0xa0) : NULL;
+                void *mcA0 = (mc && v18 == mc) ? *(void **)((char *)mc + 0xa0) : NULL;
+                // 门全部条件: a0=a4->field_0xa0 非空; mc58==0; cp=getLocalPlayer() 非空且 +0x1854==3
+                void *a0a0 = mc ? *(void **) ((char *)mc + 0xa0) : NULL;
+                void *cp = NULL;
+                int gate2 = -999;
+                if (slot && P) {
+                    typedef void *(*GetP)(void *);
+                    cp = ((GetP)slot)(P);   // 与游戏内门同一调法: this=P(=mc)
+                    if (cp && (uintptr_t)cp > 0x100000000UL && (uintptr_t)cp < 0x400000000UL)
+                        gate2 = *(int *)((char *)cp + 0x1854);
+                }
+                long long dt27 = -999, dtG = -999;
+                int sky27 = -9, skyG = -9, mc58 = -999;
+                if (v27) {
+                    dt27 = *(int64_t *)((char *)v27 + LEVEL_TIME_OFFSET);
+                    sky27 = *(uint8_t *)((char *)v27 + 0x90);
+                }
+                if (gLevel) {
+                    dtG = *(int64_t *)((char *)gLevel + LEVEL_TIME_OFFSET);
+                    skyG = *(uint8_t *)((char *)gLevel + 0x90);
+                }
+                if (mc) mc58 = *(int *)((char *)mc + 0x58);
+                NSString *line = [NSString stringWithFormat:
+                    @"%@ [010对比] mc=%p v11=%p P=%p V=%p slot=%p(%s) v27=%p mcA0=%p dt27=%lld sky27=%d gLevel=%p dtG=%lld skyG=%d 同体=%d mc58=%d lp=%p a0a0=%p 同A0=%d cp=%p 同LP=%d gate2=%d\n",
+                    [NSDate date], mc, v11, P, V, slot, sname, v27, mcA0, dt27, sky27,
+                    gLevel, dtG, skyG, (v27 && v27 == gLevel) ? 1 : 0, mc58, gLocalPlayer,
+                    a0a0, (a0a0 && a0a0 == gLevel) ? 1 : 0, cp, (cp && cp == gLocalPlayer) ? 1 : 0, gate2];
                 [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
                 [lfh closeFile];
             }

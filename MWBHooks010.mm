@@ -62,13 +62,16 @@ void MWB010SetCreative(void *player, bool creative) {
     else *(uint32_t *)a = 0;
 }
 
-// 0.10 gMinecraft 捕获 (Minecraft::tick 首参即this) + 完整版切换 + 传送直调
+// 0.10 gMinecraft 捕获 (MinecraftClient::tick 首参即this; 旧 Minecraft::tickEii 主流程不跑, 只留 Client 版)
 static void *gMinecraft010 = NULL;
+void *MWB010Minecraft(void) { return gMinecraft010; }
+int gMcTick010Count = 0;   // MinecraftClient::tick 调用计数 (client tick 存活探针用)
 typedef void (*MinecraftTick010Fn)(void *self, int a, int b);
 static MinecraftTick010Fn orig_mc010Tick = NULL;
 static void hooked_mc010Tick(void *self, int a, int b) {
     orig_mc010Tick(self, a, b);
     gMinecraft010 = self;
+    gMcTick010Count++;
 }
 void MWB010SetCreativeFull(bool creative) {
     void (*setC)(void *, bool) = (void (*)(void *, bool))MSFindSymbol(NULL, "__ZN9Minecraft17setIsCreativeModeEb");
@@ -116,5 +119,5 @@ void MWBApplySpeed(BOOL on) {
 void MWBInstallHooks010(void) {
     MWB_HOOK("__ZN11LocalPlayer10normalTickEv", hooked_normalTick, orig_normalTick);
     MWB_HOOK("__ZN5Level4tickEv", hooked_levelTick, orig_levelTick);
-    MWB_HOOK("__ZN9Minecraft4tickEii", hooked_mc010Tick, orig_mc010Tick);
+    MWB_HOOK("__ZN15MinecraftClient4tickEii", hooked_mc010Tick, orig_mc010Tick);
 }
