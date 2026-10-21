@@ -81,23 +81,38 @@
 }
 @end
 
+CGFloat MWBFloatButtonSize(void);
+CGFloat MWBFloatButtonAlpha(void);
+
 #pragma mark - 主控制器
 
 @implementation MWBViewController
 - (void)loadView { self.view = [[UIView alloc] init]; self.view.backgroundColor = [UIColor clearColor]; }
 - (void)viewDidLoad {
     [super viewDidLoad];
+    CGFloat s = MWBFloatButtonSize();
     CGFloat sw = self.view.bounds.size.width;
-    _floatButton = [[MWBFloatingButton alloc] initWithFrame:(CGRect){{sw-22-64,22},{64,64}}];
+    _floatButton = [[MWBFloatingButton alloc] initWithFrame:(CGRect){{sw-22-s,22},{s,s}}];
     _floatButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    _floatButton.alpha = MWBFloatButtonAlpha();
     __weak MWBViewController *ws = self;
     _floatButton.onTap = ^{ [ws toggleMenu]; };
     [self.view addSubview:_floatButton];
+}
+// 小地图盒子直接挂在 overlay window 上(与 rootVC.view 同级后加盖在上),
+// 菜单开在 rootVC.view 里会被它压住: 开菜单藏小地图, 关菜单恢复 (tag 0x6D62 见 MWBActions)
+- (void)mwbSetMinimapHidden:(BOOL)h {
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if (![NSStringFromClass([w class]) containsString:@"MWBOverlay"]) continue;
+        UIView *box = [w viewWithTag:0x6D62];
+        if (box) box.hidden = h;
+    }
 }
 - (void)toggleMenu {
     MWBPlayClick();
     if (_menu.superview) {
         [_menu hide];
+        [self mwbSetMinimapHidden:NO];
         _floatButton.hidden = NO;
         [UIView animateWithDuration:0.15 animations:^{ self->_floatButton.alpha = 1; }];
     } else {
@@ -112,9 +127,11 @@
         _menu.onClose = ^{
             MWBViewController *ss = ws;
             if (!ss) return;
+            [ss mwbSetMinimapHidden:NO];
             ss->_floatButton.hidden = NO;
             [UIView animateWithDuration:0.15 animations:^{ ss->_floatButton.alpha = 1; }];
         };
+        [self mwbSetMinimapHidden:YES];
         [_menu showInView:self.view];
         [UIView animateWithDuration:0.15 animations:^{ self->_floatButton.alpha = 0; } completion:^(BOOL f){ self->_floatButton.hidden = YES; }];
     }
@@ -141,6 +158,81 @@
 #pragma mark - 安装
 
 static MWBOverlayWindow *gWindow = nil;
+
+#pragma mark - 悬浮窗偏好 (自家 plist, 与游戏存档无关)
+
+static NSString *MWBFloatPrefPath(void) {
+    return @"/var/mobile/Documents/mwbfloat.plist";
+}
+static NSMutableDictionary *MWBFloatLoadPrefs(void) {
+    NSURL *u = [NSURL fileURLWithPath:MWBFloatPrefPath()];
+    NSError *e = nil;
+    NSDictionary *ro =
+        [NSDictionary dictionaryWithContentsOfURL:u error:&e];
+    if ([ro isKindOfClass:[NSDictionary class]])
+        return [ro mutableCopy];
+    return [NSMutableDictionary new];
+}
+static const CGFloat kMWBFloatSizes[3] = {48, 64, 80};
+static const CGFloat kMWBFloatAlphas[3] = {0.55, 0.8, 1.0};
+static int MWBFloatSizeIdx(void) {
+    int s = (int)[MWBFloatLoadPrefs()[@"size"] integerValue];
+    // 未存过时 integerValue=0 会误判成"小", 用 objectForKey 区分缺省
+    if (!MWBFloatLoadPrefs()[@"size"]) return 1;
+    return (s < 0 || s > 2) ? 1 : s;
+}
+static int MWBFloatAlphaIdx(void) {
+    if (!MWBFloatLoadPrefs()[@"alpha"]) return 2;
+    int a = (int)[MWBFloatLoadPrefs()[@"alpha"] integerValue];
+    return (a < 0 || a > 2) ? 2 : a;
+}
+CGFloat MWBFloatButtonSize(void) { return kMWBFloatSizes[MWBFloatSizeIdx()]; }
+CGFloat MWBFloatButtonAlpha(void) { return kMWBFloatAlphas[MWBFloatAlphaIdx()]; }
+
+void MWBFloatApplyPrefs(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!gWindow) return;
+        UIViewController *rvc = gWindow.rootViewController;
+        if (![rvc isKindOfClass:[MWBViewController class]]) return;
+        MWBViewController *vc = (MWBViewController *)rvc;
+        if (!vc.floatButton) return;
+        CGFloat s = MWBFloatButtonSize();
+        UIView *b = vc.floatButton;
+        CGPoint c = b.center;
+        if (c.x == 0 && c.y == 0)
+            c = (CGPoint){b.superview.bounds.size.width - 22 - s / 2,
+                          22 + s / 2};
+        b.bounds = (CGRect){{0, 0}, {s, s}};
+        UIView *sup = b.superview;
+        if (sup) {
+            CGFloat w = sup.bounds.size.width, h = sup.bounds.size.height;
+            c.x = MAX(s / 2, MIN(w - s / 2, c.x));
+            c.y = MAX(s / 2 + 20, MIN(h - s / 2, c.y));
+            b.center = c;
+        }
+        b.alpha = MWBFloatButtonAlpha();
+    });
+}
+void MWBFloatSetSize(int s) {
+    if (s < 0 || s > 2) return;
+    NSMutableDictionary *d = MWBFloatLoadPrefs();
+    d[@"size"] = @(s);
+    [d writeToURL:[NSURL fileURLWithPath:MWBFloatPrefPath()] atomically:YES];
+    MWBFloatApplyPrefs();
+}
+void MWBFloatSetAlpha(int a) {
+    if (a < 0 || a > 2) return;
+    NSMutableDictionary *d = MWBFloatLoadPrefs();
+    d[@"alpha"] = @(a);
+    [d writeToURL:[NSURL fileURLWithPath:MWBFloatPrefPath()] atomically:YES];
+    MWBFloatApplyPrefs();
+}
+void MWBFloatReset(void) {
+    [[NSFileManager defaultManager] removeItemAtPath:MWBFloatPrefPath()
+                                               error:nil];
+    MWBFloatApplyPrefs();
+}
+
 void MWBInstall(void) {
     if (gWindow) return;
     dispatch_async(dispatch_get_main_queue(), ^{

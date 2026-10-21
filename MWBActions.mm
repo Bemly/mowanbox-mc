@@ -178,8 +178,25 @@ void MWBPollCmdFile(void) {
                 [lfh closeFile];
             }
         }
-        else if ([act isEqualToString:@"dayinfo"] && gLevel) {
-            // 时间三值探针: 逻辑时间 / 天空覆写 / 亮度字节 (0.10 白天不亮诊断用)
+        else if ([act isEqualToString:@"yaw010"] && gLocalPlayer) {
+            // 转向探针: 读 ENTITY_YAW_OFF/PITCH_OFF, 原地转视角后多 touch 几次对比两次日志
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                float yaw = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);
+                float pitch = *(float *)((char *)gLocalPlayer + ENTITY_PITCH_OFF);
+                float px = *(float *)((char *)gLocalPlayer + 0x28);
+                float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
+                float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+                NSString *line = [NSString stringWithFormat:
+                    @"%@ [010转向] yaw=%.1f pitch=%.1f pos=(%.1f,%.1f,%.1f)\n",
+                    [NSDate date], yaw, pitch, px, py, pz];
+                [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
+        else if ([act isEqualToString:@"dayinfo"] && gLevel) {            // 时间三值探针: 逻辑时间 / 天空覆写 / 亮度字节 (0.10 白天不亮诊断用)
             NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
@@ -858,17 +875,26 @@ void MWBMinimapRefresh(void) {
                 }
             if (is010) {
                 // 玩家箭头: 北朝上, 按 yaw 旋转 (符号待真机校, 反了改一行负号)
+                // 白芯+黑边, 比原版稍大一圈, 小图上才看得清转没转
                 CGContextRef c = ctx.CGContext;
                 CGContextSaveGState(c);
                 CGContextTranslateCTM(c, 96, 96);
                 CGContextRotateCTM(c, -yawDeg * 3.14159265f / 180.0f);
-                CGContextSetFillColorWithColor(c, [UIColor whiteColor].CGColor);
                 CGContextBeginPath(c);
-                CGContextMoveToPoint(c, 0, -7);
-                CGContextAddLineToPoint(c, 5, 5);
-                CGContextAddLineToPoint(c, -5, 5);
+                CGContextMoveToPoint(c, 0, -8);
+                CGContextAddLineToPoint(c, 6, 6);
+                CGContextAddLineToPoint(c, -6, 6);
                 CGContextClosePath(c);
+                CGContextSetFillColorWithColor(c, [UIColor whiteColor].CGColor);
                 CGContextFillPath(c);
+                CGContextBeginPath(c);
+                CGContextMoveToPoint(c, 0, -8);
+                CGContextAddLineToPoint(c, 6, 6);
+                CGContextAddLineToPoint(c, -6, 6);
+                CGContextClosePath(c);
+                CGContextSetStrokeColorWithColor(c, [UIColor blackColor].CGColor);
+                CGContextSetLineWidth(c, 1.5f);
+                CGContextStrokePath(c);
                 CGContextRestoreGState(c);
             }
         }];
@@ -884,6 +910,7 @@ void MWBMinimapRefresh(void) {
         }
         NSString *pos = [NSString stringWithFormat:@"%d, %d, %d%@", px, py, pz,
                          (is010 && gMiniMapCave010) ? @"·洞" : @""];
+        if (is010 && gMWBDebug) pos = [pos stringByAppendingFormat:@" yaw%.0f", yawDeg];
         dispatch_async(dispatch_get_main_queue(), ^{
             iv.image = img;
             if (coords) coords.attributedText = MWBPixelText(pos, MWBPixelFont(20), MWB_COLOR(0x3A, 0x2E, 0x1E),
