@@ -45,12 +45,15 @@ static void hooked_levelTick(void *self) {
     MWBMarkWorldTick();
     gLevel = self;
     // 白天/夜晚: 写 dayTime 的同时清掉天空覆写 (+0x15F0>=0 时渲染只认覆写, 逻辑只认 dayTime)
+    // 点按语义是"跳过去就松手": 下一个 tick 写一次立刻清零, 时间从新时刻自然流
     if (gTimeMode == 1) {
         *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_DAY;
         *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
+        gTimeMode = 0;
     } else if (gTimeMode == 2) {
         *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
         *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
+        gTimeMode = 0;
     }
 }
 #pragma mark - 0.10 生存/创造切换后端

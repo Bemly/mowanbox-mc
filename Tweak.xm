@@ -19,7 +19,7 @@ BOOL gNightVision = NO;
 BOOL gKillAura    = NO;
 BOOL gMinimap     = NO;
 int  gGV          = 0;   // 当前游戏版本 (MWBGameVersion 数值, %ctor 内赋值, 跨版本分发用)
-int  gTimeMode    = 0;   // 0=不修改 1=白天 2=夜晚
+int  gTimeMode    = 0;   // 点按语义: 1=跳白天 2=跳夜晚, 下一个 tick 写一次即清零, 时间自然流
 int  gWeatherMode = 0;   // 0=不修改 1=晴 2=雨 3=雷
 
 void *gLocalPlayer = NULL;   // LocalPlayer* (EMI 也用)
