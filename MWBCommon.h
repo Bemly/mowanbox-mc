@@ -15,6 +15,8 @@
 #define LEVEL_TIME_OFFSET 5512
 #define LEVEL_TIME_OVERRIDE_OFF 0x15F0   // 天空覆写(>=0 时亮度/天色只认它,不认 dayTime;-1=跟随 dayTime)
 #define ENTITY_VELOCITY_Y_OFFSET 112
+#define ENTITY_YAW_OFF   0xAC   // LocalPlayer 偏航角(度, LookControl::tick 实锤)
+#define ENTITY_PITCH_OFF 0x7C   // LocalPlayer 俯仰角(度)
 #define TICK_TIME_DAY 1000
 #define TICK_TIME_NIGHT 13000
 
@@ -35,6 +37,9 @@ extern void *gPlayer143;
 extern void *gPlayer1215;
 extern void *gLevelData120, *gActor120;
 extern uint8_t gMiniMap1133[48 * 48];   // 小地图采样缓存 (1133 采样/动作侧读取)
+extern uint8_t gMiniMap010[48 * 48];
+extern uint8_t gMiniMap010H[48 * 48];   // 0.10 表面高度 (明暗用)
+extern uint8_t gMiniMap010D[48 * 48];   // 0.10 水深 (水色用, 非水=0)    // 小地图采样缓存 (0.10 采样/动作侧读取）
 
 // ---- 进世界判定 (定义在 MWBFloat.mm, 各版本 tick 打点) ----
 void MWBMarkWorldTick(void);
@@ -77,6 +82,7 @@ void MWBApplySpeed(BOOL on);
 // ---- 1.13.3 后端 (定义在 MWBHooks1133.mm) ----
 void MWB1133_KillAuraTick(void);
 int MWB1133_SampleMinimap(void);
+int MWB010_SampleMinimap(void);   // 0.10 表面扫描 (TileSource::getTile 逐列找顶)
 bool MWB1133_ApplyEffect(void *actor, int fxId, int amplifier, int durTicks);
 bool MWB1133_TeleportUp10(void *actor);
 int MWB1133_FillStone(int half);

@@ -33,6 +33,9 @@ void *gPlayer143  = NULL;
 void *gPlayer1215 = NULL;
 void *gLevelData120 = NULL, *gActor120 = NULL;
 uint8_t gMiniMap1133[48 * 48];   // 小地图后端: 48x48单层采样 (矿石标红由UI侧着色)
+uint8_t gMiniMap010[48 * 48];    // 0.10 小地图后端: 48x48表面扫描
+uint8_t gMiniMap010H[48 * 48];    // 0.10 表面高度
+uint8_t gMiniMap010D[48 * 48];    // 0.10 水深
 
 %ctor {
     MWBRegisterFont();

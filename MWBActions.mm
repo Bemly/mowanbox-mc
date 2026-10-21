@@ -30,7 +30,7 @@ void MWBApplyTimeTag(int tag) {
 // flag文件通道 (绕过cycript两次调用上限: ssh touch /tmp/mwbcmd-<动作>[-<参数>] 即可触发)
 // 支持: inv-0/1 fly break speed jump noclip night aura map debug time-0/1/2 weather-0/1/2/3
 //       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5 reactor diff-0/1/2/3 mob-32 explode
-//       dayinfo(0.10时间三值) light010(0.10门控+光照表只读) cmp010(0.10重算链三方对比) tod-N(0.10跳绝对时刻) dottime-tag(走按钮同语义) menupage-N(开菜单跳页) hitmenu blkreg1133 scaninv117 held117
+//       dayinfo(0.10时间三值) light010(0.10门控+光照表只读) cmp010(0.10重算链三方对比) tod-N(0.10跳绝对时刻) dottime-tag(走按钮同语义) menupage-N(开菜单跳页) touchtime-tag(直调菜单时间按钮) hitmenu blkreg1133 scaninv117 held117
 // 注意: 游戏调用必须在tick返回后异步执行 (tick内同步调容器函数会死锁, -19冻屏教训)
 static int gPendGive117 = -1, gPendGive143 = -1, gPendEffect143 = -1, gPendEffect1133 = -1;
 static int gPendDiff010 = -1, gPendMob010 = -1;
@@ -292,6 +292,39 @@ void MWBPollCmdFile(void) {
                 });
             });
         }
+        else if ([act isEqualToString:@"touchtime"]) {
+            // 直调菜单时间按钮(验证用): 打开菜单→World页→按 tag 触发真实 setTime:, 再查菜单是否还开着
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIWindow *w = nil;
+                for (UIWindow *ww in [UIApplication sharedApplication].windows)
+                    if ([NSStringFromClass([ww class]) containsString:@"MWBOverlay"]) { w = ww; break; }
+                NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+                NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+                void (^log)(NSString *) = ^(NSString *m){
+                    NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], m];
+                    if (lfh) { [lfh seekToEndOfFile]; [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; }
+                };
+                if (!w) { log(@"[touchtime] 无悬浮窗"); if (lfh) [lfh closeFile]; return; }
+                UIViewController *vc = w.rootViewController;
+                if (![vc isKindOfClass:[MWBViewController class]]) { log(@"[touchtime] rootVC类型不对"); if (lfh) [lfh closeFile]; return; }
+                MWBViewController *mvc = (MWBViewController *)vc;
+                if (!mvc.menu.superview) [mvc toggleMenu];
+                int tag = arg;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    MWBOptionsMenu *menu = mvc.menu;
+                    [menu showPage:3];
+                    MWBPixelButton *hit = nil;
+                    for (UIView *sv in menu.pages[3].subviews)
+                        if ([sv isKindOfClass:[MWBPixelButton class]] && ((MWBPixelButton *)sv).tag == tag) { hit = (MWBPixelButton *)sv; break; }
+                    if (!hit) { log([NSString stringWithFormat:@"[touchtime] tag=%d 未找到按钮", tag]); if (lfh) [lfh closeFile]; return; }
+                    [hit sendActionsForControlEvents:UIControlEventTouchUpInside];
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        log([NSString stringWithFormat:@"[touchtime] tag=%d 菜单还开着=%d", tag, menu.superview ? 1 : 0]);
+                        if (lfh) [lfh closeFile];
+                    });
+                });
+            });
+        }
         else if ([act isEqualToString:@"held117"] && gPlayer117) {
             void *held = ((void *(*)(void *))(MWBMainSlide() + V117_HELDITEM_VA))(gPlayer117);
             NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
@@ -469,13 +502,26 @@ void MWBFillStone5(void) {
 // 难度: 0.10 走 ServerLevel::setDifficulty (Level::setDifficulty 只是 RET 空壳, 真逻辑写 ServerLevel+0x14B8 并广播;
 // 经 ServerLevel::tick→Level::tick 调用链证实, hooked Level::tick 拿到的 gLevel 即 ServerLevel*, 可直接调)
 void MWBSetDifficulty010(int difficulty) {
-    if (gGV != (int)MWBGameV0_10 || !gLevel) return;
+    if (gGV != (int)MWBGameV0_10 || !gLevel) {
+        MWBLogFile(@"[010难度] 跳过 gv=%d level=%p d=%d", gGV, gLevel,
+                   difficulty);
+        return;
+    }
     if (difficulty < 0 || difficulty > 3) return;
     typedef void (*SetDifficultyFn)(void *, int);
     SetDifficultyFn setDifficulty =
         (SetDifficultyFn)MSFindSymbol(NULL, "__ZN11ServerLevel13setDifficultyEi");
+    BOOL bySym = (setDifficulty != NULL);
     if (!setDifficulty) setDifficulty = (SetDifficultyFn)(MWBMainSlide() + 0x1001b8f7cUL);
-    if (setDifficulty) setDifficulty(gLevel, difficulty);
+    if (setDifficulty) {
+        setDifficulty(gLevel, difficulty);
+        // 回读 ServerLevel+0x14B8 (写难度并广播的真位置, 见 AGENTS), 立判生效
+        int back = *(int *)((char *)gLevel + 0x14B8);
+        MWBLogFile(@"[010难度] 置%d bySym=%d 回读+0x14B8=%d",
+                   difficulty, bySym, back);
+    } else {
+        MWBLogFile(@"[010难度] 符号与回退地址全空, 未调用");
+    }
 }
 
 // 0.10 一键反应核: 在玩家脚下按游戏校验图案搭平台+核, 再直调 NetherReactorTile::use 激活
@@ -591,7 +637,140 @@ void MWB010Explode(void) {
     explode(gLevel, gLocalPlayer, px, py, pz, 4.0f);
     NSLog(@"[魔玩盒子] 定点爆炸 (%.0f,%.0f,%.0f)", px, py, pz);
 }
-// 小地图: 192x192 overlay (tag 0x6D62), 按48x48采样着色, 矿石标红
+// 0.10 小地图采样: 以玩家为中心 48x48, 每列从 y=127 往下找首个非空方块
+// 读块走 TileSource::getTile (kuna 反编译: id 经隐藏首参回写, y>=128 回默认)
+// TileSource::getTile 用 C++ sret 传回 (x8=回写地址, x0=this, x1=pos),
+// 普通 C 调用放错寄存器会崩 (-79 教训), 必须手写 x8
+// (kuna 反调用点实锤: add x8,sp,#..; mov x0,ts; mov x1,pos; bl)
+static inline uint8_t MWB010GetTile(void *ts, MWBBlockPos *pos) {
+    static void *fn = NULL;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        fn = MSFindSymbol(NULL, "__ZN10TileSource7getTileERK7TilePos");
+        if (!fn) fn = (void *)(MWBMainSlide() + 0x100102128UL);
+    });
+    uint8_t outbuf[16] = {0};
+    if (!fn || !ts || !pos) return 0;
+    register void *r0 __asm__("x0") = ts;
+    register void *r1 __asm__("x1") = pos;
+    register void *r8 __asm__("x8") = outbuf;
+    __asm__ volatile (
+        "blr %[fn]\n"
+        : "+r" (r0), "+r" (r1), "+r" (r8)
+        : [fn] "r" (fn)
+        : "memory", "cc", "x2", "x3", "x4", "x5", "x6", "x7",
+          "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17");
+    return outbuf[0];
+}
+// 洞穴判定: 头顶到天空有无遮挡 (树叶/玻璃/水/雪不算遮挡)
+static BOOL MWB010HasSky(void *ts, int x, int y, int z) {
+    for (int yy = y + 2; yy <= 127; yy++) {
+        MWBBlockPos bp = {x, yy, z};
+        uint8_t c = MWB010GetTile(ts, &bp);
+        if (c != 0 && c != 20 && c != 78 && c != 18 && c != 8 && c != 9) return NO;
+    }
+    return YES;
+}
+static BOOL gMiniMapCave010 = NO;   // 当前是否洞穴视角 (边框颜色/日志用)
+int MWB010_SampleMinimap(void) {
+    if (gGV != (int)MWBGameV0_10 || !gLocalPlayer) return -1;
+    void *ts = *(void **)((char *)gLocalPlayer + 0x48);
+    if (!ts) return -1;
+    float px = *(float *)((char *)gLocalPlayer + 0x28);
+    float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
+    float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+    int cx = (int)floorf(px), cz = (int)floorf(pz), cy = (int)floorf(py);
+    BOOL sky = MWB010HasSky(ts, cx, cy, cz);
+    if (sky != !gMiniMapCave010) {
+        gMiniMapCave010 = !sky;
+        MWBLogFile(@"[010小地图] 视角切换: %@", gMiniMapCave010 ? @"洞穴" : @"表面");
+    }
+    int air = 0;
+    for (int dz = -24; dz < 24; dz++) {
+        for (int dx = -24; dx < 24; dx++) {
+            int id = 0, sy = 0, depth = 0;
+            if (gMiniMapCave010) {
+                // 洞穴视角: 取眼睛高度层, 空气则往下找8格内地板 (矿道=空气路+石头墙, 矿石可见)
+                for (int y = cy + 2; y >= cy - 8 && y >= 0; y--) {
+                    MWBBlockPos bp = {cx + dx, y, cz + dz};
+                    uint8_t cur = MWB010GetTile(ts, &bp);
+                    if (cur == 0 || cur == 20 || cur == 78) continue;
+                    id = cur; sy = y;
+                    break;
+                }
+            } else
+            for (int y = 127; y >= 0; y--) {
+                MWBBlockPos bp = {cx + dx, y, cz + dz};
+                uint8_t cur = MWB010GetTile(ts, &bp);
+                if (cur == 0 || cur == 20 || cur == 78) {  // 空气/玻璃/雪层: 透过去
+                    if (y == 0) air++;
+                    continue;
+                }
+                id = cur; sy = y;
+                if (cur == 8 || cur == 9) {  // 水: 继续往下量水深 (最多12)
+                    for (int d = 1; d <= 12 && y - d >= 0; d++) {
+                        MWBBlockPos bd = {cx + dx, y - d, cz + dz};
+                        uint8_t c2 = MWB010GetTile(ts, &bd);
+                        if (c2 == 8 || c2 == 9) depth++;
+                        else break;
+                    }
+                }
+                break;
+            }
+            int i = (dz + 24) * 48 + (dx + 24);
+            gMiniMap010[i] = (uint8_t)(id & 0xFF);
+            gMiniMap010H[i] = (uint8_t)(sy & 0xFF);
+            gMiniMap010D[i] = (uint8_t)(depth & 0xFF);
+        }
+    }
+    return air;
+}
+
+// 原版地图风配色 (Map Atlases 即原版渲染): 方块基色 x 明暗(255/220/180) , 水按深度加深
+static UIColor *MWBMapVanilla(int blockId, int depth, float shade) {
+    CGFloat r = 128, g = 128, b = 128;
+    switch (blockId) {
+        case 0: r = 0; g = 0; b = 0; break;                        // 未知/虚空: 黑
+        case 1: case 4: case 7: case 14: case 15: case 16:         // 石/圆石/基岩/矿石: 石灰
+        case 21: case 56: case 73: case 129: r = 128; g = 128; b = 128; break;
+        case 2: r = 127; g = 178; b = 56; break;                  // 草方块
+        case 3: r = 134; g = 96; b = 67; break;                   // 泥土
+        case 5: case 53: r = 168; g = 126; b = 46; break;         // 木板/楼梯
+        case 12: case 24: r = 219; g = 207; b = 163; break;       // 沙/砂岩
+        case 8: case 9: {                                         // 水: 深加深
+            float dk = 1.0f - MIN(depth, 10) * 0.06f;
+            r = 56 * dk; g = 93 * dk; b = 201 * dk; break; }
+        case 17: r = 102; g = 81; b = 50; break;                  // 原木
+        case 18: r = 48; g = 116; b = 40; break;                  // 树叶
+        case 35: r = 220; g = 220; b = 220; break;                // 羊毛
+        case 41: r = 250; g = 238; b = 77; break;                 // 金块
+        case 42: r = 230; g = 230; b = 230; break;                // 铁块
+        case 46: r = 220; g = 60; b = 20; break;                 // TNT
+        case 57: r = 93; g = 236; b = 231; break;                 // 钻石块
+        case 79: r = 200; g = 225; b = 235; break;                // 冰
+        case 80: r = 240; g = 245; b = 245; break;                // 雪块
+        default: r = 128; g = 128; b = 128; break;
+    }
+    return [UIColor colorWithRed:r/255.0*shade green:g/255.0*shade blue:b/255.0*shade alpha:1];
+}
+
+// ---- 0.10 小地图 Map Atlases 风格 (A: 采样只动 0.10, 框/坐标行为全版本共用, 1.13.3 像素仍走旧糖果色) ----
+// 框 = 羊皮纸底(代码手绘毛边感, 不拷 Map Atlases 原贴图, 避版权)+ 内图 192 + 下方坐标行; 洞穴切深蓝边框
+#define MWB_MAP_IMG 192
+#define MWB_MAP_PAD 8
+#define MWB_MAP_BOX (MWB_MAP_IMG + MWB_MAP_PAD * 2)   // 208
+static UIColor *MWBMapParchment(void) { return MWB_COLOR(0xE8, 0xD9, 0xA6); }
+static UIColor *MWBMapFrameBrown(void) { return MWB_COLOR(0x5A, 0x45, 0x2A); }
+static UIColor *MWBMapFrameCave(void) { return MWB_COLOR(0x2E, 0x3E, 0x55); }
+
+// 夜晚变暗: 原版地图/Map Atlases 本身不分昼夜(同图); 这里按 Level+0x90 天空字节(0..11)自乘变暗, 纯显示不碰游戏
+static float MWBMinimapNightDim(void) {
+    if (gGV != (int)MWBGameV0_10 || !gLevel) return 1.0f;
+    int sky = *(uint8_t *)((char *)gLevel + 0x90);
+    if (sky < 0) sky = 0;
+    if (sky > 11) sky = 11;
+    return 0.62f + 0.38f * ((float)sky / 11.0f);
+}
 static UIColor *MWBMapColor(int blockId) {
     switch (blockId) {
         case 0: return [UIColor blackColor];
@@ -614,29 +793,104 @@ void MWBMinimapShow(BOOL on) {
         UIView *old = [w viewWithTag:0x6D62];
         if (!on) { [old removeFromSuperview]; return; }
         if (old) return;
-        UIImageView *iv = [[UIImageView alloc] initWithFrame:(CGRect){{8, 90}, {192, 192}}];
-        iv.tag = 0x6D62;
-        iv.layer.borderWidth = 3;
-        iv.layer.borderColor = [UIColor blackColor].CGColor;
-        [w addSubview:iv];
+        // 容器: 羊皮纸底 + 内图 + 坐标行 (A 只改 0.10 采样, 框体全版本共用)
+        UIView *box = [[UIView alloc] initWithFrame:(CGRect){{8, 90}, {MWB_MAP_BOX, MWB_MAP_BOX + 24}}];
+        box.tag = 0x6D62;
+        box.backgroundColor = MWBMapParchment();
+        box.layer.borderWidth = 3;
+        box.layer.borderColor = MWBMapFrameBrown().CGColor;
+        box.layer.cornerRadius = 3;
+        box.clipsToBounds = YES;
+        UIImageView *iv = [[UIImageView alloc] initWithFrame:(CGRect){{MWB_MAP_PAD, MWB_MAP_PAD}, {MWB_MAP_IMG, MWB_MAP_IMG}}];
+        iv.tag = 0x6D63;
+        iv.layer.borderWidth = 1;
+        iv.layer.borderColor = MWBMapFrameBrown().CGColor;
+        [box addSubview:iv];
+        // 北指示 (地图永远北朝上, 转的是箭头不是图, 与原版/Map Atlases 一致)
+        UILabel *n = [[UILabel alloc] initWithFrame:(CGRect){{MWB_MAP_BOX - 24, 0}, {20, 16}}];
+        n.tag = 0x6D66;
+        n.textAlignment = NSTextAlignmentCenter;
+        n.attributedText = MWBPixelText(@"N", MWBPixelFont(18), MWB_COLOR(0x5A, 0x45, 0x2A),
+                                       1, 1, MWB_COLOR(0xFF, 0xFB, 0xE6));
+        [box addSubview:n];
+        // 坐标行 (Map Atlases HUD 同款: x, y, z 居中, 字随框走)
+        UILabel *c = [[UILabel alloc] initWithFrame:(CGRect){{MWB_MAP_PAD, MWB_MAP_BOX}, {MWB_MAP_IMG, 20}}];
+        c.tag = 0x6D64;
+        c.textAlignment = NSTextAlignmentCenter;
+        c.attributedText = MWBPixelText(@"-, -, -", MWBPixelFont(20), MWB_COLOR(0x3A, 0x2E, 0x1E),
+                                       1, 1, MWB_COLOR(0xFF, 0xFB, 0xE6));
+        [box addSubview:c];
+        [w addSubview:box];
         return;
     }
 }
 void MWBMinimapRefresh(void) {
-    if (!gMinimap || gGV != (int)MWBGameV1_13_3) return;
+    if (!gMinimap) return;
+    BOOL is010 = (gGV == (int)MWBGameV0_10);
+    if (!is010 && gGV != (int)MWBGameV1_13_3) return;
     for (UIWindow *w in [UIApplication sharedApplication].windows) {
         if (![NSStringFromClass([w class]) containsString:@"MWBOverlay"]) continue;
-        UIImageView *iv = (UIImageView *)[w viewWithTag:0x6D62];
-        if (!iv) return;
-        UIGraphicsImageRenderer *rr = [[UIGraphicsImageRenderer alloc] initWithSize:(CGSize){192, 192}];
+        UIView *box = [w viewWithTag:0x6D62];
+        if (!box) return;
+        UIImageView *iv = (UIImageView *)[box viewWithTag:0x6D63];
+        if (!iv) return;   // 老版本遗留的整块 UIImageView: 下次开关重建即为新框
+        UILabel *coords = (UILabel *)[box viewWithTag:0x6D64];
+        float nightDim = is010 ? MWBMinimapNightDim() : 1.0f;
+        float yawDeg = 0;
+        if (is010 && gLocalPlayer) yawDeg = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);
+        uint8_t *map = is010 ? gMiniMap010 : gMiniMap1133;
+        UIGraphicsImageRenderer *rr = [[UIGraphicsImageRenderer alloc] initWithSize:(CGSize){MWB_MAP_IMG, MWB_MAP_IMG}];
         UIImage *img = [rr imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
             for (int z = 0; z < 48; z++)
                 for (int x = 0; x < 48; x++) {
-                    [MWBMapColor(gMiniMap1133[z * 48 + x]) setFill];
+                    if (is010) {
+                        // 原版地图式明暗: 与北邻比高, 上坡亮/下坡暗/等高常
+                        // (Map Atlases 即原版渲染; 亮度系数 255/220/180 原版值, 再乘夜晚系数)
+                        int i = z * 48 + x;
+                        int hN = (z > 0) ? gMiniMap010H[i - 48] : gMiniMap010H[i];
+                        int dh = (int)gMiniMap010H[i] - hN;
+                        float shade = dh > 0 ? 1.0f : (dh < 0 ? 180.0f/255.0f : 220.0f/255.0f);
+                        [MWBMapVanilla(gMiniMap010[i], gMiniMap010D[i], shade * nightDim) setFill];
+                    } else {
+                        [MWBMapColor(map[z * 48 + x]) setFill];
+                    }
                     CGContextFillRect(ctx.CGContext, (CGRect){{(CGFloat)(x * 4), (CGFloat)(z * 4)}, {4, 4}});
                 }
+            if (is010) {
+                // 玩家箭头: 北朝上, 按 yaw 旋转 (符号待真机校, 反了改一行负号)
+                CGContextRef c = ctx.CGContext;
+                CGContextSaveGState(c);
+                CGContextTranslateCTM(c, 96, 96);
+                CGContextRotateCTM(c, -yawDeg * 3.14159265f / 180.0f);
+                CGContextSetFillColorWithColor(c, [UIColor whiteColor].CGColor);
+                CGContextBeginPath(c);
+                CGContextMoveToPoint(c, 0, -7);
+                CGContextAddLineToPoint(c, 5, 5);
+                CGContextAddLineToPoint(c, -5, 5);
+                CGContextClosePath(c);
+                CGContextFillPath(c);
+                CGContextRestoreGState(c);
+            }
         }];
-        dispatch_async(dispatch_get_main_queue(), ^{ iv.image = img; });
+        int px = 0, py = 0, pz = 0;
+        if (is010 && gLocalPlayer) {
+            px = (int)floorf(*(float *)((char *)gLocalPlayer + 0x28));
+            py = (int)floorf(*(float *)((char *)gLocalPlayer + 0x28 + 4));
+            pz = (int)floorf(*(float *)((char *)gLocalPlayer + 0x28 + 8));
+        } else if (!is010 && gPlayer1133) {
+            px = (int)floorf(*(float *)((char *)gPlayer1133 + 0x41C));
+            py = (int)floorf(*(float *)((char *)gPlayer1133 + 0x41C + 4));
+            pz = (int)floorf(*(float *)((char *)gPlayer1133 + 0x41C + 8));
+        }
+        NSString *pos = [NSString stringWithFormat:@"%d, %d, %d%@", px, py, pz,
+                         (is010 && gMiniMapCave010) ? @"·洞" : @""];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            iv.image = img;
+            if (coords) coords.attributedText = MWBPixelText(pos, MWBPixelFont(20), MWB_COLOR(0x3A, 0x2E, 0x1E),
+                                                             1, 1, MWB_COLOR(0xFF, 0xFB, 0xE6));
+            box.layer.borderColor = (is010 && gMiniMapCave010)
+                ? MWBMapFrameCave().CGColor : MWBMapFrameBrown().CGColor;
+        });
         return;
     }
 }

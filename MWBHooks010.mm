@@ -16,6 +16,9 @@ static void hooked_normalTick(void *self) {
     if (gInvincible) abil[ABIL_INVULNERABLE] = 1;
     if (gFly) { abil[ABIL_FLYING] = 1; abil[ABIL_MAY_FLY] = 1; }
     if (gFastBreak) abil[ABIL_INSTABUILD] = 1;
+    if (gMinimap && (gTickCount % 40) == 1) {
+        if (MWB010_SampleMinimap() >= 0) MWBMinimapRefresh();
+    }
     // 超级跳跃: 检测跳跃瞬间的速度 (jumpFromGround 设为 0.42)
     if (gSuperJump) {
         float *vy = (float *)((char *)self + ENTITY_VELOCITY_Y_OFFSET);
