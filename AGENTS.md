@@ -52,6 +52,7 @@
      - 活路二（环境亮度，平滑爬行无门）：`LevelRenderer::tick@0x10007f7b8` 每 tick 把 `[0x1de]` 向实时目标收敛 10%（`dat_1002aaca4=0.1` 已从二进制读出），`renderLevel@0x1000815e8` 用它乘雾色/环境色（`[0x754/8/C]`）。跳变后它按指数爬，慢机 tick~1/s 时 30 tick 才收敛 96%，秒级 verdict 必黑；重进则初值即正确所以"修好"。"夜晚天空黑+地面白天亮"（day→night 切后环境还没爬下去）与"切白天重渲染仍黑"（night→day 切后环境还没爬上来，allChanged 与它无关）正好是一体两面。
      - 结论：bug 不是"没链"，是"两条活链各自滞后（门控冻结+指数爬行），而之前所有验证都在收敛前下了结论"。零代码判别实验（用户侧，站着别动）：夜里切白天后每 30s 截一张连截 5 分钟——若某时刻突然变亮=门控通过（看 W20/settle）；若平滑变亮=环境爬行；若 5 分钟仍黑=另有冻结，再上只读探针（表项+`+0x1854`+dayTime三值dump）。修复方向按实验结果二选一：(a) 跳变时顺手 snap `[0x774]/[0x778]` 到目标（渲染浮点，无 gameplay 副作用）；(b) 门控侧只读轮询 settle（`+0x1854==3` 再判 verdict，或 toast 提示等待），绝不提前置3（它还 gate 着 normalTick 里一段移动码，有副作用）。
    - 2026-10-21(午) 逆向参考库（都在 `/Users/bemly/Projects/mcpe-refs/`，仓库外，不提交）：`HorizonPE`（Razzile，2014-2015 iOS Substrate 开源修改器：hurt无敌/normalTick飞行/getWalkingSpeedModifier加速/jumpFromGround高跳/六个getDestroySpeed速破/DestroyBlock扩散nuker，与 mowanbox 同族；偏移是 0.8/0.9 代abil在player+0xC6C，不可照抄）；`MCPELauncher`（zhuowei/BlockLauncher，0.10年代Android原生patch集大成，找符号/绕校验/ModPE runtime思路通用）；`MCPE-NativeMods`（byteandahalf，BlockLauncher用C++ native mod例子）；`ModPEScripts`（zhuowei）/`McPeScripts`（tombailey，ModPE JS功能清单对照）。以上均为 `--depth 1` 克隆。
+   - 2026-10-21(午) 用户明确授权（长期有效）：agent 可直接在真机上操作测试世界（进世界/切时间/截图/新建与删除测试世界、装自家插件包），无需逐条请示；10-20 的进世界熔断是临时措施（当晚查明 LevelDB 损坏后即解除），不构成任何 standing 禁止；历史熔断记录保留备查。用户数据红线不变：只动测试世界，不碰其他存档/容器/钥匙串/照片等。
 
 ## Git 约定
 
