@@ -11,6 +11,7 @@
 // flag文件通道 (绕过cycript两次调用上限: ssh touch /tmp/mwbcmd-<动作>[-<参数>] 即可触发)
 // 支持: inv-0/1 fly break speed jump noclip night aura map debug time-0/1/2 weather-0/1/2/3
 //       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5 reactor diff-0/1/2/3 mob-32 explode
+//       dayinfo(0.10时间三值) light010(0.10门控+光照表只读) hitmenu blkreg1133 scaninv117 held117
 // 注意: 游戏调用必须在tick返回后异步执行 (tick内同步调容器函数会死锁, -19冻屏教训)
 static int gPendGive117 = -1, gPendGive143 = -1, gPendEffect143 = -1, gPendEffect1133 = -1;
 static int gPendDiff010 = -1, gPendMob010 = -1;
@@ -169,6 +170,37 @@ void MWBPollCmdFile(void) {
                 NSString *line = [NSString stringWithFormat:
                     @"%@ [010时间] dayTime=%lld override=%lld sky=%d mode=%d\n",
                     [NSDate date], (long long)dt, (long long)ov, sky, gTimeMode];
+                [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
+        else if ([act isEqualToString:@"light010"]) {
+            // 光照门控+光照表只读探针 (0.10 夜切昼地面不亮诊断用, 全只读不调游戏函数)
+            // +0x1854: 光照表重算门 (1=未 settle, 3=已 settle); +0x18B0: W20 派生速率
+            // 光照表: 静态 0x10034cd98+slide, 256 项 RGBA (读 6 个下标看昼夜)
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                int gate = -9;
+                float rate = -1.0f;
+                if (gLocalPlayer) {
+                    gate = *(int *)((char *)gLocalPlayer + 0x1854);
+                    rate = *(float *)((char *)gLocalPlayer + 0x18B0);
+                }
+                uint32_t t0 = 0, t15 = 0, t16 = 0, t128 = 0, t240 = 0, t255 = 0;
+                void *tbl = NULL;
+                if (gGV == (int)MWBGameV0_10) {
+                    tbl = *(void **)(MWBMainSlide() + 0x10034cd98UL);
+                    if (tbl) {
+                        uint32_t *t = (uint32_t *)tbl;
+                        t0 = t[0]; t15 = t[15]; t16 = t[16];
+                        t128 = t[128]; t240 = t[240]; t255 = t[255];
+                    }
+                }
+                NSString *line = [NSString stringWithFormat:
+                    @"%@ [010光照] gate=%d rate=%.3f tbl=%p [0]=%08x [15]=%08x [16]=%08x [128]=%08x [240]=%08x [255]=%08x\n",
+                    [NSDate date], gate, rate, tbl, t0, t15, t16, t128, t240, t255];
                 [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
                 [lfh closeFile];
             }
