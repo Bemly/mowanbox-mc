@@ -1,7 +1,6 @@
 /* MWBHooks010.mm — 0.10 hook (normalTick/levelTick/加速常量) */
 #import "MWBCommon.h"
 #import <mach/mach.h>
-#import <math.h>
 
 #pragma mark - C++ 游戏函数 hook
 
@@ -41,119 +40,6 @@ static void hooked_normalTick(void *self) {
 
 typedef void (*LevelTickFn)(void *self);
 static LevelTickFn orig_levelTick = NULL;
-
-// 0.10 渲染器捕获 (LevelRenderer::setLevel 在世界加载时调, 932B, hook 安全)
-static void *gRenderer010 = NULL;
-static void *gRendererLevel010 = NULL;
-typedef void (*SetLevelFn)(void *self, void *level);
-static SetLevelFn orig_010_setLevel = NULL;
-static void hooked_010_setLevel(void *self, void *level) {
-    orig_010_setLevel(self, level);
-    gRenderer010 = self;
-    gRendererLevel010 = level;
-    MWBLogFile(@"[010] 捕获渲染器 %p (level=%p)", self, level);
-}
-// 时间跳变后锻造已加载区块的存储天光 + 逐块伪造通知重建 (IDA 定案):
-// 香草存储天光恒为几何量 (种子恒15, 全二进制无按时间重算的调用),
-// 网格烘焙读存储且渲染链无实时因子, 故只能把"当前亮度"直接锻进存储值。
-// 重建不用 allChanged (实测无效): 复刻 setTileAndData 的通知段
-// (监听链 ts+56, 虚表+0x30, 新=空气旧=石头 flag=3),
-// 只发通知不写世界, 走方块变化那条必定重建的路。
-// setTileAndData 反编译铁证: v42!=v39 才通知, 同值重写直接返回, 故必须伪造。
-void MWB010RelightLoadedChunks(void) {
-    if (!gLocalPlayer || !gLevel) return;
-    void *ts = *(void **)((char *)gLocalPlayer + 0x48);
-    if (!ts) return;
-    void *cs = *(void **)((char *)ts + 32);  // ChunkSource (getRawBrightness 同款取法)
-    if (!cs) return;
-    typedef void *(*GetChunkFn)(void *, void *);
-    GetChunkFn getChunk = (GetChunkFn)*(void **)((char *)*(void **)cs + 0x10);
-    if (!getChunk) return;
-    float px = *(float *)((char *)gLocalPlayer + 0x28);
-    float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
-    int pcx = ((int)floorf(px)) >> 4, pcz = ((int)floorf(pz)) >> 4;
-    // 结构校验: 脚下区块的存储坐标必须==请求坐标 (LevelChunk+0x20/+0x24);
-    // 若查找口不是 getExistingChunk 直接放弃 (防错调崩溃)
-    int selfPos[2] = {pcx, pcz};
-    void *selfChunk = getChunk(cs, selfPos);
-    if (!selfChunk || *(int *)((char *)selfChunk + 0x20) != pcx ||
-        *(int *)((char *)selfChunk + 0x24) != pcz) {
-        MWBLogFile(@"[010] 锻造中止: 脚下区块校验失败 (chunk=%p)", selfChunk);
-        return;
-    }
-    // 目标不读亮度字节 (它滞后写入一拍): 白天15/夜晚4 (15-11, TICK_TIME_NIGHT=13000实测sky=11),
-    // 自然模式读实时字节 (本来就是对的)
-    uint8_t target;
-    if (gTimeMode == 1) target = 15;
-    else if (gTimeMode == 2) target = 4;
-    else { uint8_t dark = *(uint8_t *)((char *)gLevel + 0x90); target = dark >= 15 ? 0 : 15 - dark; }
-    NSDate *t0 = [NSDate date];
-    void *myLevel = gLevel;  // 中途退世界则停手 (防野指针)
-    uintptr_t s = MWBMainSlide();
-    int n = 0, cells = 0, notified = 0;
-    for (int dz = -8; dz <= 8 && n < 512; dz++) {
-        for (int dx = -8; dx <= 8 && n < 512; dx++) {
-            if (gLevel != myLevel || !MWBIsInWorld()) {
-                MWBLogFile(@"[010] 锻造中断 (世界已切换, 已锻%d块)", n);
-                return;
-            }
-            int pos[2] = {pcx + dx, pcz + dz};  // ChunkPos{x,z}
-            void *chunk = getChunk(cs, pos);
-            if (!chunk) continue;
-            n++;
-            // 高度图 +0x14478 (256字节, 索引 x|z<<4); 天光数组 +0xc078
-            int chunkCells = 0, topH = 0;
-            for (int lz = 0; lz < 16; lz++) {
-                for (int lx = 0; lx < 16; lx++) {
-                    int h = *(uint8_t *)((char *)chunk + 0x14478 + (lx | (lz << 4)));
-                    if (h < 0) h = 0; if (h > 126) continue;
-                    if (h > topH) topH = h;
-                    int wx = (pos[0] << 4) + lx, wz = (pos[1] << 4) + lz;
-                    for (int y = h + 1; y <= 127; y++) {
-                        unsigned long off = (unsigned long)((((wz & 15) << 7) | ((wx & 15) << 11) | (y & 0xfe)) >> 1);
-                        uint8_t *bp = (uint8_t *)chunk + 0xc078 + off;
-                        uint8_t cur = (y & 1) ? (*bp >> 4) : (*bp & 0xf);
-                        if (cur == target) continue;
-                        if (y & 1) *bp = (*bp & 0x0f) | (target << 4);
-                        else *bp = (*bp & 0xf0) | target;
-                        cells++; chunkCells++;
-                    }
-                }
-            }
-            // 有改动才伪造一次"挖掉石头"通知 (监听链 ts+56, 虚表+0x30),
-            // 只发通知不写世界, 走方块变化那条必定重建的路
-            if (chunkCells > 0) {
-                int wpos[3] = {(pos[0] << 4) + 8, topH > 126 ? 126 : topH, (pos[1] << 4) + 8};
-                uint8_t nft[2] = {0, 0}, oft[2] = {1, 0};  // 新=空气 旧=石头 (复刻真实挖掉)
-                void *lhead = *(void **)((char *)ts + 56);
-                int lguard = 0;
-                while (lhead && lguard++ < 64) {
-                    void *lis = *(void **)((char *)lhead + 16);
-                    if (lis) {
-                        void *vt = *(void **)lis;
-                        if ((uintptr_t)vt >= s + 0x100000000UL && (uintptr_t)vt < s + 0x100900000UL) {
-                            typedef void (*NotifyFn)(void *, void *, void *, void *, void *, int);
-                            NotifyFn nf = (NotifyFn)*(void **)((char *)vt + 48);
-                            nf(lis, ts, wpos, nft, oft, 3);
-                        }
-                    }
-                    lhead = *(void **)lhead;
-                }
-                notified++;
-            }
-        }
-    }
-    MWBLogFile(@"[010] 锻造天光 %d块 %d格通知%d (mode=%d->%d, %.1fs)", n, cells, notified, gTimeMode, target, -[t0 timeIntervalSinceNow]);
-}
-// 时间跳变刷新: 后台锻造+逐块伪造通知 (重建走方块变化通道);
- // allChanged 实测无效已删, 回主线程只记日志
-void MWB010RefreshChunks(void) {
-    if (!gLevel) return;
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        MWB010RelightLoadedChunks();
-        MWBLogFile(@"[010] 本轮刷新收尾 (inWorld=%d)", (int)MWBIsInWorld());
-    });
-}
 static void hooked_levelTick(void *self) {
     orig_levelTick(self);
     MWBMarkWorldTick();
@@ -165,12 +51,6 @@ static void hooked_levelTick(void *self) {
     } else if (gTimeMode == 2) {
         *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_NIGHT;
         *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
-    }
-    // 时间模式一切换立刻锻造+重建 (目标按模式定不读滞后字节, 中途退世界自动停)
-    static int s_lastTimeMode = -1;
-    if (gTimeMode != s_lastTimeMode) {
-        s_lastTimeMode = gTimeMode;
-        dispatch_async(dispatch_get_main_queue(), ^{ MWB010RefreshChunks(); });
     }
 }
 #pragma mark - 0.10 生存/创造切换后端
@@ -237,5 +117,4 @@ void MWBInstallHooks010(void) {
     MWB_HOOK("__ZN11LocalPlayer10normalTickEv", hooked_normalTick, orig_normalTick);
     MWB_HOOK("__ZN5Level4tickEv", hooked_levelTick, orig_levelTick);
     MWB_HOOK("__ZN9Minecraft4tickEii", hooked_mc010Tick, orig_mc010Tick);
-    MWB_HOOK("__ZN13LevelRenderer8setLevelEP5Level", hooked_010_setLevel, orig_010_setLevel);
 }

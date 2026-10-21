@@ -110,8 +110,6 @@ bool MWB1215_AddXP(void *player, int pts);
 void MWB120ProbeMobEffect(void);
 
 // ---- 0.10 后端 (定义在 MWBHooks010.mm) ----
-void MWB010RelightLoadedChunks(void);
-void MWB010RefreshChunks(void);
 void MWB010SetCreative(void *player, bool creative);
 void MWB010SetCreativeFull(bool creative);
 bool MWB010Teleport(void *player, float x, float y, float z);
