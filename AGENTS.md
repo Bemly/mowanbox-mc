@@ -57,6 +57,7 @@
    - 探针保留：`light010`（门/速率/表）、`cmp010`（v11/P/V/slot/dladdr/v27/mcA0/同体/mc58/a0a0/cp/gate2 全链）、`dayinfo+mctick`（MinecraftClient::tick 存活计数，实测 20/s）。均为 flag 触发、默认静默。
    - 2026-10-21(午) 逆向参考库（都在 `/Users/bemly/Projects/mcpe-refs/`，仓库外，不提交）：`HorizonPE`（Razzile，2014-2015 iOS Substrate 开源修改器：hurt无敌/normalTick飞行/getWalkingSpeedModifier加速/jumpFromGround高跳/六个getDestroySpeed速破/DestroyBlock扩散nuker，与 mowanbox 同族；偏移是 0.8/0.9 代abil在player+0xC6C，不可照抄）；`MCPELauncher`（zhuowei/BlockLauncher，0.10年代Android原生patch集大成，找符号/绕校验/ModPE runtime思路通用）；`MCPE-NativeMods`（byteandahalf，BlockLauncher用C++ native mod例子）；`ModPEScripts`（zhuowei）/`McPeScripts`（tombailey，ModPE JS功能清单对照）。以上均为 `--depth 1` 克隆。
    - 2026-10-21(午) 用户明确授权（长期有效）：agent 可直接在真机上操作测试世界（进世界/切时间/截图/新建与删除测试世界、装自家插件包），无需逐条请示；10-20 的进世界熔断是临时措施（当晚查明 LevelDB 损坏后即解除），不构成任何 standing 禁止；历史熔断记录保留备查。用户数据红线不变：只动测试世界，不碰其他存档/容器/钥匙串/照片等。
+    - 2026-10-22(晨) 小地图A Map Atlases风+转向实锤（插件-82~-90，设备现装-90）：框体羊皮纸底+N/坐标行/洞穴深蓝边框；夜暗按 Level+0x90 天空字节（**白天0夜里10~11**，初版映射反了已纠正）；坐标16号字防截断、N 移入图内。转向：旧 `ENTITY_YAW_OFF 0xAC` 恒0是错的，加 `dragGameFromX:y:toX:y:`（`turn-N` flag）转视角+`yawscan010` 扫玩家对象 diff 两轮锁定真 yaw=`+0x78`/pitch=`+0x7C`（311.0→432.3，矩阵区+0x194~0x1a8 联动）；箭头公式经 8 组真机截图程序量角闭环为屏角(顺时针从正北)=`(180+yaw)%360`（yaw=0朝南增量顺时针，Java 同款）；`tapGameAtX` 点不动自家 UIKit 菜单（只到游戏 VC），故关菜单走 `menuclose` flag；开菜单藏小地图/关菜单恢复双向截图验证 ✅。教训：`NSMutableString appendFormat` 拼大数据行莫名被吞（空头行），探针 dump 改 C 缓冲 `snprintf` 直拼；小箭头肉眼判向不可靠，一律程序量角。
 
 ## Git 约定
 

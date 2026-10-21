@@ -7,6 +7,11 @@
 #import "MWBFloat.h"
 #import <dlfcn.h>   // cmp010 探针 dladdr 符号反查用
 
+// 转视角直调 (定义在 MWBDebug.mm, flag turn-N 用)
+@interface MWBTouchHelper : NSObject
++ (void)dragGameFromX:(CGFloat)x1 y:(CGFloat)y1 toX:(CGFloat)x2 y:(CGFloat)y2;
+@end
+
 #pragma mark - 跨版本动作分发
 
 // 时间按钮语义 (菜单 setTime: 与 flag dottime 共用; tag: 1=白天 2=夜晚 6=日出0 7=正午4800 8=黄昏9600 9=午夜14400 25=-233 26=+233)
@@ -178,6 +183,29 @@ void MWBPollCmdFile(void) {
                 [lfh closeFile];
             }
         }
+        else if ([act isEqualToString:@"yawscan010"] && gLocalPlayer) {
+            // 转向扫内存: dump 玩家对象 +0~+0x1FF 逐字, 转视角前后各一次, diff 找真 yaw/pitch
+            // (C 缓冲直拼, 不用 NSMutableString, 另记长度防吞)
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                char *buf = (char *)malloc(8192);
+                int n = 0;
+                n += snprintf(buf + n, 8192 - n, "%s [010扫] player=%p\n",
+                              [[[NSDate date] description] UTF8String], gLocalPlayer);
+                for (int off = 0; off < 0x200 && n < 7000; off += 16) {
+                    uint32_t *w = (uint32_t *)((char *)gLocalPlayer + off);
+                    float *f = (float *)((char *)gLocalPlayer + off);
+                    n += snprintf(buf + n, 8192 - n, " +%x=%08x/%08x/%08x/%08x(%.1f/%.1f/%.1f/%.1f)",
+                                  off, w[0], w[1], w[2], w[3], f[0], f[1], f[2], f[3]);
+                }
+                n += snprintf(buf + n, 8192 - n, "\n[010扫] 共%d字节\n", n);
+                [lfh writeData:[NSData dataWithBytes:buf length:n]];
+                [lfh closeFile];
+                free(buf);
+            }
+        }
         else if ([act isEqualToString:@"yaw010"] && gLocalPlayer) {
             // 转向探针: 读 ENTITY_YAW_OFF/PITCH_OFF, 原地转视角后多 touch 几次对比两次日志
             NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
@@ -190,8 +218,8 @@ void MWBPollCmdFile(void) {
                 float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
                 float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
                 NSString *line = [NSString stringWithFormat:
-                    @"%@ [010转向] yaw=%.1f pitch=%.1f pos=(%.1f,%.1f,%.1f)\n",
-                    [NSDate date], yaw, pitch, px, py, pz];
+                    @"%@ [010转向] lp=%p yaw=%.1f pitch=%.1f pos=(%.1f,%.1f,%.1f)\n",
+                    [NSDate date], gLocalPlayer, yaw, pitch, px, py, pz];
                 [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
                 [lfh closeFile];
             }
@@ -292,8 +320,20 @@ void MWBPollCmdFile(void) {
             }
         }
         else if ([act isEqualToString:@"dottime"]) { MWBApplyTimeTag(arg); }
-        else if ([act isEqualToString:@"menupage"]) {
-            // 打开菜单并跳到指定页(布局截图用): Game=0 Blocks=1 Controls=2 World=3
+        else if ([act isEqualToString:@"menuclose"]) {
+            // 关菜单(恢复小地图, 验证层级用): cycript 点不到自家 UIKit 按钮, 走此通道
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIWindow *w = nil;
+                for (UIWindow *ww in [UIApplication sharedApplication].windows)
+                    if ([NSStringFromClass([ww class]) containsString:@"MWBOverlay"]) { w = ww; break; }
+                if (!w) return;
+                UIViewController *vc = w.rootViewController;
+                if (![vc isKindOfClass:[MWBViewController class]]) return;
+                MWBViewController *mvc = (MWBViewController *)vc;
+                if (mvc.menu.superview) [mvc.menu close];
+            });
+        }
+        else if ([act isEqualToString:@"menupage"]) {            // 打开菜单并跳到指定页(布局截图用): Game=0 Blocks=1 Controls=2 World=3
             dispatch_async(dispatch_get_main_queue(), ^{
                 UIWindow *w = nil;
                 for (UIWindow *ww in [UIApplication sharedApplication].windows)
@@ -341,6 +381,11 @@ void MWBPollCmdFile(void) {
                     });
                 });
             });
+        }
+        else if ([act isEqualToString:@"turn"]) {
+            // 转视角(验证小地图箭头用): 从屏幕中部向右水平拖 arg 点 (768x1024 点坐标系)
+            int dx = arg ? arg : 200;
+            [MWBTouchHelper dragGameFromX:512 y:500 toX:512 + dx y:500];
         }
         else if ([act isEqualToString:@"held117"] && gPlayer117) {
             void *held = ((void *(*)(void *))(MWBMainSlide() + V117_HELDITEM_VA))(gPlayer117);
@@ -780,13 +825,14 @@ static UIColor *MWBMapParchment(void) { return MWB_COLOR(0xE8, 0xD9, 0xA6); }
 static UIColor *MWBMapFrameBrown(void) { return MWB_COLOR(0x5A, 0x45, 0x2A); }
 static UIColor *MWBMapFrameCave(void) { return MWB_COLOR(0x2E, 0x3E, 0x55); }
 
-// 夜晚变暗: 原版地图/Map Atlases 本身不分昼夜(同图); 这里按 Level+0x90 天空字节(0..11)自乘变暗, 纯显示不碰游戏
+// 夜晚变暗: 原版地图/Map Atlases 本身不分昼夜(同图); 这里按 Level+0x90 天空字节自乘变暗, 纯显示不碰游戏
+// 实测: 白天 sky=0, 夜里 sky=10~11(与"亮度"字面反直觉, 以真机为准), 故 sky 越大越暗
 static float MWBMinimapNightDim(void) {
     if (gGV != (int)MWBGameV0_10 || !gLevel) return 1.0f;
     int sky = *(uint8_t *)((char *)gLevel + 0x90);
     if (sky < 0) sky = 0;
     if (sky > 11) sky = 11;
-    return 0.62f + 0.38f * ((float)sky / 11.0f);
+    return 1.0f - 0.38f * ((float)sky / 11.0f);
 }
 static UIColor *MWBMapColor(int blockId) {
     switch (blockId) {
@@ -823,18 +869,18 @@ void MWBMinimapShow(BOOL on) {
         iv.layer.borderWidth = 1;
         iv.layer.borderColor = MWBMapFrameBrown().CGColor;
         [box addSubview:iv];
-        // 北指示 (地图永远北朝上, 转的是箭头不是图, 与原版/Map Atlases 一致)
-        UILabel *n = [[UILabel alloc] initWithFrame:(CGRect){{MWB_MAP_BOX - 24, 0}, {20, 16}}];
+        // 北指示: 压在地图右上角内侧(白字黑边, 地图上才看得清), 地图永远北朝上转的是箭头
+        UILabel *n = [[UILabel alloc] initWithFrame:(CGRect){{MWB_MAP_PAD + MWB_MAP_IMG - 24, MWB_MAP_PAD + 2}, {20, 20}}];
         n.tag = 0x6D66;
         n.textAlignment = NSTextAlignmentCenter;
-        n.attributedText = MWBPixelText(@"N", MWBPixelFont(18), MWB_COLOR(0x5A, 0x45, 0x2A),
-                                       1, 1, MWB_COLOR(0xFF, 0xFB, 0xE6));
+        n.attributedText = MWBPixelText(@"N", MWBPixelFont(18), [UIColor whiteColor],
+                                       1, 1, [UIColor blackColor]);
         [box addSubview:n];
-        // 坐标行 (Map Atlases HUD 同款: x, y, z 居中, 字随框走)
-        UILabel *c = [[UILabel alloc] initWithFrame:(CGRect){{MWB_MAP_PAD, MWB_MAP_BOX}, {MWB_MAP_IMG, 20}}];
+        // 坐标行 (Map Atlases HUD 同款: x, y, z 居中, 字随框走; 16号字防"1888, 89, -27+yaw"截断)
+        UILabel *c = [[UILabel alloc] initWithFrame:(CGRect){{4, MWB_MAP_BOX}, {MWB_MAP_BOX - 8, 20}}];
         c.tag = 0x6D64;
         c.textAlignment = NSTextAlignmentCenter;
-        c.attributedText = MWBPixelText(@"-, -, -", MWBPixelFont(20), MWB_COLOR(0x3A, 0x2E, 0x1E),
+        c.attributedText = MWBPixelText(@"-, -, -", MWBPixelFont(16), MWB_COLOR(0x3A, 0x2E, 0x1E),
                                        1, 1, MWB_COLOR(0xFF, 0xFB, 0xE6));
         [box addSubview:c];
         [w addSubview:box];
@@ -874,12 +920,12 @@ void MWBMinimapRefresh(void) {
                     CGContextFillRect(ctx.CGContext, (CGRect){{(CGFloat)(x * 4), (CGFloat)(z * 4)}, {4, 4}});
                 }
             if (is010) {
-                // 玩家箭头: 北朝上, 按 yaw 旋转 (符号待真机校, 反了改一行负号)
-                // 白芯+黑边, 比原版稍大一圈, 小图上才看得清转没转
+                // 玩家箭头: 北朝上, 按 yaw 旋转; 真机标定: yaw=0朝南增量顺时针(Java 同款),
+                // 屏角(视觉顺时针从正北)=(180+yaw), 经 4 组真机截图+程序量角闭环 (39/155/31/275 全对上)
                 CGContextRef c = ctx.CGContext;
                 CGContextSaveGState(c);
                 CGContextTranslateCTM(c, 96, 96);
-                CGContextRotateCTM(c, -yawDeg * 3.14159265f / 180.0f);
+                CGContextRotateCTM(c, yawDeg * 3.14159265f / 180.0f + 3.14159265f);
                 CGContextBeginPath(c);
                 CGContextMoveToPoint(c, 0, -8);
                 CGContextAddLineToPoint(c, 6, 6);
@@ -913,7 +959,7 @@ void MWBMinimapRefresh(void) {
         if (is010 && gMWBDebug) pos = [pos stringByAppendingFormat:@" yaw%.0f", yawDeg];
         dispatch_async(dispatch_get_main_queue(), ^{
             iv.image = img;
-            if (coords) coords.attributedText = MWBPixelText(pos, MWBPixelFont(20), MWB_COLOR(0x3A, 0x2E, 0x1E),
+            if (coords) coords.attributedText = MWBPixelText(pos, MWBPixelFont(16), MWB_COLOR(0x3A, 0x2E, 0x1E),
                                                              1, 1, MWB_COLOR(0xFF, 0xFB, 0xE6));
             box.layer.borderColor = (is010 && gMiniMapCave010)
                 ? MWBMapFrameCave().CGColor : MWBMapFrameBrown().CGColor;

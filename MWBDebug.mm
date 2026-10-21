@@ -16,6 +16,9 @@
 // 不走 UIApplication sendEvent:, 不会 SIGSEGV)
 // 用法 (cycript): [MWBTouchHelper tapGameAtX:512 y:485]
 + (void)tapGameAtX:(CGFloat)x y:(CGFloat)y;
+// 直调式拖拽 (转视角用, 与 tapGameAtX 同合规路径)
+// 用法: [MWBTouchHelper dragGameFromX:512 y:500 toX:712 y:500]
++ (void)dragGameFromX:(CGFloat)x1 y:(CGFloat)y1 toX:(CGFloat)x2 y:(CGFloat)y2;
 + (UIViewController *)findGameVC;
 @end
 
@@ -151,6 +154,61 @@
             [touch setValue:@(UITouchPhaseEnded) forKey:@"_phase"];
             for (UIViewController *vc in vcs) [vc touchesEnded:s withEvent:nil];
             log(@"直调 ended 已调用");
+        });
+    });
+}
+
+// 直调式拖拽: began + 若干 moved + ended, 打到全窗口全 VC (转视角验证用)
++ (void)dragGameFromX:(CGFloat)x1 y:(CGFloat)y1 toX:(CGFloat)x2 y:(CGFloat)y2 {
+    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    void (^log)(NSString *) = ^(NSString *m) {
+        NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], m];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
+        if (fh) { [fh seekToEndOfFile]; [fh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
+    };
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSMutableArray *vcs = [NSMutableArray new];
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
+            if ([w isKindOfClass:NSClassFromString(@"MWBOverlayWindow")]) continue;
+            UIViewController *rvc = w.rootViewController;
+            while (rvc) {
+                NSString *cls = NSStringFromClass([rvc class]);
+                if (![cls containsString:@"MWB"] && ![cls containsString:@"EMI"]) [vcs addObject:rvc];
+                if (rvc.presentedViewController && rvc.presentedViewController != rvc)
+                    rvc = rvc.presentedViewController;
+                else break;
+            }
+            if (vcs.count == 0) {
+                UIViewController *fvc = [self findGameVC];
+                if (fvc) [vcs addObject:fvc];
+            }
+        }
+        UIView *gameView = [self findGameView];
+        UIWindow *window = gameView.window ?: [UIApplication sharedApplication].keyWindow;
+        log([NSString stringWithFormat:@"直调拖拽 (%.0f,%.0f)->(%.0f,%.0f) vc数=%lu",
+             x1, y1, x2, y2, (unsigned long)vcs.count]);
+        if (vcs.count == 0 || !gameView) { log(@"未找到游戏 VC/view, 放弃"); return; }
+        CGPoint pt = (CGPoint){x1, y1};
+        UITouch *touch = [self createTouchAt:pt window:window view:gameView phase:UITouchPhaseBegan];
+        NSSet *s = [NSSet setWithObject:touch];
+        for (UIViewController *vc in vcs) [vc touchesBegan:s withEvent:nil];
+        int steps = 8;
+        for (int i = 1; i <= steps; i++) {
+            CGFloat t = (CGFloat)i / steps;
+            CGPoint p = (CGPoint){x1 + (x2 - x1) * t, y1 + (y2 - y1) * t};
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.03 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{
+                [touch setValue:@(UITouchPhaseMoved) forKey:@"_phase"];
+                [touch setValue:[NSValue valueWithCGPoint:p] forKey:@"_locationInWindow"];
+                [touch setValue:[NSValue valueWithCGPoint:p] forKey:@"_previousLocationInWindow"];
+                for (UIViewController *vc in vcs) [vc touchesMoved:s withEvent:nil];
+            });
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((steps * 0.03 + 0.08) * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{
+            [touch setValue:@(UITouchPhaseEnded) forKey:@"_phase"];
+            for (UIViewController *vc in vcs) [vc touchesEnded:s withEvent:nil];
+            log(@"直调拖拽 ended 已调用");
         });
     });
 }

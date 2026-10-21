@@ -15,8 +15,8 @@
 #define LEVEL_TIME_OFFSET 5512
 #define LEVEL_TIME_OVERRIDE_OFF 0x15F0   // 天空覆写(>=0 时亮度/天色只认它,不认 dayTime;-1=跟随 dayTime)
 #define ENTITY_VELOCITY_Y_OFFSET 112
-#define ENTITY_YAW_OFF   0xAC   // LocalPlayer 偏航角(度, LookControl::tick 实锤)
-#define ENTITY_PITCH_OFF 0x7C   // LocalPlayer 俯仰角(度)
+#define ENTITY_YAW_OFF   0x78   // LocalPlayer 偏航角(度, 转视角前后内存diff实锤: 311→432, 旧0xAC恒0是错的)
+#define ENTITY_PITCH_OFF 0x7C   // LocalPlayer 俯仰角(度, 与yaw相邻成对, 转视角不变)
 #define TICK_TIME_DAY 1000
 #define TICK_TIME_NIGHT 13000
 
