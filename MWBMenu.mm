@@ -245,28 +245,70 @@
     [h3 sizeToFit];
     h3.frame = (CGRect){{padL,padTop},{h3.bounds.size.width,h3.bounds.size.height}};
     [p3 addSubview:h3];
-    // 时间切换: 白天 / 夜晚 两个像素按钮
+    // 时间切换: 两行六个像素按钮 (0.10 一天 19200 tick: 日出0/白天1000/正午4800/黄昏9600/夜晚13000/午夜14400)
+    // 白天/夜晚走 gTimeMode (跨版本通用); 日出/正午/黄昏/午夜走 gTimeCustom010 (仅 0.10, 其余版本置灰)
     UILabel *timeLabel = [self makeRowLabel:@"时间"];
     timeLabel.frame = (CGRect){{33,CGRectGetMaxY(h3.frame)+30},{200,60}};
     [p3 addSubview:timeLabel];
-    MWBPixelButton *dayBtn = [[MWBPixelButton alloc] init];
-    [dayBtn setAttributedTitle:MWBPixelText(@"白天", MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
-                                            3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
-    dayBtn.tag = 1;
-    [dayBtn addTarget:self action:@selector(setTime:) forControlEvents:UIControlEventTouchUpInside];
-    dayBtn.frame = (CGRect){{pw-33-260,CGRectGetMaxY(h3.frame)+30},{120,60}};
-    [p3 addSubview:dayBtn];
-    MWBPixelButton *nightBtn = [[MWBPixelButton alloc] init];
-    [nightBtn setAttributedTitle:MWBPixelText(@"夜晚", MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
+    NSArray *timeTitlesA = @[@"日出", @"白天", @"正午"];
+    int timeTagsA[3] = {6, 1, 7};
+    CGFloat tBase = CGRectGetMaxY(h3.frame) + 30;
+    CGFloat rowY = tBase;
+    for (int i = 0; i < 3; i++) {
+        MWBPixelButton *tBtn = [[MWBPixelButton alloc] init];
+        [tBtn setAttributedTitle:MWBPixelText(timeTitlesA[i], MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
                                               3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
-    nightBtn.tag = 2;
-    [nightBtn addTarget:self action:@selector(setTime:) forControlEvents:UIControlEventTouchUpInside];
-    nightBtn.frame = (CGRect){{pw-33-130,CGRectGetMaxY(h3.frame)+30},{120,60}};
-    [p3 addSubview:nightBtn];
-    // 天气: 晴 / 雨 / 雷 三个像素按钮 (tag 3/4/5)
+        tBtn.tag = timeTagsA[i];
+        [tBtn addTarget:self action:@selector(setTime:) forControlEvents:UIControlEventTouchUpInside];
+        tBtn.frame = (CGRect){{pw-33-390+i*135,rowY},{120,60}};
+        if (timeTagsA[i] >= 6 && !MWB010Only()) {
+            tBtn.alpha = 0.35;
+            tBtn.userInteractionEnabled = NO;
+        }
+        [p3 addSubview:tBtn];
+    }
+    tBase = rowY + 60;
+    NSArray *timeTitlesB = @[@"黄昏", @"夜晚", @"午夜"];
+    int timeTagsB[3] = {8, 2, 9};
+    rowY = tBase + 10;
+    for (int i = 0; i < 3; i++) {
+        MWBPixelButton *tBtn = [[MWBPixelButton alloc] init];
+        [tBtn setAttributedTitle:MWBPixelText(timeTitlesB[i], MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
+                                              3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
+        tBtn.tag = timeTagsB[i];
+        [tBtn addTarget:self action:@selector(setTime:) forControlEvents:UIControlEventTouchUpInside];
+        tBtn.frame = (CGRect){{pw-33-390+i*135,rowY},{120,60}};
+        if (timeTagsB[i] >= 6 && !MWB010Only()) {
+            tBtn.alpha = 0.35;
+            tBtn.userInteractionEnabled = NO;
+        }
+        [p3 addSubview:tBtn];
+    }
+    tBase = rowY + 60;
+    // 微调: -233 / +233 两个像素按钮 (tag 25/26, 在当前 dayTime 上加减, 仅 0.10)
+    UILabel *stepLabel = [self makeRowLabel:@"微调"];
+    stepLabel.frame = (CGRect){{33,tBase+10},{200,60}};
+    [p3 addSubview:stepLabel];
+    NSArray *stepTitles = @[@"-233", @"+233"];
+    int stepTags[2] = {25, 26};
+    rowY = tBase + 10;
+    for (int i = 0; i < 2; i++) {
+        MWBPixelButton *stBtn = [[MWBPixelButton alloc] init];
+        [stBtn setAttributedTitle:MWBPixelText(stepTitles[i], MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
+                                              3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
+        stBtn.tag = stepTags[i];
+        [stBtn addTarget:self action:@selector(setTime:) forControlEvents:UIControlEventTouchUpInside];
+        stBtn.frame = (CGRect){{pw-33-250+i*135,rowY},{120,60}};
+        if (!MWB010Only()) {
+            stBtn.alpha = 0.35;
+            stBtn.userInteractionEnabled = NO;
+        }
+        [p3 addSubview:stBtn];
+    }
+    tBase = rowY + 60;
     // 0.10/1.1.7/1.20.62 没有可写天气通道, 按钮置灰, 只读不点
     UILabel *wxLabel = [self makeRowLabel:@"天气"];
-    wxLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+20},{200,60}};
+    wxLabel.frame = (CGRect){{33,tBase+20},{200,60}};
     [p3 addSubview:wxLabel];
     NSArray *wxTitles = @[@"晴", @"雨", @"雷"];
     for (int i = 0; i < 3; i++) {
@@ -275,7 +317,7 @@
                                               3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
         wxBtn.tag = 3 + i;
         [wxBtn addTarget:self action:@selector(setWeather:) forControlEvents:UIControlEventTouchUpInside];
-        wxBtn.frame = (CGRect){{pw-33-400+i*135,CGRectGetMaxY(dayBtn.frame)+20},{120,60}};
+        wxBtn.frame = (CGRect){{pw-33-400+i*135,tBase+20},{120,60}};
         if (!MWBWeatherSupported()) {
             wxBtn.alpha = 0.35;
             wxBtn.userInteractionEnabled = NO;
@@ -284,7 +326,7 @@
     }
     // 动作: 治疗 / 附魔255 / 传送+10 / 铺石块 (tag 10-13)
     UILabel *actLabel = [self makeRowLabel:@"动作"];
-    actLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+100},{200,60}};
+    actLabel.frame = (CGRect){{33,tBase+100},{200,60}};
     [p3 addSubview:actLabel];
     NSArray *actTitles = @[@"治疗", @"附魔", @"传送", @"铺石"];
     for (int i = 0; i < 4; i++) {
@@ -293,14 +335,14 @@
                                                3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
         actBtn.tag = 10 + i;
         [actBtn addTarget:self action:@selector(doAction:) forControlEvents:UIControlEventTouchUpInside];
-        actBtn.frame = (CGRect){{pw-33-430+i*105,CGRectGetMaxY(dayBtn.frame)+100},{95,56}};
+        actBtn.frame = (CGRect){{pw-33-430+i*105,tBase+100},{95,56}};
         [p3 addSubview:actBtn];
     }
-    p3.frame = (CGRect){{0,0},{pw,CGRectGetMaxY(dayBtn.frame)+368}};
+    p3.frame = (CGRect){{0,0},{pw,tBase+368}};
     NSArray *diffTitles = @[@"和平", @"简单", @"普通", @"困难"];
     // 难度: 和平 / 简单 / 普通 / 困难 四个像素按钮 (tag 15-18, 目前只接了 0.10 后端)
     UILabel *diffLabel = [self makeRowLabel:@"难度"];
-    diffLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+164},{200,60}};
+    diffLabel.frame = (CGRect){{33,tBase+164},{200,60}};
     [p3 addSubview:diffLabel];
     for (int i = 0; i < 4; i++) {
         MWBPixelButton *diffBtn = [[MWBPixelButton alloc] init];
@@ -308,7 +350,7 @@
                                                 3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
         diffBtn.tag = 15 + i;
         [diffBtn addTarget:self action:@selector(setDifficulty:) forControlEvents:UIControlEventTouchUpInside];
-        diffBtn.frame = (CGRect){{pw-33-430+i*105,CGRectGetMaxY(dayBtn.frame)+164},{95,56}};
+        diffBtn.frame = (CGRect){{pw-33-430+i*105,tBase+164},{95,56}};
         if (!MWB010Only()) {
             diffBtn.alpha = 0.35;
             diffBtn.userInteractionEnabled = NO;
@@ -317,14 +359,14 @@
     }
     // 反应核: 点燃 (tag 14, 目前只接了 0.10 后端)
     UILabel *reactorLabel = [self makeRowLabel:@"反应核"];
-    reactorLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+228},{200,60}};
+    reactorLabel.frame = (CGRect){{33,tBase+228},{200,60}};
     [p3 addSubview:reactorLabel];
     MWBPixelButton *reactorBtn = [[MWBPixelButton alloc] init];
     [reactorBtn setAttributedTitle:MWBPixelText(@"点燃", MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
                                                3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
     reactorBtn.tag = 14;
     [reactorBtn addTarget:self action:@selector(doAction:) forControlEvents:UIControlEventTouchUpInside];
-    reactorBtn.frame = (CGRect){{pw-33-430,CGRectGetMaxY(dayBtn.frame)+228},{95,56}};
+    reactorBtn.frame = (CGRect){{pw-33-430,tBase+228},{95,56}};
     if (!MWB010Only()) {
         reactorBtn.alpha = 0.35;
         reactorBtn.userInteractionEnabled = NO;
@@ -336,7 +378,7 @@
                                                3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
     explodeBtn.tag = 24;
     [explodeBtn addTarget:self action:@selector(doAction:) forControlEvents:UIControlEventTouchUpInside];
-    explodeBtn.frame = (CGRect){{pw-33-430+105,CGRectGetMaxY(dayBtn.frame)+228},{95,56}};
+    explodeBtn.frame = (CGRect){{pw-33-430+105,tBase+228},{95,56}};
     if (!MWB010Only()) {
         explodeBtn.alpha = 0.35;
         explodeBtn.userInteractionEnabled = NO;
@@ -344,7 +386,7 @@
     [p3 addSubview:explodeBtn];
     // 刷怪: 僵尸 / 爬行者 / 骷髅 / 猪人 (tag 20-23, 目前只接了 0.10 后端)
     UILabel *mobLabel = [self makeRowLabel:@"刷怪"];
-    mobLabel.frame = (CGRect){{33,CGRectGetMaxY(dayBtn.frame)+292},{200,60}};
+    mobLabel.frame = (CGRect){{33,tBase+292},{200,60}};
     [p3 addSubview:mobLabel];
     NSArray *mobTitles = @[@"僵尸", @"爬行者", @"骷髅", @"猪人"];
     for (int i = 0; i < 4; i++) {
@@ -353,7 +395,7 @@
                                                3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
         mobBtn.tag = 20 + i;
         [mobBtn addTarget:self action:@selector(doAction:) forControlEvents:UIControlEventTouchUpInside];
-        mobBtn.frame = (CGRect){{pw-33-430+i*105,CGRectGetMaxY(dayBtn.frame)+292},{95,56}};
+        mobBtn.frame = (CGRect){{pw-33-430+i*105,tBase+292},{95,56}};
         if (!MWB010Only()) {
             mobBtn.alpha = 0.35;
             mobBtn.userInteractionEnabled = NO;
@@ -432,7 +474,7 @@
     NSLog(@"[魔玩盒子] 调试模式 %@", gMWBDebug ? @"已开启" : @"已关闭");
 }
 - (void)setTime:(MWBPixelButton *)sender {
-    gTimeMode = (int)sender.tag;
+    MWBApplyTimeTag((int)sender.tag);
     [self close];   // 时间是纯视觉效果, 关菜单直接看结果 (开着会被半透明面板压暗误判)
 }
 - (void)setWeather:(MWBPixelButton *)sender {

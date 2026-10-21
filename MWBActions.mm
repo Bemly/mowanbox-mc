@@ -9,10 +9,28 @@
 
 #pragma mark - 跨版本动作分发
 
+// 时间按钮语义 (菜单 setTime: 与 flag dottime 共用; tag: 1=白天 2=夜晚 6=日出0 7=正午4800 8=黄昏9600 9=午夜14400 25=-233 26=+233)
+void MWBApplyTimeTag(int tag) {
+    if (tag >= 6 && tag <= 9) {
+        static const int tods[4] = {0, 4800, 9600, 14400};
+        if (MWB010Only()) gTimeCustom010 = tods[tag - 6];
+    } else if (tag == 25 || tag == 26) {
+        if (MWB010Only() && gLevel) {
+            int64_t dt = *(int64_t *)((char *)gLevel + LEVEL_TIME_OFFSET);
+            dt += (tag == 26 ? 233 : -233);
+            if (dt < 0) dt += 19200;
+            *(int64_t *)((char *)gLevel + LEVEL_TIME_OFFSET) = dt;
+            *(int64_t *)((char *)gLevel + LEVEL_TIME_OVERRIDE_OFF) = -1;
+        }
+    } else {
+        gTimeMode = tag;
+    }
+}
+
 // flag文件通道 (绕过cycript两次调用上限: ssh touch /tmp/mwbcmd-<动作>[-<参数>] 即可触发)
 // 支持: inv-0/1 fly break speed jump noclip night aura map debug time-0/1/2 weather-0/1/2/3
 //       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5 reactor diff-0/1/2/3 mob-32 explode
-//       dayinfo(0.10时间三值) light010(0.10门控+光照表只读) cmp010(0.10重算链三方对比) hitmenu blkreg1133 scaninv117 held117
+//       dayinfo(0.10时间三值) light010(0.10门控+光照表只读) cmp010(0.10重算链三方对比) tod-N(0.10跳绝对时刻) dottime-tag(走按钮同语义) menupage-N(开菜单跳页) hitmenu blkreg1133 scaninv117 held117
 // 注意: 游戏调用必须在tick返回后异步执行 (tick内同步调容器函数会死锁, -19冻屏教训)
 static int gPendGive117 = -1, gPendGive143 = -1, gPendEffect143 = -1, gPendEffect1133 = -1;
 static int gPendDiff010 = -1, gPendMob010 = -1;
@@ -78,6 +96,7 @@ void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"map"]) { gMinimap = arg ? YES : NO; MWBMinimapShow(gMinimap); }
         else if ([act isEqualToString:@"debug"]) gMWBDebug = arg ? YES : NO;
         else if ([act isEqualToString:@"time"]) gTimeMode = arg;
+        else if ([act isEqualToString:@"tod"]) { if (arg >= 0) gTimeCustom010 = arg; }
         else if ([act isEqualToString:@"weather"]) gWeatherMode = arg;
         else if ([act isEqualToString:@"heal"]) { gPendHeal = YES; needFlush = YES; }
         else if ([act isEqualToString:@"enchant"]) { gPendEnchant = YES; needFlush = YES; }
@@ -254,6 +273,24 @@ void MWBPollCmdFile(void) {
                 [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
                 [lfh closeFile];
             }
+        }
+        else if ([act isEqualToString:@"dottime"]) { MWBApplyTimeTag(arg); }
+        else if ([act isEqualToString:@"menupage"]) {
+            // 打开菜单并跳到指定页(布局截图用): Game=0 Blocks=1 Controls=2 World=3
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIWindow *w = nil;
+                for (UIWindow *ww in [UIApplication sharedApplication].windows)
+                    if ([NSStringFromClass([ww class]) containsString:@"MWBOverlay"]) { w = ww; break; }
+                if (!w) return;
+                UIViewController *vc = w.rootViewController;
+                if (![vc isKindOfClass:[MWBViewController class]]) return;
+                MWBViewController *mvc = (MWBViewController *)vc;
+                if (!mvc.menu.superview) [mvc toggleMenu];
+                int page = arg;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [mvc.menu showPage:page];
+                });
+            });
         }
         else if ([act isEqualToString:@"held117"] && gPlayer117) {
             void *held = ((void *(*)(void *))(MWBMainSlide() + V117_HELDITEM_VA))(gPlayer117);

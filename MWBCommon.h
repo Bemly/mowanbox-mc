@@ -25,6 +25,7 @@ typedef struct { int x, y, z; } MWBBlockPos;
 extern BOOL gInvincible, gFly, gFastBreak, gSpeed, gSuperJump;
 extern BOOL gNoclip, gNightVision, gKillAura, gMinimap;
 extern int gGV, gTimeMode, gWeatherMode;
+extern int gTimeCustom010;   // 0.10 绝对时刻跳转 (Tweak.xm 定义, MWBHooks010 消费)
 extern void *gLevel;
 
 // ---- 版本指针 (定义在 Tweak.xm) ----
@@ -62,6 +63,7 @@ void MWBLogFile(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 
 // ---- 跨版本动作 (定义在 MWBActions.mm) ----
 void MWBHealNow(void);
+void MWBApplyTimeTag(int tag);   // 时间按钮语义 (菜单/flag 共用, 定义在 MWBActions.mm)
 void MWBEnchantHeld255(void);
 void MWBTeleportUp10(void);
 void MWBFillStone5(void);

@@ -46,7 +46,12 @@ static void hooked_levelTick(void *self) {
     gLevel = self;
     // 白天/夜晚: 写 dayTime 的同时清掉天空覆写 (+0x15F0>=0 时渲染只认覆写, 逻辑只认 dayTime)
     // 点按语义是"跳过去就松手": 下一个 tick 写一次立刻清零, 时间从新时刻自然流
-    if (gTimeMode == 1) {
+    // gTimeCustom010: 绝对时刻 (菜单四时段/flag tod-N), 优先于 gTimeMode
+    if (gTimeCustom010 >= 0) {
+        *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = gTimeCustom010;
+        *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
+        gTimeCustom010 = -1;
+    } else if (gTimeMode == 1) {
         *(int64_t *)((char *)self + LEVEL_TIME_OFFSET) = TICK_TIME_DAY;
         *(int64_t *)((char *)self + LEVEL_TIME_OVERRIDE_OFF) = -1;
         gTimeMode = 0;
