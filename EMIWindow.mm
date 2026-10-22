@@ -4,6 +4,7 @@
 #import "EMI.h"
 #import "EMIViews.h"
 #import "EMIWindow.h"
+#import "MWBUI.h"
 
 #pragma mark - 配方查看面板 (长按物品弹出)
 
@@ -85,14 +86,14 @@
         [self addSubview:panel];
 
         UILabel *title = [[UILabel alloc] initWithFrame:(CGRect){{40 * s, 16 * s},{pw - 80 * s, 70 * s}}];
-        title.text = [NSString stringWithFormat:@"%@ 的配方", name];
+        title.text = [NSString stringWithFormat:@"%@%@", name, MWBTr("recipe_of")];
         title.font = [UIFont boldSystemFontOfSize:44 * s];
         title.textColor = EMIColor(0x34,0x31,0x32);
         [panel addSubview:title];
 
         if (none) {
             UILabel *l = [[UILabel alloc] initWithFrame:(CGRect){{40 * s, titleH},{pw - 80 * s, 90 * s}}];
-            l.text = @"游戏配方中没有能合成该物品的配方 (自然生成 / 怪物掉落)";
+            l.text = MWBTr("recipe_none");
             l.font = [UIFont systemFontOfSize:34 * s];
             l.textColor = EMIColor(0x6b,0x66,0x68);
             [panel addSubview:l];
@@ -150,7 +151,7 @@
         }
 
         UILabel *hint = [[UILabel alloc] initWithFrame:(CGRect){{0, ph - 38 * s},{pw, 32 * s}}];
-        hint.text = @"轻触任意处关闭";
+        hint.text = MWBTr("recipe_hint");
         hint.font = [UIFont systemFontOfSize:24 * s];
         hint.textAlignment = NSTextAlignmentCenter;
         hint.textColor = EMIColor(0x9c,0x91,0x89);
@@ -236,7 +237,7 @@
         [self addSubview:panel];
 
         UILabel *title = [[UILabel alloc] initWithFrame:(CGRect){{30 * s, 20 * s},{pw - 60 * s, 70 * s}}];
-        title.text = [NSString stringWithFormat:@"%@ · 选择变种", MWBItemName(itemId)];
+        title.text = [NSString stringWithFormat:@"%@ · %@", MWBItemName(itemId), MWBTr("variant_sel")];
         title.font = [UIFont boldSystemFontOfSize:44 * s];
         title.textColor = EMIColor(0x34,0x31,0x32);
         [panel addSubview:title];
@@ -255,7 +256,7 @@
             b.tag = 100 + i;
             [b addTarget:self action:@selector(giveTapped:) forControlEvents:UIControlEventTouchUpInside];
             [panel addSubview:b];
-            [self styleBtn:b title:(i == 0 ? @"给 1 个" : @"给 1 组") selected:NO fontSize:36 * s];
+            [self styleBtn:b title:(i == 0 ? MWBTr("give1") : MWBTr("give64")) selected:NO fontSize:36 * s];
             if (i == 0) _giveOne = b; else _giveStack = b;
         }
     }
@@ -266,9 +267,8 @@
 #pragma mark - EMI 主窗口
 
 @implementation MWBEMIWindow {
-    UIView *_window, *_rail, *_gridWrap;
+    UIView *_tabStrip, *_gridWrap;
     UIScrollView *_gridScroll;
-    UIView *_hotbar;
     NSArray<MWBEMITab *> *_tabs;
     int _currentCategory;
 }
@@ -289,48 +289,48 @@
     return hit;
 }
 
+// 合并布局: 无内窗无边栏无快捷栏, 格子直接铺在菜单页上;
+// 分类改顶部横排 (与菜单侧栏不再重叠), 关闭走菜单 Back/侧栏 (X 按钮已删)
 - (void)buildWindow {
     CGFloat s = kEMIScale;
-    CGFloat winW = 1879*s, winH = 923*s;
-    CGFloat winX = (self.bounds.size.width-winW)/2;
-    CGFloat winY = (self.bounds.size.height-winH-139*s)/2;
-    _window = [[UIView alloc] initWithFrame:(CGRect){{winX,winY},{winW,winH}}];
-    _window.backgroundColor = EMIColor(0xc8,0xc0,0xb8);
-    _window.layer.borderWidth = 10*s;
-    _window.layer.borderColor = EMIColor(0x9c,0x91,0x89).CGColor;
-    _window.layer.shadowColor = [UIColor blackColor].CGColor;
-    _window.layer.shadowOffset = (CGSize){8*s, 8*s};
-    _window.layer.shadowRadius = 0; _window.layer.shadowOpacity = 0.28;
-    [self addSubview:_window];
-    [self addInsetShadow:_window light:EMIColor(0xe7,0xe0,0xda) dark:EMIColor(0x7f,0x77,0x70)
-                   lightW:8 darkW:9];
+    CGFloat W = self.bounds.size.width, H = self.bounds.size.height;
 
-    _rail = [[UIView alloc] initWithFrame:(CGRect){{6*s,20*s},{165*s,878*s}}];
-    [_window addSubview:_rail];
+    _tabStrip = [[UIView alloc] initWithFrame:(CGRect){{0,0},{W,116*s}}];
+    _tabStrip.backgroundColor = [UIColor clearColor];
+    _tabStrip.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+    [self addSubview:_tabStrip];
 
-    UIControl *closeBtn = [self makeCloseButton];
-    closeBtn.frame = (CGRect){{24*s,0},{132*s,120*s}};
-    [closeBtn addTarget:self action:@selector(close) forControlEvents:UIControlEventTouchUpInside];
-    [_rail addSubview:closeBtn];
-
-    NSArray *icons = @[[self makeSaplingIcon],[self makeSwordIcon],
-                       [self makeBookshelfIcon],[self makeBrickCubeIcon]];
+    // 分类图标: 全部用游戏图集切 (与 0.10 分类对齐: 小麦种子/铁剑/书架/砖头,
+    // 名出自游戏自带 terrain.meta/items.meta, 不手写坐标; 找不到回整图, 不崩)
+    MWBItemIconView *seedsIcon = [[MWBItemIconView alloc] initWithSize:64*kEMIScale];
+    [seedsIcon setItemTile:@"seeds_wheat" index:0];
+    MWBItemIconView *swordIcon = [[MWBItemIconView alloc] initWithSize:64*kEMIScale];
+    [swordIcon setItemTile:@"sword" index:2];   // 0木1石2铁: 铁剑
+    MWBCubeView *shelfIcon = [[MWBCubeView alloc] initWithSize:64*kEMIScale];
+    [shelfIcon setTopTile:@"planks" frontTile:@"bookshelf" sideTile:@"planks"
+                 topIndex:0 frontIndex:0 sideIndex:0];
+    MWBCubeView *brickIcon = [[MWBCubeView alloc] initWithSize:64*kEMIScale];
+    [brickIcon setTopTile:@"brick" frontTile:@"brick" sideTile:@"brick"
+                topIndex:0 frontIndex:0 sideIndex:0];
+    NSArray *icons = @[seedsIcon, swordIcon, shelfIcon, brickIcon];
     NSMutableArray *tabs = [NSMutableArray new];
-    CGFloat tabY[] = {156, 336, 516, 696};
+    CGFloat gap = 10*s, tw = (W - gap * 5) / 4, th = 100*s;
     for (int i = 0; i < 4; i++) {
         MWBEMITab *tab = [[MWBEMITab alloc] initWithIcon:icons[i]];
-        tab.frame = (CGRect){{0,tabY[i]*s},{165*s,166*s}};
+        tab.frame = (CGRect){{gap + i * (tw + gap),8*s},{tw,th}};
         tab.tag = i; tab.active = (i == 0);
         [tab addTarget:self action:@selector(switchTab:) forControlEvents:UIControlEventTouchUpInside];
-        [_rail addSubview:tab]; [tabs addObject:tab];
+        [_tabStrip addSubview:tab]; [tabs addObject:tab];
     }
     _tabs = tabs;
 
-    _gridWrap = [[UIView alloc] initWithFrame:(CGRect){{233*s,37*s},{1590*s,873*s}}];
+    CGFloat gy = 116*s + 8*s;
+    _gridWrap = [[UIView alloc] initWithFrame:(CGRect){{0,gy},{W,H-gy}}];
     _gridWrap.backgroundColor = EMIColor(0x1a,0x1a,0x19);
     _gridWrap.layer.borderWidth = 8*s;
     _gridWrap.layer.borderColor = EMIColor(0x17,0x17,0x16).CGColor;
-    [_window addSubview:_gridWrap];
+    _gridWrap.autoresizingMask = UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight;
+    [self addSubview:_gridWrap];
 
     _gridScroll = [[UIScrollView alloc] initWithFrame:_gridWrap.bounds];
     _gridScroll.tag = 999;
@@ -342,117 +342,6 @@
     [_gridWrap addSubview:_gridScroll];
 
     [self buildItemGrid];
-    [self buildHotbar];
-}
-
-- (void)addInsetShadow:(UIView *)v light:(UIColor *)light dark:(UIColor *)dark
-                lightW:(CGFloat)lw darkW:(CGFloat)dw {
-    CGFloat s = kEMIScale;
-    CALayer *t=[CALayer layer],*l=[CALayer layer],*b=[CALayer layer],*r=[CALayer layer];
-    t.backgroundColor = light.CGColor; l.backgroundColor = light.CGColor;
-    b.backgroundColor = dark.CGColor; r.backgroundColor = dark.CGColor;
-    [v.layer addSublayer:t]; [v.layer addSublayer:l];
-    [v.layer addSublayer:b]; [v.layer addSublayer:r];
-    CGFloat o = v.layer.borderWidth, w = v.bounds.size.width, h = v.bounds.size.height;
-    t.frame = (CGRect){{o,o},{w-2*o,lw*s}}; l.frame = (CGRect){{o,o},{lw*s,h-2*o}};
-    b.frame = (CGRect){{o,h-o-dw*s},{w-2*o,dw*s}}; r.frame = (CGRect){{w-o-dw*s,o},{dw*s,h-2*o}};
-}
-
-- (UIControl *)makeCloseButton {
-    UIControl *btn = [[UIControl alloc] init];
-    btn.backgroundColor = EMIColor(0xc5,0xbd,0xb6);
-    btn.layer.borderWidth = 10*kEMIScale;
-    btn.layer.borderColor = EMIColor(0xc5,0xbd,0xb6).CGColor;
-    btn.layer.shadowColor = [UIColor blackColor].CGColor;
-    btn.layer.shadowOffset = (CGSize){8*kEMIScale, 8*kEMIScale};
-    btn.layer.shadowRadius = 0; btn.layer.shadowOpacity = 0.48;
-    UIView *inner = [[UIView alloc] init];
-    inner.backgroundColor = EMIColor(0x35,0x35,0x35);
-    inner.tag = 1; [btn addSubview:inner];
-    UIView *x1 = [[UIView alloc] init]; x1.backgroundColor = EMIColor(0xf6,0xf1,0xec); x1.tag = 2;
-    UIView *x2 = [[UIView alloc] init]; x2.backgroundColor = EMIColor(0xf6,0xf1,0xec); x2.tag = 3;
-    [inner addSubview:x1]; [inner addSubview:x2];
-    return btn;
-}
-
-- (void)layoutSubviews {
-    [super layoutSubviews];
-    CGFloat s = kEMIScale;
-    UIControl *closeBtn = (UIControl *)_rail.subviews.firstObject;
-    if (closeBtn) {
-        UIView *inner = [closeBtn viewWithTag:1];
-        CGFloat inset = 12*s;
-        inner.frame = CGRectInset(closeBtn.bounds, inset, inset);
-        CALayer *it=[CALayer layer],*il=[CALayer layer],*ib=[CALayer layer],*ir=[CALayer layer];
-        it.backgroundColor = EMIColor(0x25,0x25,0x25).CGColor;
-        il.backgroundColor = EMIColor(0x25,0x25,0x25).CGColor;
-        ib.backgroundColor = EMIColor(0x59,0x59,0x59).CGColor;
-        ir.backgroundColor = EMIColor(0x59,0x59,0x59).CGColor;
-        [inner.layer addSublayer:it]; [inner.layer addSublayer:il];
-        [inner.layer addSublayer:ib]; [inner.layer addSublayer:ir];
-        CGFloat sh = 5*s, iw = inner.bounds.size.width, ih = inner.bounds.size.height;
-        it.frame = (CGRect){{0,0},{iw,sh}}; il.frame = (CGRect){{0,0},{sh,ih}};
-        ib.frame = (CGRect){{0,ih-sh},{iw,sh}}; ir.frame = (CGRect){{iw-sh,0},{sh,ih}};
-        UIView *x1 = [inner viewWithTag:2], *x2 = [inner viewWithTag:3];
-        CGFloat xw = 60*s, xh = 19*s;
-        x1.frame = (CGRect){{(iw-xw)/2,(ih-xh)/2},{xw,xh}};
-        x2.frame = (CGRect){{(iw-xw)/2,(ih-xh)/2},{xw,xh}};
-        x1.transform = CGAffineTransformMakeRotation(M_PI_4);
-        x2.transform = CGAffineTransformMakeRotation(-M_PI_4);
-    }
-}
-
-#pragma mark - 分类图标
-
-- (UIView *)makeSaplingIcon {
-    UIView *v = [[UIView alloc] init]; v.backgroundColor = [UIColor clearColor];
-    CGFloat s = kEMIScale, sz = 78*s;
-    v.bounds = (CGRect){{0,0},{sz,sz}};
-    UIView *trunk = [[UIView alloc] initWithFrame:(CGRect){{sz*0.42,sz*0.65},{sz*0.12,sz*0.3}}];
-    trunk.backgroundColor = EMIColor(0x6b,0x3b,0x12);
-    UIView *leaves = [[UIView alloc] initWithFrame:(CGRect){{sz*0.15,sz*0.1},{sz*0.7,sz*0.6}}];
-    leaves.backgroundColor = EMIColor(0x2c,0x76,0x07);
-    [v addSubview:trunk]; [v addSubview:leaves];
-    return v;
-}
-- (UIView *)makeSwordIcon {
-    UIView *v = [[UIView alloc] init]; v.backgroundColor = [UIColor clearColor];
-    CGFloat s = kEMIScale, sz = 92*s;
-    v.bounds = (CGRect){{0,0},{sz,sz}};
-    UIView *blade = [[UIView alloc] initWithFrame:(CGRect){{sz*0.42,sz*0.02},{sz*0.18,sz*0.7}}];
-    blade.backgroundColor = EMIColor(0xc2,0xcb,0xce);
-    blade.layer.borderWidth = 4*s; blade.layer.borderColor = EMIColor(0x2f,0x34,0x34).CGColor;
-    UIView *guard = [[UIView alloc] initWithFrame:(CGRect){{sz*0.22,sz*0.68},{sz*0.6,sz*0.13}}];
-    guard.backgroundColor = EMIColor(0x5d,0x44,0x2d);
-    guard.layer.borderWidth = 4*s; guard.layer.borderColor = EMIColor(0x2a,0x21,0x18).CGColor;
-    UIView *handle = [[UIView alloc] initWithFrame:(CGRect){{sz*0.45,sz*0.78},{sz*0.15,sz*0.27}}];
-    handle.backgroundColor = EMIColor(0x5e,0x44,0x2f);
-    handle.layer.borderWidth = 4*s; handle.layer.borderColor = EMIColor(0x2a,0x21,0x18).CGColor;
-    [v addSubview:blade]; [v addSubview:guard]; [v addSubview:handle];
-    v.transform = CGAffineTransformMakeRotation(-M_PI_4*0.97);
-    return v;
-}
-- (UIView *)makeBookshelfIcon {
-    UIView *v = [[UIView alloc] init]; v.backgroundColor = [UIColor clearColor];
-    CGFloat s = kEMIScale, sz = 80*s;
-    v.bounds = (CGRect){{0,0},{sz,sz}};
-    UIView *front = [[UIView alloc] initWithFrame:(CGRect){{sz*0.12,sz*0.25},{sz*0.72,sz*0.6}}];
-    front.backgroundColor = EMIColor(0x5e,0x3b,0x20);
-    front.layer.borderWidth = 5*s; front.layer.borderColor = EMIColor(0x3b,0x24,0x12).CGColor;
-    NSArray *colors = @[EMIColor(0x1b,0x68,0x2f),EMIColor(0x5d,0x2b,0x5e),
-                        EMIColor(0x6a,0x25,0x25),EMIColor(0x19,0x3d,0x6c),EMIColor(0xb7,0x9b,0x32)];
-    CGFloat bookW = front.bounds.size.width / colors.count;
-    for (int i = 0; i < (int)colors.count; i++) {
-        UIView *book = [[UIView alloc] initWithFrame:(CGRect){{i*bookW+3*s,3*s},{bookW-6*s,front.bounds.size.height-6*s}}];
-        book.backgroundColor = colors[i]; [front addSubview:book];
-    }
-    [v addSubview:front];
-    return v;
-}
-- (UIView *)makeBrickCubeIcon {
-    MWBCubeView *cube = [[MWBCubeView alloc] initWithSize:82*kEMIScale*0.98];
-    [cube setTopTile:@"brick" frontTile:@"brick" sideTile:@"brick" topIndex:0 frontIndex:0 sideIndex:0];
-    return cube;
 }
 
 #pragma mark - 物品网格
@@ -464,7 +353,9 @@
 
     CGFloat s = kEMIScale;
     CGFloat cellSize = 159*s;
-    int cols = 10;
+    // 列数随合并后的整宽自适应 (原来写死 10 列是按旧内窗 1590 宽算的)
+    int cols = (int)(_gridScroll.bounds.size.width / cellSize);
+    if (cols < 4) cols = 4;
     NSMutableArray *visible = [NSMutableArray new];
     for (int i = 0; i < gItemCount; i++) {
         if (_currentCategory == 0 || gItems[i].category == _currentCategory)
@@ -522,41 +413,6 @@
     }
 }
 
-#pragma mark - 底部快捷栏
-
-- (void)buildHotbar {
-    CGFloat s = kEMIScale;
-    CGFloat hbW = 1092*s, hbH = 139*s;
-    CGFloat hbX = _window.frame.origin.x + 417*s;
-    CGFloat hbY = _window.frame.origin.y + 941*s;
-    _hotbar = [[UIView alloc] initWithFrame:(CGRect){{hbX,hbY},{hbW,hbH}}];
-    _hotbar.backgroundColor = EMIColor(0xd7,0xde,0xd7);
-    _hotbar.layer.borderWidth = 8*s;
-    _hotbar.layer.borderColor = EMIColor(0x11,0x11,0x11).CGColor;
-    [self addSubview:_hotbar];
-    [self addInsetShadow:_hotbar light:EMIColor(0xee,0xf6,0xef) dark:EMIColor(0x69,0x71,0x6b)
-                   lightW:6 darkW:6];
-    int slots = 9; CGFloat pad = 8*s;
-    CGFloat slotW = (hbW-pad*2)/slots, slotH = hbH-pad*2;
-    for (int i = 0; i < slots; i++) {
-        UIView *slot = [[UIView alloc] initWithFrame:(CGRect){{pad+i*slotW,pad},{slotW,slotH}}];
-        slot.backgroundColor = [UIColor colorWithRed:40/255.0 green:52/255.0 blue:35/255.0 alpha:0.78];
-        slot.layer.borderWidth = (i==0 ? 8 : 7)*s;
-        slot.layer.borderColor = (i==0 ? EMIColor(0xe7,0xf0,0xe7) : EMIColor(0x85,0x8b,0x83)).CGColor;
-        CALayer *st=[CALayer layer],*sl=[CALayer layer],*sb=[CALayer layer],*sr=[CALayer layer];
-        st.backgroundColor = EMIColor(0x51,0x56,0x50).CGColor;
-        sl.backgroundColor = EMIColor(0x51,0x56,0x50).CGColor;
-        sb.backgroundColor = EMIColor(0xc1,0xc7,0xc0).CGColor;
-        sr.backgroundColor = EMIColor(0xc1,0xc7,0xc0).CGColor;
-        [slot.layer addSublayer:st]; [slot.layer addSublayer:sl];
-        [slot.layer addSublayer:sb]; [slot.layer addSublayer:sr];
-        CGFloat sh = 4*s, sw = slot.bounds.size.width, sh2 = slot.bounds.size.height;
-        st.frame = (CGRect){{0,0},{sw,sh}}; sl.frame = (CGRect){{0,0},{sh,sh2}};
-        sb.frame = (CGRect){{0,sh2-sh},{sw,sh}}; sr.frame = (CGRect){{sw-sh,0},{sh,sh2}};
-        [_hotbar addSubview:slot];
-    }
-}
-
 #pragma mark - 交互
 
 - (void)switchTab:(MWBEMITab *)sender {
@@ -568,11 +424,9 @@
 }
 - (void)close { if (self.onClose) self.onClose(); }
 - (void)showInView:(UIView *)view {
+    // 第三项打开动画已去: 直接贴上, 无缩放无淡入 (关闭动画保留不动)
     self.frame = view.bounds; [view addSubview:self];
-    self.alpha = 0; self.transform = CGAffineTransformMakeScale(0.95, 0.95);
-    [UIView animateWithDuration:0.15 animations:^{
-        self.alpha = 1; self.transform = CGAffineTransformIdentity;
-    }];
+    self.alpha = 1; self.transform = CGAffineTransformIdentity;
 }
 - (void)hide {
     [UIView animateWithDuration:0.12 animations:^{

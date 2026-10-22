@@ -434,3 +434,180 @@ static UIImage *MWBTOGOn_(void) {
     CGContextFillRect(ctx, (CGRect){{0,h-5},{w,5}});
 }
 @end
+
+#pragma mark - 插件自身语言 (中英 i18n, 与游戏汉化独立)
+
+// 中英对照表: {key, 中文, 英文} (按钮英文按 120px/28号与 95px/24号宽度收过, 长词用缩写)
+static const char *kMWBTrTable[][3] = {
+    {"back", "返回", "Back"},
+    {"options", "选项", "Options"},
+    {"cheats", "作弊", "Cheats"},
+    {"world", "世界", "World"},
+    {"float", "悬浮窗", "Float"},
+    {"spawn", "刷怪", "Spawn"},
+    {"inv", "无敌", "Invincible"},
+    {"fly", "飞行", "Fly"},
+    {"instabreak", "快速破坏", "Instabreak"},
+    {"noclip", "穿墙", "Noclip"},
+    {"night", "夜视", "Night Vision"},
+    {"aura", "杀戮光环", "Kill Aura"},
+    {"minimap", "小地图", "Minimap"},
+    {"slime", "史莱姆区块", "Slime Chunks"},
+    {"debug", "调试模式", "Debug"},
+    {"speed", "加速奔跑", "Fast Run"},
+    {"jump", "超级跳跃", "Super Jump"},
+    {"time", "时间", "Time"},
+    {"srise", "日出", "Sunrise"},
+    {"day", "白天", "Day"},
+    {"noon", "正午", "Noon"},
+    {"dusk", "黄昏", "Dusk"},
+    {"nightt", "夜晚", "Night"},
+    {"midn", "午夜", "12 AM"},
+    {"adjust", "微调", "Adjust"},
+    {"weather", "天气", "Weather"},
+    {"clear", "晴", "Clear"},
+    {"rain", "雨", "Rain"},
+    {"storm", "雷", "Storm"},
+    {"action", "动作", "Action"},
+    {"heal", "治疗", "Heal"},
+    {"ench", "附魔", "Ench"},
+    {"tp", "传送", "TP"},
+    {"fill", "铺石", "Fill"},
+    {"diff", "难度", "Difficulty"},
+    {"peace", "和平", "Peace"},
+    {"easy", "简单", "Easy"},
+    {"normal", "普通", "Normal"},
+    {"hard", "困难", "Hard"},
+    {"reactor", "反应核", "Reactor"},
+    {"ignite", "点燃", "Ignite"},
+    {"boom", "爆炸", "Boom"},
+    {"mode", "模式", "Mode"},
+    {"surv", "生存", "Survival"},
+    {"creat", "创造", "Creative"},
+    {"size", "大小", "Size"},
+    {"sz_s", "小", "S"},
+    {"sz_m", "中", "M"},
+    {"sz_l", "大", "L"},
+    {"alpha", "透明度", "Alpha"},
+    {"al_lo", "低", "Low"},
+    {"al_md", "中", "Med"},
+    {"al_hi", "高", "High"},
+    {"pos", "位置", "Position"},
+    {"reset", "复位", "Reset"},
+    {"lang", "语言", "Language"},
+    {"enter_world", "请先进入世界", "Enter a world first"},
+    {"t_float_s", "小悬浮窗", "Small float"},
+    {"t_float_m", "中悬浮窗", "Medium float"},
+    {"t_float_l", "大悬浮窗", "Large float"},
+    {"t_alpha_lo", "低透明度", "Low alpha"},
+    {"t_alpha_md", "中透明度", "Medium alpha"},
+    {"t_alpha_hi", "高透明度", "High alpha"},
+    {"t_float_reset", "悬浮窗已复位", "Float reset"},
+    {"t_sent", "(已发送)", "(sent)"},
+    {"t_only010", "仅0.10可用", "0.10 only"},
+    {"t_map_auto", "小地图已连带打开", "Minimap auto-on"},
+    {"t_spawned", "已刷出(玩家旁边)", " spawned nearby"},
+    {"cave_tag", "·洞", "·cave"},
+    {"recipe_of", "的配方", " Recipe"},
+    {"recipe_none", "游戏配方中没有能合成该物品的配方 (自然生成 / 怪物掉落)", "No recipe in game (natural / drop only)"},
+    {"recipe_hint", "轻触任意处关闭", "Tap anywhere to close"},
+    {"variant_sel", "选择变种", "Variants"},
+    {"give1", "给 1 个", "Give 1"},
+    {"give64", "给 1 组", "Give 64"},
+    {"egg0", "鸡", "Chicken"},
+    {"egg1", "牛", "Cow"},
+    {"egg2", "猪", "Pig"},
+    {"egg3", "羊", "Sheep"},
+    {"egg4", "狼", "Wolf"},
+    {"egg5", "村民", "Villager"},
+    {"egg6", "哞菇", "Mooshroom"},
+    {"egg7", "僵尸", "Zombie"},
+    {"egg8", "爬行者", "Creeper"},
+    {"egg9", "骷髅", "Skeleton"},
+    {"egg10", "蜘蛛", "Spider"},
+    {"egg11", "猪人", "Pigman"},
+    {"egg12", "史莱姆", "Slime"},
+    {"egg13", "末影人", "Enderman"},
+    {"egg14", "蠹虫", "Silverfish"},
+    {"wool", "羊毛", "Wool"},
+    {"dye", "染料", "Dye"},
+    {"coal", "煤炭", "Coal"},
+    {"charcoal", "木炭", "Charcoal"},
+    {"oak", "橡木", "Oak"},
+    {"spruce", "云杉", "Spruce"},
+    {"birch", "桦木", "Birch"},
+    {"variant_n", "变种", "Variant"},
+    {"c_white", "白", "White"},
+    {"c_orange", "橙", "Orange"},
+    {"c_magenta", "品红", "Magenta"},
+    {"c_lblue", "淡蓝", "Lt Blue"},
+    {"c_yellow", "黄", "Yellow"},
+    {"c_lime", "黄绿", "Lime"},
+    {"c_pink", "粉", "Pink"},
+    {"c_gray", "灰", "Gray"},
+    {"c_lgray", "浅灰", "Lt Gray"},
+    {"c_cyan", "青", "Cyan"},
+    {"c_purple", "紫", "Purple"},
+    {"c_blue", "蓝", "Blue"},
+    {"c_brown", "棕", "Brown"},
+    {"c_green", "绿", "Green"},
+    {"c_red", "红", "Red"},
+    {"c_black", "黑", "Black"},
+    {"c_ink", "墨囊", "Ink"},
+    {"c_rose", "玫瑰红", "Rose"},
+    {"c_cactus", "仙人掌绿", "Cactus"},
+    {"c_cocoa", "可可豆", "Cocoa"},
+    {"c_sky", "天蓝", "Sky"},
+    {"c_silver", "银灰", "Silver"},
+    {"c_pink2", "粉红", "Pink"},
+    {"c_bone", "骨粉", "Bone"},
+};
+
+static NSDictionary *MWBTrDict(void) {
+    static NSDictionary *d = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableDictionary *m = [NSMutableDictionary new];
+        size_t n = sizeof(kMWBTrTable) / sizeof(kMWBTrTable[0]);
+        for (size_t i = 0; i < n; i++) {
+            NSString *k = [NSString stringWithUTF8String:kMWBTrTable[i][0]];
+            NSString *zh = [NSString stringWithUTF8String:kMWBTrTable[i][1]];
+            NSString *en = [NSString stringWithUTF8String:kMWBTrTable[i][2]];
+            m[k] = @[zh, en];
+        }
+        d = m;
+    });
+    return d;
+}
+
+static NSString *MWBPluginLangPath(void) {
+    return @"/var/mobile/Documents/mwbpluglang.plist";
+}
+
+static int gMWBPluginLangCached = -1;   // 内存缓存 (set 时同步更新, 免得切完还读旧值)
+
+void MWBSetPluginLang(int lang) {
+    if (lang != 0 && lang != 1) return;
+    gMWBPluginLangCached = lang;
+    NSMutableDictionary *d = [NSMutableDictionary new];
+    d[@"lang"] = @(lang);
+    [d writeToURL:[NSURL fileURLWithPath:MWBPluginLangPath()] atomically:YES];
+}
+
+int MWBPluginLang(void) {
+    if (gMWBPluginLangCached >= 0) return gMWBPluginLangCached;
+    NSURL *u = [NSURL fileURLWithPath:MWBPluginLangPath()];
+    NSError *e = nil;
+    NSDictionary *ro = [NSDictionary dictionaryWithContentsOfURL:u error:&e];
+    int v = 0;
+    if ([ro isKindOfClass:[NSDictionary class]]) v = (int)[ro[@"lang"] integerValue];
+    gMWBPluginLangCached = (v == 1) ? 1 : 0;
+    return gMWBPluginLangCached;
+}
+
+NSString *MWBTr(const char *key) {
+    NSArray *pair = MWBTrDict()[[NSString stringWithUTF8String:key]];
+    if (![pair isKindOfClass:[NSArray class]] || pair.count < 2)
+        return [NSString stringWithUTF8String:key];
+    return (MWBPluginLang() == 1) ? pair[1] : pair[0];
+}

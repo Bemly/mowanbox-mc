@@ -3,12 +3,58 @@
 #import <UIKit/UIKit.h>
 #import "MWBUI.h"
 
+#pragma mark - 小地图拖动 (位置记忆, 存自家 Documents/mwbminimap.plist, 与游戏存档无关)
+
+static NSString *MWBMinimapPrefPath(void) {
+    return @"/var/mobile/Documents/mwbminimap.plist";
+}
+
+@interface MWBMinimapDragHelper : NSObject
++ (instancetype)shared;
+- (void)handlePan:(UIPanGestureRecognizer *)pan;
+@end
+
+@implementation MWBMinimapDragHelper
++ (instancetype)shared {
+    static MWBMinimapDragHelper *inst = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ inst = [[self alloc] init]; });
+    return inst;
+}
+- (void)handlePan:(UIPanGestureRecognizer *)pan {
+    UIView *box = pan.view;
+    if (!box) return;
+    if (pan.state == UIGestureRecognizerStateChanged) {
+        CGPoint t = [pan translationInView:box.superview];
+        CGPoint c = box.center;
+        c.x += t.x; c.y += t.y;
+        // 钳制在父窗口内, 半个框都不许出屏
+        UIView *sup = box.superview;
+        if (sup) {
+            CGFloat hw = box.bounds.size.width / 2, hh = box.bounds.size.height / 2;
+            c.x = MAX(hw, MIN(sup.bounds.size.width - hw, c.x));
+            c.y = MAX(hh, MIN(sup.bounds.size.height - hh, c.y));
+        }
+        box.center = c;
+        [pan setTranslation:CGPointZero inView:box.superview];
+    } else if (pan.state == UIGestureRecognizerStateEnded ||
+               pan.state == UIGestureRecognizerStateCancelled) {
+        // 松手落盘, 下次开小地图回到这次的位置
+        NSMutableDictionary *d = [NSMutableDictionary new];
+        d[@"x"] = @(box.frame.origin.x);
+        d[@"y"] = @(box.frame.origin.y);
+        [d writeToURL:[NSURL fileURLWithPath:MWBMinimapPrefPath()] atomically:YES];
+    }
+}
+@end
+
 // 0.10 小地图采样: 以玩家为中心 48x48, 每列从 y=127 往下找首个非空方块
 // 读块走 TileSource::getTile (kuna 反编译: id 经隐藏首参回写, y>=128 回默认)
 // TileSource::getTile 用 C++ sret 传回 (x8=回写地址, x0=this, x1=pos),
 // 普通 C 调用放错寄存器会崩 (-79 教训), 必须手写 x8
 // (kuna 反调用点实锤: add x8,sp,#..; mov x0,ts; mov x1,pos; bl)
-static inline uint8_t MWB010GetTile(void *ts, MWBBlockPos *pos) {
+// (渲染线程也调: 只读世界, 安全; 穿墙近平面判断共用, 见 MWBHooks010)
+uint8_t MWB010GetTile(void *ts, MWBBlockPos *pos) {
     static void *fn = NULL;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
@@ -192,6 +238,21 @@ void MWBMinimapShow(BOOL on) {
         if (old) return;
         // 容器: 羊皮纸底 + 内图 + 坐标行 (A 只改 0.10 采样, 框体全版本共用)
         UIView *box = [[UIView alloc] initWithFrame:(CGRect){{8, 90}, {MWB_MAP_BOX, MWB_MAP_BOX + 24}}];
+        // 恢复上次拖放位置 (无记录/越界则保持默认左上)
+        {
+            NSURL *u = [NSURL fileURLWithPath:MWBMinimapPrefPath()];
+            NSError *e = nil;
+            NSDictionary *ro = [NSDictionary dictionaryWithContentsOfURL:u error:&e];
+            if ([ro isKindOfClass:[NSDictionary class]]) {
+                CGFloat px = [ro[@"x"] floatValue], py = [ro[@"y"] floatValue];
+                CGFloat bw = w.bounds.size.width, bh = w.bounds.size.height;
+                if (px >= 0 && py >= 0 && px + MWB_MAP_BOX <= bw && py + MWB_MAP_BOX + 24 <= bh)
+                    box.frame = (CGRect){{px, py}, {MWB_MAP_BOX, MWB_MAP_BOX + 24}};
+            }
+        }
+        // 整框可拖: 子视图默认不吃触摸 (iv/label 的 userInteractionEnabled=NO), 手势落框上即走
+        [box addGestureRecognizer:[[UIPanGestureRecognizer alloc]
+            initWithTarget:[MWBMinimapDragHelper shared] action:@selector(handlePan:)]];
         box.tag = 0x6D62;
         box.backgroundColor = MWBMapParchment();
         box.layer.borderWidth = 3;
@@ -347,7 +408,7 @@ void MWBMinimapRefresh(void) {
         }
         BOOL inSlime = (is010 && gSlimeChunk && gLocalPlayer) ? MWBIsSlimeChunk(pcx, pcz) : NO;
         NSString *pos = [NSString stringWithFormat:@"%d, %d, %d%@%@", px, py, pz,
-                         (is010 && gMiniMapCave010) ? @"·洞" : @"",
+                         (is010 && gMiniMapCave010) ? MWBTr("cave_tag") : @"",
                          inSlime ? @"·史" : @""];
         if (is010 && gMWBDebug) pos = [pos stringByAppendingFormat:@" yaw%.0f", yawDeg];
         dispatch_async(dispatch_get_main_queue(), ^{

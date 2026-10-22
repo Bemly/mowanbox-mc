@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #import <substrate.h>
 #import "EMI.h"
+#import "MWBUI.h"
 
 #pragma mark - 物品数据
 
@@ -14,7 +15,7 @@
     {(cn), NO, (id), (tp), (ti), NULL, 0, NULL, 0, NULL, 0, (stk), (cat)}
 
 MWBItemDef gItems[] = {
-    // ---- 建筑方块 (category 3) ----
+    // ---- 建筑方块 (category 3; 功能/装饰类 9 种已分到 category 2) ----
     B(stone,       "石头",      1,  "stone",0, NULL,0, NULL,0, NULL,0, 64, 3),
     B(grass,       "草方块",    2,  "grass",0, "grass",0, "grass",1, "dirt",0, 64, 3),
     B(dirt,        "泥土",      3,  "dirt",0, NULL,0, NULL,0, NULL,0, 64, 3),
@@ -38,25 +39,25 @@ MWBItemDef gItems[] = {
     B(iron_block,  "铁块",      42, "iron_block",0, NULL,0, NULL,0, NULL,0, 64, 3),
     B(stone_slab,  "石台阶",    44, "stone_slab",0, NULL,0, NULL,0, NULL,0, 64, 3),
     B(brick,       "砖块",      45, "brick",0, NULL,0, NULL,0, NULL,0, 64, 3),
-    B(tnt,         "TNT",       46, "tnt",0, "tnt",1, "tnt",0, "tnt",2, 64, 3),
-    B(bookshelf,   "书架",      47, "bookshelf",0, "planks",0, "bookshelf",0, "planks",0, 64, 3),
+    B(tnt,         "TNT",       46, "tnt",0, "tnt",1, "tnt",0, "tnt",2, 64, 2),
+    B(bookshelf,   "书架",      47, "bookshelf",0, "planks",0, "bookshelf",0, "planks",0, 64, 2),
     B(mossy,       "苔石",      48, "cobblestone_mossy",0, NULL,0, NULL,0, NULL,0, 64, 3),
     B(obsidian,    "黑曜石",    49, "obsidian",0, NULL,0, NULL,0, NULL,0, 64, 3),
     B(diamond_ore, "钻石矿石",  56, "diamond_ore",0, NULL,0, NULL,0, NULL,0, 64, 3),
     B(diamond_blk, "钻石块",    57, "diamond_block",0, NULL,0, NULL,0, NULL,0, 64, 3),
-    B(crafting,    "工作台",    58, "crafting_table",0, "crafting_table",1, "crafting_table",0, "crafting_table",2, 64, 3),
-    B(furnace,     "熔炉",      61, "furnace",0, "furnace",2, "furnace",0, "furnace",1, 64, 3),
+    B(crafting,    "工作台",    58, "crafting_table",0, "crafting_table",1, "crafting_table",0, "crafting_table",2, 64, 2),
+    B(furnace,     "熔炉",      61, "furnace",0, "furnace",2, "furnace",0, "furnace",1, 64, 2),
     B(ice,         "冰",        79, "ice",0, NULL,0, NULL,0, NULL,0, 64, 3),
     B(snow,        "雪块",      80, "snow",0, NULL,0, NULL,0, NULL,0, 64, 3),
     B(clay,        "黏土块",    82, "clay",0, NULL,0, NULL,0, NULL,0, 64, 3),
-    B(pumpkin,     "南瓜",      86, "pumpkin",0, "pumpkin",1, "pumpkin",0, "pumpkin",2, 64, 3),
+    B(pumpkin,     "南瓜",      86, "pumpkin",0, "pumpkin",1, "pumpkin",0, "pumpkin",2, 64, 2),
     B(netherrack,  "地狱岩",    87, "netherrack",0, NULL,0, NULL,0, NULL,0, 64, 3),
     B(soul_sand,   "灵魂沙",    88, "soul_sand",0, NULL,0, NULL,0, NULL,0, 64, 3),
-    B(glowstone,   "萤石",      89, "glowstone",0, NULL,0, NULL,0, NULL,0, 64, 3),
+    B(glowstone,   "萤石",      89, "glowstone",0, NULL,0, NULL,0, NULL,0, 64, 2),
     B(stonebrick,  "石砖",      98, "stonebrick",0, NULL,0, NULL,0, NULL,0, 64, 3),
-    B(iron_bars,   "铁栏杆",    101,"iron_bars",0, NULL,0, NULL,0, NULL,0, 64, 3),
-    B(glass_pane,  "玻璃板",    102,"glass_pane_top",0, NULL,0, NULL,0, NULL,0, 64, 3),
-    B(melon,       "西瓜",      103,"melon",0, "melon",0, "melon",1, "melon",1, 64, 3),
+    B(iron_bars,   "铁栏杆",    101,"iron_bars",0, NULL,0, NULL,0, NULL,0, 64, 2),
+    B(glass_pane,  "玻璃板",    102,"glass_pane_top",0, NULL,0, NULL,0, NULL,0, 64, 2),
+    B(melon,       "西瓜",      103,"melon",0, "melon",0, "melon",1, "melon",1, 64, 2),
     B(mycelium,    "菌丝",      110,"mycelium",0, "mycelium",1, "mycelium",0, "dirt",0, 64, 3),
     B(end_stone,   "末地石",    121,"end_stone",0, NULL,0, NULL,0, NULL,0, 64, 3),
     B(redstone_ore,"红石矿石",  73, "redstone_ore",0, NULL,0, NULL,0, NULL,0, 64, 3),
@@ -199,15 +200,15 @@ int MWBVariantCount(int itemId) {
     }
 }
 
-// 变种名 (羊毛与染料的 aux 色序不同)
+// 变种名 (羊毛与染料的 aux 色序不同; 颜色走 MWBTr 中英表, 插件语言切换即变)
 NSString *MWBVariantName(int itemId, int aux) {
-    static const char *wool[16] = {"白","橙","品红","淡蓝","黄","黄绿","粉","灰","浅灰","青","紫","蓝","棕","绿","红","黑"};
-    static const char *dye[16]  = {"墨囊","玫瑰红","仙人掌绿","可可豆","天蓝","紫","青","银灰","灰","粉红","黄绿","黄","淡蓝","品红","橙","骨粉"};
-    if (itemId == 35) return [NSString stringWithFormat:@"羊毛·%s", wool[aux % 16]];
-    if (itemId == 351) return [NSString stringWithFormat:@"染料·%s", dye[aux % 16]];
-    if (itemId == 263) return aux == 1 ? @"木炭" : @"煤炭";
-    if (itemId == 17) return aux == 0 ? @"橡木" : (aux == 1 ? @"云杉" : @"桦木");
-    return [NSString stringWithFormat:@"变种 %d", aux];
+    static const char *wool[16] = {"c_white","c_orange","c_magenta","c_lblue","c_yellow","c_lime","c_pink","c_gray","c_lgray","c_cyan","c_purple","c_blue","c_brown","c_green","c_red","c_black"};
+    static const char *dye[16]  = {"c_ink","c_rose","c_cactus","c_cocoa","c_sky","c_purple","c_cyan","c_silver","c_gray","c_pink2","c_lime","c_yellow","c_lblue","c_magenta","c_orange","c_bone"};
+    if (itemId == 35) return [NSString stringWithFormat:@"%@·%@", MWBTr("wool"), MWBTr(wool[aux % 16])];
+    if (itemId == 351) return [NSString stringWithFormat:@"%@·%@", MWBTr("dye"), MWBTr(dye[aux % 16])];
+    if (itemId == 263) return aux == 1 ? MWBTr("charcoal") : MWBTr("coal");
+    if (itemId == 17) return aux == 0 ? MWBTr("oak") : (aux == 1 ? MWBTr("spruce") : MWBTr("birch"));
+    return [NSString stringWithFormat:@"%@ %d", MWBTr("variant_n"), aux];
 }
 
 #pragma mark - 游戏配方读取 (长按查看, 数据来自游戏 Recipes 单例)

@@ -46,17 +46,27 @@ static void hooked_1215_playerTick(void *self) {
     orig_1215_playerTick(self);
     MWBMarkWorldTick();
     gPlayer1215 = self;
-    if (gInvincible) ((unsigned char *)self)[V1215_ACTOR_INVULN_OFF] = 1;
+    // 开关边沿清零: 无敌字节/能力表写 1 后一直粘着, 关了必须写回 0 (同 0.10 根因)
+    static BOOL sWasInv = NO, sWasFly = NO, sWasBreak = NO, sWasClip = NO;
+    if (gInvincible) { ((unsigned char *)self)[V1215_ACTOR_INVULN_OFF] = 1; sWasInv = YES; }
+    else if (sWasInv) { ((unsigned char *)self)[V1215_ACTOR_INVULN_OFF] = 0; sWasInv = NO; }
     void *abil = (char *)self + V1215_PLAYER_ABIL_OFF;
     uintptr_t slide = MWBMainSlide();
     V1215SetBoolFn setB = (V1215SetBoolFn)(slide + V1215_SET_BOOL);
     V1215SetFloatFn setF = (V1215SetFloatFn)(slide + V1215_SET_FLOAT);
-    if (gFastBreak) setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_INSTABUILD * 0x18), 1);
+    if (gFastBreak) { setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_INSTABUILD * 0x18), 1); sWasBreak = YES; }
+    else if (sWasBreak) { setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_INSTABUILD * 0x18), 0); sWasBreak = NO; }
     if (gFly) {
         setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_FLYING * 0x18), 1);
         setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_MAYFLY * 0x18), 1);
+        sWasFly = YES;
+    } else if (sWasFly) {
+        setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_FLYING * 0x18), 0);
+        setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_MAYFLY * 0x18), 0);
+        sWasFly = NO;
     }
-    if (gNoclip) setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_NOCLIP * 0x18), 1);
+    if (gNoclip) { setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_NOCLIP * 0x18), 1); sWasClip = YES; }
+    else if (sWasClip) { setB(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_NOCLIP * 0x18), 0); sWasClip = NO; }
     if (gSpeed) setF(abil, (void *)(slide + V1215_ABIL_BASE + V1215_ABIL_WALKSPEED * 0x18), 0.25f);
 }
 static void hooked_1215_timeTick(void *level) {

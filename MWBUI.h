@@ -17,6 +17,12 @@ extern UIColor *kControlDark;     // #6b6668
 
 UIFont *MWBPixelFont(CGFloat size);
 void MWBRegisterFont(void);
+// 插件自身语言 (0中文 1英文, 默认中文, 落盘自家 Documents/mwbpluglang.plist;
+// 与游戏汉化 gChinese 独立, 由悬浮窗页语言按钮一键双切)
+void MWBSetPluginLang(int lang);
+int MWBPluginLang(void);
+// 插件中英翻译 (key 为英文 ID, 中文模式回中文, 查不到回 key 本身)
+NSString *MWBTr(const char *key);
 NSAttributedString *MWBPixelText(NSString *text, UIFont *font, UIColor *color,
                                  CGFloat shadowX, CGFloat shadowY, UIColor *shadowColor);
 UIBezierPath *MWBPathFromSVG(NSString *d);

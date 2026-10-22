@@ -68,7 +68,7 @@
     // Back 按钮
     _backButton = [[MWBPixelButton alloc] init];
     _backButton.autoresizingMask = UIViewAutoresizingFlexibleRightMargin;
-    NSAttributedString *backTitle = MWBPixelText(@"Back", MWBPixelFont(36), MWB_COLOR(0xef,0xed,0xeb),
+    NSAttributedString *backTitle = MWBPixelText(MWBTr("back"), MWBPixelFont(36), MWB_COLOR(0xef,0xed,0xeb),
                                                  3, 3, MWB_COLOR(0x39,0x36,0x38));
     [_backButton setAttributedTitle:backTitle forState:UIControlStateNormal];
     [_backButton addTarget:self action:@selector(close) forControlEvents:UIControlEventTouchUpInside];
@@ -78,7 +78,7 @@
     UILabel *title = [[UILabel alloc] init];
     title.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     title.textAlignment = NSTextAlignmentCenter;
-    title.attributedText = MWBPixelText(@"Options", MWBPixelFont(42), MWB_COLOR(0xe9,0xe6,0xe4),
+    title.attributedText = MWBPixelText(MWBTr("options"), MWBPixelFont(42), MWB_COLOR(0xe9,0xe6,0xe4),
                                         4, 4, MWB_COLOR(0x37,0x35,0x37));
     [_topBar addSubview:title];
 
@@ -179,23 +179,23 @@
     UIView *p0 = [[UIView alloc] init];
     p0.backgroundColor = [UIColor clearColor];
     UILabel *h0 = [[UILabel alloc] init];
-    h0.attributedText = MWBPixelText(@"作弊", MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
+    h0.attributedText = MWBPixelText(MWBTr("cheats"), MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
                                      4, 4, MWB_COLOR(0x30,0x30,0x31));
     [h0 sizeToFit];
     h0.frame = (CGRect){{padL,padTop},{h0.bounds.size.width,h0.bounds.size.height}};
     [p0 addSubview:h0];
     NSArray *rows0 = @[
-        @[@"无敌", [self makeToggle:gInvincible action:@selector(togInvincible:)]],
-        @[@"飞行", [self makeToggle:gFly action:@selector(togFly:)]],
-        @[@"快速破坏", [self makeToggle:gFastBreak action:@selector(togFastBreak:)]],
-        @[@"穿墙", [self makeToggle:gNoclip action:@selector(togNoclip:)]],
-        @[@"夜视", [self makeToggle:gNightVision action:@selector(togNightVision:)]],
-        @[@"杀戮光环", [self makeToggle:gKillAura action:@selector(togKillAura:)]],
-        @[@"小地图", [self makeToggle:gMinimap action:@selector(togMinimap:)]],
-        @[@"史莱姆区块", [self makeToggle:gSlimeChunk action:@selector(togSlimeChunk:)]],
-        @[@"调试模式", [self makeToggle:gMWBDebug action:@selector(togDebug:)]],
-        @[@"加速奔跑", [self makeToggle:gSpeed action:@selector(togSpeed:)]],
-        @[@"超级跳跃", [self makeToggle:gSuperJump action:@selector(togSuperJump:)]],
+        @[MWBTr("inv"), [self makeToggle:gInvincible action:@selector(togInvincible:)]],
+        @[MWBTr("fly"), [self makeToggle:gFly action:@selector(togFly:)]],
+        @[MWBTr("instabreak"), [self makeToggle:gFastBreak action:@selector(togFastBreak:)]],
+        @[MWBTr("noclip"), [self makeToggle:gNoclip action:@selector(togNoclip:)]],
+        @[MWBTr("night"), [self makeToggle:gNightVision action:@selector(togNightVision:)]],
+        @[MWBTr("aura"), [self makeToggle:gKillAura action:@selector(togKillAura:)]],
+        @[MWBTr("minimap"), [self makeToggle:gMinimap action:@selector(togMinimap:)]],
+        @[MWBTr("slime"), [self makeToggle:gSlimeChunk action:@selector(togSlimeChunk:)]],
+        @[MWBTr("debug"), [self makeToggle:gMWBDebug action:@selector(togDebug:)]],
+        @[MWBTr("speed"), [self makeToggle:gSpeed action:@selector(togSpeed:)]],
+        @[MWBTr("jump"), [self makeToggle:gSuperJump action:@selector(togSuperJump:)]],
     ];
     CGFloat ry = CGRectGetMaxY(h0.frame) + 20;
     for (NSArray *r in rows0) {
@@ -226,17 +226,17 @@
     UIView *p3 = [[UIView alloc] init];
     p3.backgroundColor = [UIColor clearColor];
     UILabel *h3 = [[UILabel alloc] init];
-    h3.attributedText = MWBPixelText(@"世界", MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
+    h3.attributedText = MWBPixelText(MWBTr("world"), MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
                                      4, 4, MWB_COLOR(0x30,0x30,0x31));
     [h3 sizeToFit];
     h3.frame = (CGRect){{padL,padTop},{h3.bounds.size.width,h3.bounds.size.height}};
     [p3 addSubview:h3];
     // 时间切换: 两行六个像素按钮 (0.10 一天 19200 tick: 日出0/白天1000/正午4800/黄昏9600/夜晚13000/午夜14400)
     // 白天/夜晚走 gTimeMode (跨版本通用); 日出/正午/黄昏/午夜走 gTimeCustom010 (仅 0.10, 其余版本置灰)
-    UILabel *timeLabel = [self makeRowLabel:@"时间"];
+    UILabel *timeLabel = [self makeRowLabel:MWBTr("time")];
     timeLabel.frame = (CGRect){{33,CGRectGetMaxY(h3.frame)+30},{200,60}};
     [p3 addSubview:timeLabel];
-    NSArray *timeTitlesA = @[@"日出", @"白天", @"正午"];
+    NSArray *timeTitlesA = @[MWBTr("srise"), MWBTr("day"), MWBTr("noon")];
     int timeTagsA[3] = {6, 1, 7};
     CGFloat tBase = CGRectGetMaxY(h3.frame) + 30;
     CGFloat rowY = tBase;
@@ -254,7 +254,7 @@
         [p3 addSubview:tBtn];
     }
     tBase = rowY + 60;
-    NSArray *timeTitlesB = @[@"黄昏", @"夜晚", @"午夜"];
+    NSArray *timeTitlesB = @[MWBTr("dusk"), MWBTr("nightt"), MWBTr("midn")];
     int timeTagsB[3] = {8, 2, 9};
     rowY = tBase + 10;
     for (int i = 0; i < 3; i++) {
@@ -272,7 +272,7 @@
     }
     tBase = rowY + 60;
     // 微调: -233 / +233 两个像素按钮 (tag 25/26, 在当前 dayTime 上加减, 仅 0.10)
-    UILabel *stepLabel = [self makeRowLabel:@"微调"];
+    UILabel *stepLabel = [self makeRowLabel:MWBTr("adjust")];
     stepLabel.frame = (CGRect){{33,tBase+10},{200,60}};
     [p3 addSubview:stepLabel];
     NSArray *stepTitles = @[@"-233", @"+233"];
@@ -293,10 +293,10 @@
     }
     tBase = rowY + 60;
     // 0.10/1.1.7/1.20.62 没有可写天气通道, 按钮置灰, 只读不点
-    UILabel *wxLabel = [self makeRowLabel:@"天气"];
+    UILabel *wxLabel = [self makeRowLabel:MWBTr("weather")];
     wxLabel.frame = (CGRect){{33,tBase+20},{200,60}};
     [p3 addSubview:wxLabel];
-    NSArray *wxTitles = @[@"晴", @"雨", @"雷"];
+    NSArray *wxTitles = @[MWBTr("clear"), MWBTr("rain"), MWBTr("storm")];
     for (int i = 0; i < 3; i++) {
         MWBPixelButton *wxBtn = [[MWBPixelButton alloc] init];
         [wxBtn setAttributedTitle:MWBPixelText(wxTitles[i], MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
@@ -311,10 +311,10 @@
         [p3 addSubview:wxBtn];
     }
     // 动作: 治疗 / 附魔255 / 传送+10 / 铺石块 (tag 10-13)
-    UILabel *actLabel = [self makeRowLabel:@"动作"];
+    UILabel *actLabel = [self makeRowLabel:MWBTr("action")];
     actLabel.frame = (CGRect){{33,tBase+100},{200,60}};
     [p3 addSubview:actLabel];
-    NSArray *actTitles = @[@"治疗", @"附魔", @"传送", @"铺石"];
+    NSArray *actTitles = @[MWBTr("heal"), MWBTr("ench"), MWBTr("tp"), MWBTr("fill")];
     for (int i = 0; i < 4; i++) {
         MWBPixelButton *actBtn = [[MWBPixelButton alloc] init];
         [actBtn setAttributedTitle:MWBPixelText(actTitles[i], MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
@@ -325,9 +325,9 @@
         [p3 addSubview:actBtn];
     }
     p3.frame = (CGRect){{0,0},{pw,tBase+432}};
-    NSArray *diffTitles = @[@"和平", @"简单", @"普通", @"困难"];
+    NSArray *diffTitles = @[MWBTr("peace"), MWBTr("easy"), MWBTr("normal"), MWBTr("hard")];
     // 难度: 和平 / 简单 / 普通 / 困难 四个像素按钮 (tag 15-18, 目前只接了 0.10 后端)
-    UILabel *diffLabel = [self makeRowLabel:@"难度"];
+    UILabel *diffLabel = [self makeRowLabel:MWBTr("diff")];
     diffLabel.frame = (CGRect){{33,tBase+164},{200,60}};
     [p3 addSubview:diffLabel];
     for (int i = 0; i < 4; i++) {
@@ -344,11 +344,11 @@
         [p3 addSubview:diffBtn];
     }
     // 反应核: 点燃 (tag 14, 目前只接了 0.10 后端)
-    UILabel *reactorLabel = [self makeRowLabel:@"反应核"];
+    UILabel *reactorLabel = [self makeRowLabel:MWBTr("reactor")];
     reactorLabel.frame = (CGRect){{33,tBase+228},{200,60}};
     [p3 addSubview:reactorLabel];
     MWBPixelButton *reactorBtn = [[MWBPixelButton alloc] init];
-    [reactorBtn setAttributedTitle:MWBPixelText(@"点燃", MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
+    [reactorBtn setAttributedTitle:MWBPixelText(MWBTr("ignite"), MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
                                                3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
     reactorBtn.tag = 14;
     [reactorBtn addTarget:self action:@selector(doAction:) forControlEvents:UIControlEventTouchUpInside];
@@ -360,7 +360,7 @@
     [p3 addSubview:reactorBtn];
     // 爆炸: 定点爆炸 (tag 24, 目前只接了 0.10 后端)
     MWBPixelButton *explodeBtn = [[MWBPixelButton alloc] init];
-    [explodeBtn setAttributedTitle:MWBPixelText(@"爆炸", MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
+    [explodeBtn setAttributedTitle:MWBPixelText(MWBTr("boom"), MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
                                                3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
     explodeBtn.tag = 24;
     [explodeBtn addTarget:self action:@selector(doAction:) forControlEvents:UIControlEventTouchUpInside];
@@ -370,11 +370,11 @@
         explodeBtn.userInteractionEnabled = NO;
     }
     [p3 addSubview:explodeBtn];
-    // 游戏模式: 生存 / 创造 (tag 27/28, 目前只接了 0.10 后端; 存档 GameType 不改, 重进读档位)
-    UILabel *modeLabel = [self makeRowLabel:@"模式"];
+    // 游戏模式: 生存 / 创造 (tag 27/28, 目前只接了 0.10 后端; 世界标记一起翻, 自动存档后重进也是新模式)
+    UILabel *modeLabel = [self makeRowLabel:MWBTr("mode")];
     modeLabel.frame = (CGRect){{33,tBase+292},{200,60}};
     [p3 addSubview:modeLabel];
-    NSArray *modeTitles = @[@"生存", @"创造"];
+    NSArray *modeTitles = @[MWBTr("surv"), MWBTr("creat")];
     for (int i = 0; i < 2; i++) {
         MWBPixelButton *modeBtn = [[MWBPixelButton alloc] init];
         [modeBtn setAttributedTitle:MWBPixelText(modeTitles[i], MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
@@ -402,16 +402,16 @@
     UIView *pF = [[UIView alloc] init];
     pF.backgroundColor = [UIColor clearColor];
     UILabel *hF = [[UILabel alloc] init];
-    hF.attributedText = MWBPixelText(@"悬浮窗", MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
+    hF.attributedText = MWBPixelText(MWBTr("float"), MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
                                      4, 4, MWB_COLOR(0x30,0x30,0x31));
     [hF sizeToFit];
     hF.frame = (CGRect){{padL,padTop},{hF.bounds.size.width,hF.bounds.size.height}};
     [pF addSubview:hF];
     CGFloat fBase = CGRectGetMaxY(hF.frame) + 30;
-    UILabel *sizeLabel = [self makeRowLabel:@"大小"];
+    UILabel *sizeLabel = [self makeRowLabel:MWBTr("size")];
     sizeLabel.frame = (CGRect){{33,fBase},{200,60}};
     [pF addSubview:sizeLabel];
-    NSArray *sizeTitles = @[@"小", @"中", @"大"];
+    NSArray *sizeTitles = @[MWBTr("sz_s"), MWBTr("sz_m"), MWBTr("sz_l")];
     for (int i = 0; i < 3; i++) {
         MWBPixelButton *sBtn = [[MWBPixelButton alloc] init];
         [sBtn setAttributedTitle:MWBPixelText(sizeTitles[i], MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
@@ -421,10 +421,10 @@
         sBtn.frame = (CGRect){{pw-33-390+i*135,fBase},{120,60}};
         [pF addSubview:sBtn];
     }
-    UILabel *alphaLabel = [self makeRowLabel:@"透明度"];
+    UILabel *alphaLabel = [self makeRowLabel:MWBTr("alpha")];
     alphaLabel.frame = (CGRect){{33,fBase+70},{200,60}};
     [pF addSubview:alphaLabel];
-    NSArray *alphaTitles = @[@"低", @"中", @"高"];
+    NSArray *alphaTitles = @[MWBTr("al_lo"), MWBTr("al_md"), MWBTr("al_hi")];
     for (int i = 0; i < 3; i++) {
         MWBPixelButton *aBtn = [[MWBPixelButton alloc] init];
         [aBtn setAttributedTitle:MWBPixelText(alphaTitles[i], MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
@@ -434,20 +434,20 @@
         aBtn.frame = (CGRect){{pw-33-390+i*135,fBase+70},{120,60}};
         [pF addSubview:aBtn];
     }
-    UILabel *posLabel = [self makeRowLabel:@"位置"];
+    UILabel *posLabel = [self makeRowLabel:MWBTr("pos")];
     posLabel.frame = (CGRect){{33,fBase+140},{200,60}};
     [pF addSubview:posLabel];
     MWBPixelButton *resetBtn = [[MWBPixelButton alloc] init];
-    [resetBtn setAttributedTitle:MWBPixelText(@"复位", MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
+    [resetBtn setAttributedTitle:MWBPixelText(MWBTr("reset"), MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
                                              3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
     resetBtn.tag = 36;
     [resetBtn addTarget:self action:@selector(resetFloat:) forControlEvents:UIControlEventTouchUpInside];
     resetBtn.frame = (CGRect){{pw-33-390,fBase+140},{120,60}};
     [pF addSubview:resetBtn];
-    UILabel *langLabel = [self makeRowLabel:@"语言"];
+    UILabel *langLabel = [self makeRowLabel:MWBTr("lang")];
     langLabel.frame = (CGRect){{33,fBase+210},{200,60}};
     [pF addSubview:langLabel];
-    NSArray *langTitles = @[@"中文", @"英文"];
+    NSArray *langTitles = @[@"中文", @"English"];   // 语言名永远用自身, 不随切换变
     for (int i = 0; i < 2; i++) {
         MWBPixelButton *langBtn = [[MWBPixelButton alloc] init];
         [langBtn setAttributedTitle:MWBPixelText(langTitles[i], MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
@@ -464,20 +464,19 @@
     pF.frame = (CGRect){{0,0},{pw,fBase+280}};
     [pages addObject:pF];
 
-    // ---- 页 4: 刷怪 (刷怪蛋): 蛋格占位, 点按只记日志, 接线下一轮
-    // 蛋序假设(待接线时真机验): 蛋0-14 ↔ 实体[10-16,32-39]
-    // = 鸡/牛/猪/羊/狼/村民/哞菇/僵尸/爬行者/骷髅/蜘蛛/猪人/史莱姆/末影人/蠹虫
+    // ---- 页 4: 刷怪 (刷怪蛋): 点按直调 MWB010SpawnMob 在玩家旁边刷怪 (仅 0.10)
+    // 蛋序 ↔ 实体[10-16,32-39] = 鸡/牛/猪/羊/狼/村民/哞菇/僵尸/爬行者/骷髅/蜘蛛/猪人/史莱姆/末影人/蠹虫
     UIView *pEgg = [[UIView alloc] init];
     pEgg.backgroundColor = [UIColor clearColor];
     UILabel *hE = [[UILabel alloc] init];
-    hE.attributedText = MWBPixelText(@"刷怪", MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
+    hE.attributedText = MWBPixelText(MWBTr("spawn"), MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
                                      4, 4, MWB_COLOR(0x30,0x30,0x31));
     [hE sizeToFit];
     hE.frame = (CGRect){{padL,padTop},{hE.bounds.size.width,hE.bounds.size.height}};
     [pEgg addSubview:hE];
-    NSArray *eggNames = @[@"鸡", @"牛", @"猪", @"羊", @"狼",
-                          @"村民", @"哞菇", @"僵尸", @"爬行者", @"骷髅",
-                          @"蜘蛛", @"猪人", @"史莱姆", @"末影人", @"蠹虫"];
+    NSArray *eggNames = @[MWBTr("egg0"), MWBTr("egg1"), MWBTr("egg2"), MWBTr("egg3"), MWBTr("egg4"),
+                          MWBTr("egg5"), MWBTr("egg6"), MWBTr("egg7"), MWBTr("egg8"), MWBTr("egg9"),
+                          MWBTr("egg10"), MWBTr("egg11"), MWBTr("egg12"), MWBTr("egg13"), MWBTr("egg14")];
     CGFloat eTop = CGRectGetMaxY(hE.frame) + 20;
     CGFloat eCell = (pw - 66) / 5.0;
     for (int i = 0; i < 15; i++) {
@@ -499,6 +498,8 @@
         UILabel *en = [[UILabel alloc] init];
         en.text = eggNames[i];
         en.font = [UIFont systemFontOfSize:20];
+        en.adjustsFontSizeToFitWidth = YES;   // 英文名长 (Villager/Enderman) 自动缩小防截断
+        en.minimumScaleFactor = 0.7;
         en.textColor = MWB_COLOR(0xcf,0xcc,0xc6);
         en.textAlignment = NSTextAlignmentCenter;
         en.frame = (CGRect){{33 + c * eCell, eTop + r * 118 + 86},{eCell - 8, 28}};
@@ -569,10 +570,10 @@
 - (void)togKillAura:(MWBPixelToggle *)t { gKillAura = t.on; }
 - (void)togMinimap:(MWBPixelToggle *)t { gMinimap = t.on; MWBMinimapShow(t.on); }
 - (void)togSlimeChunk:(MWBPixelToggle *)t {
-    if (!MWB010Only()) { t.on = NO; gSlimeChunk = NO; [self toast:@"仅0.10可用"]; return; }
+    if (!MWB010Only()) { t.on = NO; gSlimeChunk = NO; [self toast:MWBTr("t_only010")]; return; }
     gSlimeChunk = t.on;
     // 叠加画在小地图上: 打开时顺手把小地图也打开 (小地图开关不同步, 重进菜单即一致)
-    if (t.on && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); [self toast:@"小地图已连带打开"]; }
+    if (t.on && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); [self toast:MWBTr("t_map_auto")]; }
 }
 - (void)togDebug:(MWBPixelToggle *)t {
     gMWBDebug = t.on;
@@ -592,13 +593,13 @@
 - (void)setDifficulty:(MWBPixelButton *)sender {
     int d = (int)sender.tag - 15;
     MWBSetDifficulty010(d);
-    NSArray *names = @[@"和平", @"简单", @"普通", @"困难"];
-    if (d >= 0 && d < 4) [self toast:[names[d] stringByAppendingString:@"(已发送)"]];
+    NSArray *names = @[MWBTr("peace"), MWBTr("easy"), MWBTr("normal"), MWBTr("hard")];
+    if (d >= 0 && d < 4) [self toast:[names[d] stringByAppendingString:MWBTr("t_sent")]];
 }
 - (void)setGameMode:(MWBPixelButton *)sender {
     int m = (int)sender.tag - 27;
     MWBSetGameMode010(m);
-    if (m == 0 || m == 1) [self toast:[@[@"生存", @"创造"][m] stringByAppendingString:@"(已发送)"]];
+    if (m == 0 || m == 1) [self toast:[@[MWBTr("surv"), MWBTr("creat")][m] stringByAppendingString:MWBTr("t_sent")]];
 }
 // 菜单内轻提示: 走悬浮窗 VC 的 showToast (无引用, 用 performSelector 避循环依赖)
 - (void)toast:(NSString *)msg {
@@ -610,29 +611,38 @@
     int s = (int)sender.tag - 30;  // 0小 1中 2大
     if (s < 0 || s > 2) return;
     MWBFloatSetSize(s);
-    [self toast:@[@"小悬浮窗", @"中悬浮窗", @"大悬浮窗"][s]];
+    [self toast:@[MWBTr("t_float_s"), MWBTr("t_float_m"), MWBTr("t_float_l")][s]];
 }
 - (void)setFloatAlpha:(MWBPixelButton *)sender {
     int a = (int)sender.tag - 33;  // 0低 1中 2高
     if (a < 0 || a > 2) return;
     MWBFloatSetAlpha(a);
-    [self toast:@[@"低透明度", @"中透明度", @"高透明度"][a]];
+    [self toast:@[MWBTr("t_alpha_lo"), MWBTr("t_alpha_md"), MWBTr("t_alpha_hi")][a]];
 }
 - (void)resetFloat:(MWBPixelButton *)sender {
     (void)sender;
     MWBFloatReset();
-    [self toast:@"悬浮窗已复位"];
+    [self toast:MWBTr("t_float_reset")];
 }
 - (void)setLang:(MWBPixelButton *)sender {
     if (!MWB010Only()) return;
+    // 一键双切: 游戏内文本 + 插件自身 UI (菜单下次打开即新语言, 故直接关菜单)
     gChinese = ((int)sender.tag == 37);
+    MWBSetPluginLang(gChinese ? 0 : 1);
     MWBApplyLang();
-    [self toast:(gChinese ? @"已切中文" : @"已切英文")];
+    [self toast:(gChinese ? @"中文" : @"English")];
+    [self close];
 }
 - (void)eggTap:(UIButton *)sender {
     int i = (int)sender.tag - 100;
-    MWBLogFile(@"[刷怪蛋] 点击 idx=%d (占位, 接线下一轮)", i);
-    [self toast:@"刷怪蛋接线中, 下一版可用"];
+    if (i < 0 || i >= 15) return;
+    // 蛋序 ↔ 实体 id (MobFactory::CreateMob 实锤映射, 仅 0.10 有后端, 非 0.10 按钮本身置灰点不到)
+    int mobIds[15] = {10, 11, 12, 13, 14, 15, 16, 32, 33, 34, 35, 36, 37, 38, 39};
+    NSArray *eggNames = @[MWBTr("egg0"), MWBTr("egg1"), MWBTr("egg2"), MWBTr("egg3"), MWBTr("egg4"),
+                          MWBTr("egg5"), MWBTr("egg6"), MWBTr("egg7"), MWBTr("egg8"), MWBTr("egg9"),
+                          MWBTr("egg10"), MWBTr("egg11"), MWBTr("egg12"), MWBTr("egg13"), MWBTr("egg14")];
+    MWB010SpawnMob(mobIds[i]);
+    [self toast:[eggNames[i] stringByAppendingString:MWBTr("t_spawned")]];
 }
 - (void)doAction:(MWBPixelButton *)sender {
     int tag = (int)sender.tag;

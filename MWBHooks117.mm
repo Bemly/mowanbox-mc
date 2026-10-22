@@ -75,12 +75,21 @@ static void hooked_117_playerTick(void *self) {
     uintptr_t s = MWBMainSlide();
     V117SetBoolFn setB = (V117SetBoolFn)(s + V117_SETBOOL_VA);
     V117SetFloatFn setF = (V117SetFloatFn)(s + V117_SETFLOAT_VA);
-    if (gInvincible) setB(abil, (void *)(s + V117_ABIL_INVULN), 1);
+    // 开关边沿清零: setB 写入 Abilities map 后一直粘着, 关了必须写回 0 (同 0.10 根因)
+    static BOOL sWasInv = NO, sWasFly = NO, sWasBreak = NO;
+    if (gInvincible) { setB(abil, (void *)(s + V117_ABIL_INVULN), 1); sWasInv = YES; }
+    else if (sWasInv) { setB(abil, (void *)(s + V117_ABIL_INVULN), 0); sWasInv = NO; }
     if (gFly) {
         setB(abil, (void *)(s + V117_ABIL_FLYING), 1);
         setB(abil, (void *)(s + V117_ABIL_MAYFLY), 1);
+        sWasFly = YES;
+    } else if (sWasFly) {
+        setB(abil, (void *)(s + V117_ABIL_FLYING), 0);
+        setB(abil, (void *)(s + V117_ABIL_MAYFLY), 0);
+        sWasFly = NO;
     }
-    if (gFastBreak) setB(abil, (void *)(s + V117_ABIL_INSTABUILD), 1);
+    if (gFastBreak) { setB(abil, (void *)(s + V117_ABIL_INSTABUILD), 1); sWasBreak = YES; }
+    else if (sWasBreak) { setB(abil, (void *)(s + V117_ABIL_INSTABUILD), 0); sWasBreak = NO; }
     if (gSpeed) setF(abil, (void *)(s + V117_ABIL_WALKSPEED), 0.25f);
     if (gMWBDebug && (gTick117 % 200) == 1) {
         NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];

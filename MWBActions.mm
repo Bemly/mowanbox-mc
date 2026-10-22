@@ -78,6 +78,7 @@ static void MWBFlushPending(void) {
     if (gPendExplode) { gPendExplode = NO; MWB010Explode(); }
 }
 void MWBPollCmdFile(void) {
+    MWBDumpItemRegistry();   // 世界内扫注册表 (preload 期扫不全, 以这次为准)
     static int cooldown = 0;
     if ((cooldown++ % 20) != 0) return;
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -98,9 +99,12 @@ void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"jump"]) gSuperJump = arg ? YES : NO;
         else if ([act isEqualToString:@"noclip"]) gNoclip = arg ? YES : NO;
         else if ([act isEqualToString:@"night"]) gNightVision = arg ? YES : NO;
+        else if ([act isEqualToString:@"ysm"]) { gYSM = arg ? YES : NO; if (gYSM) MWBYSMReload(); }
+        else if ([act isEqualToString:@"ysmreload"]) { MWBYSMReload(); }
+        else if ([act isEqualToString:@"ysmgeo"]) { gYSM = YES; MWBYSMReloadGeo(); }
         else if ([act isEqualToString:@"aura"]) gKillAura = arg ? YES : NO;
         else if ([act isEqualToString:@"map"]) { gMinimap = arg ? YES : NO; MWBMinimapShow(gMinimap); }
-        else if ([act isEqualToString:@"lang"]) { gChinese = arg ? YES : NO; MWBApplyLang(); }
+        else if ([act isEqualToString:@"lang"]) { gChinese = arg ? YES : NO; MWBSetPluginLang(arg ? 0 : 1); MWBApplyLang(); }
         else if ([act isEqualToString:@"slime"]) {
             gSlimeChunk = arg ? YES : NO;
             if (gSlimeChunk && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); }
@@ -260,6 +264,20 @@ void MWBPollCmdFile(void) {
                     @"%@ [010gl] slots=%d calls=%d persp=%d buried=%d patched=%d\n",
                     [NSDate date], MWB010GOTSlots(), MWB010GLCalls(), MWB010GLPersp(),
                     MWB010GLBuried(), MWB010GLPatched()];
+                [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
+        else if ([act isEqualToString:@"aurainfo"]) {
+            // 杀戮光环计数探针: 扫描次数/命中目标累计/实际出刀累计 (全 ASCII)
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                NSString *line = [NSString stringWithFormat:
+                    @"%@ [010aura] on=%d scans=%d targets=%d hurts=%d\n",
+                    [NSDate date], gKillAura ? 1 : 0,
+                    MWB010AuraScans(), MWB010AuraTargets(), MWB010AuraHurts()];
                 [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
                 [lfh closeFile];
             }
@@ -634,6 +652,9 @@ void MWBSetDifficulty010(int difficulty) {
 // 生存/创造切换: Minecraft::setIsCreativeMode 换 GameMode 对象+flag,
 // 但它不管 ability (尾调 slot 0x98 只是 isCreativeType 无操作), 必须手写 abil 4 字节落位
 // (创造 abil=[1,0,1,1]: 无敌/可飞/瞬挖; 生存清零, 开着的开关下个 tick 由 hook 补回)
+// 世界标记也要一起翻 (Level+0x15E4, selectLevel 反编译实锤): 只改玩家/MC 层的话,
+// 箱子/刷怪/反应核这些查世界标记的逻辑还认建档时的旧模式, 切了等于没切。
+// 注意: 游戏自动存档会把这个标记写进 level.dat, 重进就是新模式 (回不去了, 用户要的就是这个)。
 void MWBSetGameMode010(int mode) {
     if (gGV != (int)MWBGameV0_10 || !gLocalPlayer) {
         MWBLogFile(@"[010模式] 跳过 gv=%d player=%p m=%d", gGV, gLocalPlayer, mode);
@@ -642,7 +663,8 @@ void MWBSetGameMode010(int mode) {
     if (mode != 0 && mode != 1) return;
     MWB010SetCreativeFull(mode == 1);
     MWB010SetCreative(NULL, mode == 1);
-    MWBLogFile(@"[010模式] 切%@", mode ? @"创造" : @"生存");
+    if (gLevel) *(int *)((char *)gLevel + 0x15E4) = (mode == 1) ? 1 : 0;
+    MWBLogFile(@"[010模式] 切%@ (世界标记=%d)", mode ? @"创造" : @"生存", mode);
 }
 
 // 0.10 一键反应核: 在玩家脚下按游戏校验图案搭平台+核, 再直调 NetherReactorTile::use 激活
@@ -693,7 +715,16 @@ void MWB010SpawnReactor(void) {
     ReactorUseFn useReactor = (ReactorUseFn)(slide + 0x10015a344UL);
     void *maybeLevel = *(void **)((char *)gLocalPlayer + 0x58);
     int launchGate = maybeLevel ? *(int *)((char *)maybeLevel + 0x15E4) : -1;
+    // +0x15E4 实为世界创造标记 (Minecraft::selectLevel 拿它调 setIsCreativeMode, otool 实锤),
+    // 创造世界里 use() 进门第一行就静默 return 0 (连提示都不给) —— 点了没反应的根因。
+    // 先暂存并清零骗过检查, 调完立刻恢复 (use 只在入口查一次, tick/lightItUp 不复查), 不污染存档。
+    int savedGate = launchGate;
+    if (maybeLevel && launchGate == 1) {
+        *(int *)((char *)maybeLevel + 0x15E4) = 0;
+        MWBLogFile(@"[010反应核] 创造世界 gate=1, 已临时清零再激活");
+    }
     int launched = useReactor(NULL, gLocalPlayer, cx, y, cz);
+    if (maybeLevel && savedGate == 1) *(int *)((char *)maybeLevel + 0x15E4) = savedGate;
     NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
     if (fh) {

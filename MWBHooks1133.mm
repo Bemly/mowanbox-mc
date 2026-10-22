@@ -53,14 +53,20 @@ static void hooked_1133_playerTick(void *self) {
     // 无敌: entry[8]invulnerable 值=Player+2480 (Base2376+12+8*12, 逆向分队实锤)
     // 旧双写 base[8*12]/[9*12] 实为 teleport/invulnerable, 现改为单写去副作用
     char *ab = (char *)self + V1133_PLAYER_ABILITIES_OFF + 12;
-    if (gInvincible) ab[8 * 12] = 1;                    // Player+2480 invulnerable
-    if (gFly) { ab[9 * 12] = 1; ab[10 * 12] = 1; }      // flying+mayfly
-    if (gFastBreak) ab[11 * 12] = 1;                    // instabuild
+    // 开关边沿清零: 能力表写 1 后一直粘着, 关了必须写回 0 (同 0.10 根因)
+    static BOOL sWasInv = NO, sWasFly = NO, sWasBreak = NO, sWasClip = NO;
+    if (gInvincible) { ab[8 * 12] = 1; sWasInv = YES; }
+    else if (sWasInv) { ab[8 * 12] = 0; sWasInv = NO; }
+    if (gFly) { ab[9 * 12] = 1; ab[10 * 12] = 1; sWasFly = YES; }
+    else if (sWasFly) { ab[9 * 12] = 0; ab[10 * 12] = 0; sWasFly = NO; }
+    if (gFastBreak) { ab[11 * 12] = 1; sWasBreak = YES; }
+    else if (sWasBreak) { ab[11 * 12] = 0; sWasBreak = NO; }
     if (gSpeed) {
         *(float *)(ab + 14 * 12) = 1.0f;                // walkSpeed
         *(float *)(ab + 13 * 12) = 1.0f;                // flySpeed
     }
-    if (gNoclip) ab[17 * 12] = 1;                       // noclip
+    if (gNoclip) { ab[17 * 12] = 1; sWasClip = YES; }
+    else if (sWasClip) { ab[17 * 12] = 0; sWasClip = NO; }
     if (gKillAura) MWB1133_KillAuraTick();
     if (gMinimap && (gTick1133 % 40) == 1) {
         if (MWB1133_SampleMinimap() >= 0) MWBMinimapRefresh();
