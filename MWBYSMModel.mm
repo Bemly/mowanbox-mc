@@ -493,6 +493,10 @@ static void YSMFreePart(void *part) {
 + (void)setVanillaHidden:(void *)model hide:(BOOL)hide {
     // HumanoidModel 内 6 个内嵌 part 偏移（逆向实锤），+0x80 置 1 藏 / 置 0 恢复。
     if (!model) return;
+    // 边沿触发：hook 每帧都调，状态不变直接回（否则每帧打日志，20KB/s 刷屏；新世界 model 指针变了会自动重应用）。
+    static void *sLastModel = NULL; static BOOL sLastHide = NO; static BOOL sInit = NO;
+    if (sInit && sLastModel == model && sLastHide == hide) return;
+    sInit = YES; sLastModel = model; sLastHide = hide;
     static const size_t kOff[6] = { 0x108, 0x1C8, 0x288, 0x348, 0x408, 0x4C8 };
     for (int i = 0; i < 6; i++) {
         uint8_t *part = (uint8_t *)model + kOff[i];

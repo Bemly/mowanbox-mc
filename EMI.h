@@ -34,7 +34,7 @@ typedef struct {
     const char *frontTile; int frontIdx;
     const char *sideTile; int sideIdx;
     int maxStack;           // 最大堆叠
-    int category;           // 0=全部 1=装备 2=配方 3=建筑
+    int category;           // 0=全部 1=装备 2=功能方块 3=建筑
 } MWBItemDef;
 extern int gItemCount;
 extern MWBItemDef gItems[];
@@ -58,6 +58,14 @@ void **mwb_items_registry(void);
 + (void)presentBrowserInView:(UIView *)hostView onClose:(void (^)(void))onClose;
 + (void)dismissBrowser;
 @end
+
+// 注册表全扫 (dump 用, preload/世界tick都可调)
+void MWBDumpItemRegistry(void);
+// 原版分类全扫 (dump 用): 复刻 CreativeInventoryScreen::populateItems 尾部分发
+// (方块读 Tile+0x8c 否则读 Item+0x58, tab=cat-1), 与 EMI 表做 diff 对齐原版分类
+void MWBDumpItemCats(void);
+// EMI 全表自检 (verify 用): 逐项复算原版 cat 并映射回 EMI 分类, 错位落日志
+void MWBEMIVerifyCats(void);
 
 // 调试用: 直接给予物品 (cycript 可调用)
 // 用法: [MWBEMIManager giveItem:264 count:1]  (264=钻石)

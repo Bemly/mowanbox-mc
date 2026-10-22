@@ -220,6 +220,105 @@ static void MWBInstallGiver() {
     void **reg = mwb_items_registry();
     MWBAddFn add = mwb_inventory_add();
     MWBDLog(@"[EMI] 物品给予模块已就绪 (registry=%p add=%p)", reg, add);
+    MWBDumpItemRegistry();
+}
+
+// 游戏 getName 同款: 虚表 +0x118 即 getDescriptionId (Item::getName 反编译实锤),
+// 只读调它拿真名, 比猜 id 准
+static NSString *MWBDescOfItem(void *item) {
+    if (!item) return nil;
+    void *fn = *(void **)((char *)(*(void **)item) + 0x118);
+    if (!fn) return nil;
+    char tmp[24]; memset(tmp, 0, sizeof(tmp));
+    register void *r0 __asm__("x0") = item;
+    register void *r8 __asm__("x8") = tmp;
+    __asm__ volatile (
+        "blr %[fn]\n"
+        : "+r" (r0), "+r" (r8)
+        : [fn] "r" (fn)
+        : "memory", "cc", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
+          "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17");
+    uint8_t *s = (uint8_t *)tmp;
+    if (s[23] & 1) {   // libc++ 短串: 数据在位, 长度在末字节 >>1
+        size_t n = s[23] >> 1;
+        if (n > 23) return nil;
+        return [[NSString alloc] initWithBytes:tmp length:n encoding:NSUTF8StringEncoding];
+    }
+    void *p = *(void **)(s + 16);   // 长串: 指针+16, 长度+8
+    size_t n = *(size_t *)(s + 8);
+    if (!p || n == 0 || n > 256) return nil;
+    return [[NSString alloc] initWithBytes:p length:n encoding:NSUTF8StringEncoding];
+}
+
+// dumpitems: 扫 Item::items[512] 落盘全部已注册 id+真名 (与 EMI 表做 diff, 找原版缺口;
+// 索引即 id, <256 为方块, >=256 为物品; preload 和世界 tick 里都接, 以世界内为准)
+void MWBDumpItemRegistry(void) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:@"/tmp/mwbcmd-dumpitems"]) return;
+    [[NSFileManager defaultManager] removeItemAtPath:@"/tmp/mwbcmd-dumpitems" error:nil];
+    void **reg = mwb_items_registry();
+    if (!reg) { MWBDLog(@"[dumpitems] 注册表未解析"); return; }
+    NSMutableString *b = [NSMutableString stringWithString:@"[dumpitems] blocks:"]; int nb = 0;
+    NSMutableString *t = [NSMutableString stringWithString:@"[dumpitems] items:"]; int ni = 0;
+    for (int i = 0; i < 512; i++) {
+        if (!reg[i]) continue;
+        NSString *d = MWBDescOfItem(reg[i]);
+        if (i < 256) { [b appendFormat:@" %d=%@", i, d ?: @"?"]; nb++; }
+        else { [t appendFormat:@" %d=%@", i, d ?: @"?"]; ni++; }
+    }
+    MWBDLog(@"%@ (共%d)", b, nb);
+    MWBDLog(@"%@ (共%d)", t, ni);
+}
+
+// dumpcats: 复刻原版 CreativeInventoryScreen::populateItems 尾部分发扫全表分类
+// (方块: Tile* 非空读 Tile+0x8c, 否则读 Item+0x58; 原版 tab=cat-1, 共 4 个 tab 向量)
+// 与 EMI 表 category 做 diff, 把错位的物品搬到原版同 tab; C 缓冲拼行
+// (NSMutableString appendFormat 拼大数据行会被吞, 见小地图教训)
+void MWBDumpItemCats(void) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:@"/tmp/mwbcmd-dumpcats"]) return;
+    [[NSFileManager defaultManager] removeItemAtPath:@"/tmp/mwbcmd-dumpcats" error:nil];
+    void **reg = mwb_items_registry();
+    if (!reg) { MWBDLog(@"[dumpcats] 注册表未解析"); return; }
+    void **tiles = (void **)(MWBMainSlide() + MWB_ITEM_INFO_TABLE_VMADDR);
+    static char buf[16384];
+    int n = snprintf(buf, sizeof(buf), "[dumpcats] cat(原版tab=cat-1):");
+    int cnt[8] = {0,0,0,0,0,0,0,0};
+    for (int i = 0; i < 512 && n > 0 && n < (int)sizeof(buf) - 16; i++) {
+        void *it = reg[i];
+        if (!it) continue;
+        void *t = (i < 256) ? tiles[i] : NULL;
+        int cat = t ? *(int *)((char *)t + 0x8c) : *(int *)((char *)it + 0x58);
+        if (cat >= 0 && cat < 8) cnt[cat]++;
+        n += snprintf(buf + n, sizeof(buf) - n, " %d=%d", i, cat);
+    }
+    MWBDLog(@"%s", buf);
+    MWBDLog(@"[dumpcats] 各cat数量: 0=%d 1=%d 2=%d 3=%d 4=%d 5=%d 6=%d 7=%d (正常应只有1..4有数)",
+        cnt[0], cnt[1], cnt[2], cnt[3], cnt[4], cnt[5], cnt[6], cnt[7]);
+}
+
+// emivrfy: EMI 全表自检 (只读): 逐项复算原版 cat 并按 原1→3/原2→2/原3→1/原4→0
+// 映射回 EMI 分类, 与 gItems category 逐项比对, 错位(或原版cat异常)落日志; 未注册 id 跳过
+void MWBEMIVerifyCats(void) {
+    if (![[NSFileManager defaultManager] fileExistsAtPath:@"/tmp/mwbcmd-emivrfy"]) return;
+    [[NSFileManager defaultManager] removeItemAtPath:@"/tmp/mwbcmd-emivrfy" error:nil];
+    void **reg = mwb_items_registry();
+    if (!reg) { MWBDLog(@"[emivrfy] 注册表未解析"); return; }
+    void **tiles = (void **)(MWBMainSlide() + MWB_ITEM_INFO_TABLE_VMADDR);
+    static char buf[4096];
+    int n = snprintf(buf, sizeof(buf), "[emivrfy] 错位(id:原cat/现cat):");
+    int bad = 0, skip = 0;
+    for (int k = 0; k < gItemCount && n > 0 && n < (int)sizeof(buf) - 24; k++) {
+        int id = gItems[k].itemId;
+        if (id < 0 || id >= 512 || !reg[id]) { skip++; continue; }
+        void *t = (id < 256) ? tiles[id] : NULL;
+        int cat = t ? *(int *)((char *)t + 0x8c) : *(int *)((char *)reg[id] + 0x58);
+        int want = (cat == 1) ? 3 : (cat == 2) ? 2 : (cat == 3) ? 1 : (cat == 4) ? 0 : -1;
+        if (want < 0 || want != gItems[k].category) {
+            bad++;
+            n += snprintf(buf + n, sizeof(buf) - n, " %d:%d/%d", id, cat, gItems[k].category);
+        }
+    }
+    MWBDLog(@"%s", buf);
+    MWBDLog(@"[emivrfy] 共%d项 错位%d 未注册跳过%d (错位0即与原版一致)", gItemCount, bad, skip);
 }
 
 #pragma mark - EMI 管理器

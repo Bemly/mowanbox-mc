@@ -10,6 +10,7 @@
 // 转视角直调 (定义在 MWBDebug.mm, flag turn-N 用)
 @interface MWBTouchHelper : NSObject
 + (void)dragGameFromX:(CGFloat)x1 y:(CGFloat)y1 toX:(CGFloat)x2 y:(CGFloat)y2;
++ (void)tapGameAtX:(CGFloat)x y:(CGFloat)y;
 @end
 
 #pragma mark - 跨版本动作分发
@@ -79,6 +80,8 @@ static void MWBFlushPending(void) {
 }
 void MWBPollCmdFile(void) {
     MWBDumpItemRegistry();   // 世界内扫注册表 (preload 期扫不全, 以这次为准)
+    MWBDumpItemCats();       // 世界内扫原版分类 (同上, 与 EMI 表对齐用)
+    MWBEMIVerifyCats();      // 世界内自检 EMI 分类 (错位落日志, 应为 0)
     static int cooldown = 0;
     if ((cooldown++ % 20) != 0) return;
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -444,6 +447,14 @@ void MWBPollCmdFile(void) {
             // 转视角(验证小地图箭头用): 从屏幕中部向右水平拖 arg 点 (768x1024 点坐标系)
             int dx = arg ? arg : 200;
             [MWBTouchHelper dragGameFromX:512 y:500 toX:512 + dx y:500];
+        }
+        else if ([act isEqualToString:@"tap"]) {
+            // 通用直调点击 (替代 flaky 的 cycript: touch /tmp/mwbcmd-tap-500-570 即点 (500,570) 点坐标系)
+            NSArray *pp = [cmd componentsSeparatedByString:@"-"];
+            if (pp.count >= 3) {
+                int tx = (int)[pp[1] intValue], ty = (int)[pp[2] intValue];
+                [MWBTouchHelper tapGameAtX:tx y:ty];
+            }
         }
         else if ([act isEqualToString:@"sink"]) {
             // 穿墙验证: 原地垂直传送 (sink-5 下埋 5 格 / sink--5 上浮 5 格, 双横杠解析出负数)

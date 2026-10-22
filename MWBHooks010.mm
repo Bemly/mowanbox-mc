@@ -169,6 +169,7 @@ static void hooked_mc010Tick(void *self, int a, int b) {
     orig_mc010Tick(self, a, b);
     gMinecraft010 = self;
     gMcTick010Count++;
+    MWBPollCmdFile();   // 主菜单也接 flag (tap 进世界等), 世界 tick 里照常双调无害(共享 cooldown)
 }
 void MWB010SetCreativeFull(bool creative) {
     void (*setC)(void *, bool) = (void (*)(void *, bool))MSFindSymbol(NULL, "__ZN9Minecraft17setIsCreativeModeEb");
