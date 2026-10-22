@@ -69,6 +69,7 @@ export THEOS=~/theos PATH="$THEOS/bin:$PATH"
 make package
 sshpass -p alpine scp packages/*.deb root@192.168.1.81:/tmp/mowanbox.deb
 sshpass -p alpine ssh root@192.168.1.81 "dpkg -i /tmp/mowanbox.deb"
-sshpass -p alpine ssh root@192.168.1.81 "killall minecraftpe 2>/dev/null; uiopen moe.bemly.mcpe.0.10"
+PID=$(sshpass -p alpine ssh root@192.168.1.81 "launchctl list" | grep -i minecraftpe | awk '{print $1}'); sshpass -p alpine ssh root@192.168.1.81 "kill -15 $PID"; sleep 3
+sshpass -p alpine ssh root@192.168.1.81 "uiopen moe.bemly.mcpe.0.10"
 sshpass -p alpine ssh root@192.168.1.81 "activator send libactivator.system.take-screenshot"
 ```
