@@ -145,9 +145,7 @@ __attribute__((unused)) static void MWBSkinBuild(void *model) {
     if (sPartsKept) free(sPartsKept);
     sPartsKept = parts;
     sPartsCount = MWBFishBoneCount;
-    // 测试期：鱼挪到头顶 +40Y（第一人称相机在玩家脸上，不挪全被近平面裁掉，只能看到一角）。
-    // 注意轴心是渲染时现读的，建好后改也生效。
-    *(float *)((char *)root + 0x04) += 40.0f; // 头顶+40Y
+    // 真穿身上：相对坐标已证对，不再偏移（第三人称回看即见）。
     // 关键：compile 里读 part+0xB8 当 Model* 调 getAABB，C1 不填它，必须调 setModel
     // （HumanoidModel 构造里每 part 都调；漏调=空指针解引用静默死，-169 闪退根因）。
     // model 传 hook 的 self（HumanoidModel*），建树点在 mini hook 内才有，见下。

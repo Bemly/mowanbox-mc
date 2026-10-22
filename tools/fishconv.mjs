@@ -23,6 +23,18 @@ if (process.env.FISHMODE === 'single' && limit > 0) {
   for (let i = 0; i < bones.length && n < limit; i++) {
     if ((bones[i].cubes || []).length) { addAnc(i); n++; }
   }
+} else if (process.env.FISHMODE === 'avatar') {
+  // 穿戴体：砍场景件（Gui/Brand/电饭煲/雨滴/武器/鞘翅）连带整棵子树，保证无孤儿错位
+  const rx = /Gui|Brand|riceCooker|Rainfall|raindrop|Rifle|Pistol|Elytra|molang/i;
+  const drop = new Set();
+  const isDrop = (i) => {
+    if (drop.has(i)) return true;
+    const b = bones[i];
+    if (rx.test(b.name)) { drop.add(i); return true; }
+    if (b.parent) { const p = idx.get(b.parent); if (p !== undefined && isDrop(p)) { drop.add(i); return true; } }
+    return false;
+  };
+  bones.forEach((_, i) => { if (!isDrop(i)) keep.add(i); });
 } else {
   for (let i = 0; i < bones.length && (limit < 0 || keep.size < limit); i++) keep.add(i);
 }
@@ -59,9 +71,10 @@ kb.forEach((b, ni) => {
   const bp = absPiv[ni];
   for (const cu of (b.cubes || [])) {
     cu.origin = [0,1,2].map((k) => cu.origin[k] - bp[k]);
-    // 截断后任一维度为 0 即跳过（0.9 之类小盒截断成 0 会退化，全量 41 个原生零盒另算在内）
-    const td = cu.size.map((v) => Math.trunc(v));
-    if (td[0] <= 0 || td[1] <= 0 || td[2] <= 0) continue;
+    // 原生零盒跳过；其余截断后夹到 ≥1（0.45 薄片留 1 保形状，0.10 整数盒子下限）
+    if (cu.size[0] === 0 || cu.size[1] === 0 || cu.size[2] === 0) continue;
+    cu.size = cu.size.map((v) => Math.max(1, Math.trunc(v)));
+    const td = cu.size;
     cb++; cBone.push(ni); cOrg.push('{' + g(cu.origin).join(',') + '}'); cSize.push('{' + g(cu.size).join(',') + '}'); }
 });
 c += 'const int MWBFishCubeCount = ' + cb + ';\n';
@@ -70,4 +83,8 @@ c += 'const float MWBFishCubeOrigin[][3] = {' + cOrg.join(',') + '};\n';
 c += 'const float MWBFishCubeSize[][3] = {' + cSize.join(',') + '};\n';
 fs.writeFileSync(outPrefix + '.h', h);
 fs.writeFileSync(outPrefix + '.c', c);
+const jb = kb.map((b, ni) => ({name: b.name, parent: (() => { const p = newIdx.get(b.parent); return p === undefined ? -1 : p; })(), pivot: relPiv[ni], rot: (b.rotation || [0,0,0])}));
+const jc = [];
+kb.forEach((b, ni) => { for (const cu of (b.cubes || [])) { const t = cu.size.map((v) => Math.trunc(v)); if (t[0] <= 0 || t[1] <= 0 || t[2] <= 0) continue; jc.push({bone: ni, o: cu.origin, s: cu.size}); } });
+fs.writeFileSync(outPrefix + '.json', JSON.stringify({bones: jb, cubes: jc}));
 console.log('bones=' + kb.length + ' cubes=' + cb);
