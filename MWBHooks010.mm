@@ -273,6 +273,14 @@ int MWB010GOTSlots(void) { return gGOTSlots; }
 // 透视矩阵签名: 列主序 m[11]==-1, m[15]==0 (modelview 仿射矩阵 m[11]==0, 不会误伤)
 static void patched_glUniformMatrix4fv(int loc, int count, unsigned char tr, const float *m) {
     gGLCalls++;
+    // 4D皮肤优先: 窗口期内模型矩阵做列缩放 (与穿墙透视矩阵互斥, 各走各的分支)
+    if (count == 1 && !tr && m) {
+        float scaled[16];
+        if (MWBMini4DScaleMatrix(m, scaled)) {
+            orig_glUniformMatrix4fv(loc, count, tr, scaled);
+            return;
+        }
+    }
     if (count == 1 && !tr && m &&
         m[3] == 0.0f && m[7] == 0.0f &&
         fabsf(m[11] + 1.0f) < 1e-6f && m[15] == 0.0f) {

@@ -26,6 +26,7 @@ typedef struct { int x, y, z; } MWBBlockPos;
 // ---- 全局开关/状态 (定义在 Tweak.xm) ----
 extern BOOL gInvincible, gFly, gFastBreak, gSpeed, gSuperJump;
 extern BOOL gNoclip, gNightVision, gKillAura, gMinimap, gSlimeChunk, gChinese;
+extern BOOL gSkin4D; // 4D皮肤总开关 (定义在 Tweak.xm, 后端在 MWBSkin4D.mm)
 extern BOOL gFlyUp, gFlyDown, gPadJump;   // 触控板跳/升/降按住状态 (定义在 Tweak.xm)
 extern int gGV, gTimeMode, gWeatherMode;
 extern int gTimeCustom010;   // 0.10 绝对时刻跳转 (Tweak.xm 定义, MWBHooks010 消费)
@@ -156,3 +157,7 @@ int MWB010AuraHurts(void);
 // 触控板 (定义在 MWBFloat.mm): 升/降两钮创建+显隐同步 (仅 0.10 世界内;
 // 跳用原生键, 蹲已撤——0.10 无潜行)
 void MWBPadSync(void);
+// ---- 4D皮肤 (定义在 MWBSkin4D.mm, 开关在 Tweak.xm) ----
+extern BOOL gMiniDrawScope; // 本地玩家绘制窗口 (render hook 置位, 均匀层消费)
+void MWBSkin4DInstall(void); // 0.10 才安装
+BOOL MWBMini4DScaleMatrix(const float *m, float *out); // 均匀层列缩放, 命中返回 YES

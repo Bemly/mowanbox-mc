@@ -22,6 +22,7 @@ BOOL gFlyUp = NO, gFlyDown = NO;   // 触控板: 上升/下降按住状态 (0.10
 BOOL gPadJump = NO;                // 触控板: 跳按住状态 (置游戏输入[0x11], 原版离地闸消费)
 BOOL gSlimeChunk  = NO;   // 史莱姆区块叠加 (0.10 小地图用)
 BOOL gChinese     = YES;  // 中文汉化开关 (0.10 默认开, 可切回英文)
+BOOL gSkin4D      = NO;   // 4D皮肤总开关 (P1 迷你史蒂夫, 仅 0.10)
 int  gGV          = 0;   // 当前游戏版本 (MWBGameVersion 数值, %ctor 内赋值, 跨版本分发用)
 int  gTimeMode    = 0;   // 点按语义: 1=跳白天 2=跳夜晚, 下一个 tick 写一次即清零, 时间自然流
 int  gTimeCustom010 = -1; // 0.10 绝对时刻跳转 (>=0 有效, hook 写一次即清零)
@@ -53,6 +54,7 @@ uint8_t gMiniMap010D[48 * 48];    // 0.10 水深
 
     // 0.10 永远安装 (符号 hook); 其余版本按识别结果安装
     MWBInstallHooks010();
+    MWBSkin4DInstall(); // 4D皮肤 (内部判版本, 仅 0.10 挂载)
     if (gv == MWBGameV1_13_3) MWBInstallHooks1133();
     if (gv == MWBGameV1_1_7)  MWBInstallHooks117();
     if (gv == MWBGameV1_4_3)  MWBInstallHooks143();

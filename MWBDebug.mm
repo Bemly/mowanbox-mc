@@ -226,6 +226,7 @@
 + (void)dbgMap:(BOOL)v { gMinimap = v; MWBMinimapShow(v); }
 + (void)dbgLang:(BOOL)v { gChinese = v; MWBSetPluginLang(v ? 0 : 1); MWBApplyLang(); }
 + (void)dbgSlime:(BOOL)v { gSlimeChunk = v; if (v && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); } }
++ (void)dbgSkin4D:(BOOL)v { gSkin4D = v; }
 + (void)dbgDebug:(BOOL)v { gMWBDebug = v; }
 + (void)dbgTime:(int)v { gTimeMode = v; }
 + (void)dbgWeather:(int)v { gWeatherMode = v; }

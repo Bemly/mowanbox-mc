@@ -196,6 +196,7 @@
         @[MWBTr("debug"), [self makeToggle:gMWBDebug action:@selector(togDebug:)]],
         @[MWBTr("speed"), [self makeToggle:gSpeed action:@selector(togSpeed:)]],
         @[MWBTr("jump"), [self makeToggle:gSuperJump action:@selector(togSuperJump:)]],
+        @[MWBTr("skin4d"), [self makeToggle:gSkin4D action:@selector(togSkin4D:)]],
     ];
     CGFloat ry = CGRectGetMaxY(h0.frame) + 20;
     for (NSArray *r in rows0) {
@@ -574,6 +575,10 @@
     gSlimeChunk = t.on;
     // 叠加画在小地图上: 打开时顺手把小地图也打开 (小地图开关不同步, 重进菜单即一致)
     if (t.on && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); [self toast:MWBTr("t_map_auto")]; }
+}
+- (void)togSkin4D:(MWBPixelToggle *)t {
+    if (!MWB010Only()) { t.on = NO; gSkin4D = NO; [self toast:MWBTr("t_only010")]; return; }
+    gSkin4D = t.on;
 }
 - (void)togDebug:(MWBPixelToggle *)t {
     gMWBDebug = t.on;

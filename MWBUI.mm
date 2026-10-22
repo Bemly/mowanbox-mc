@@ -456,6 +456,7 @@ static const char *kMWBTrTable[][3] = {
     {"debug", "调试模式", "Debug"},
     {"speed", "加速奔跑", "Fast Run"},
     {"jump", "超级跳跃", "Super Jump"},
+    {"skin4d", "4D皮肤", "4D Skin"},
     {"time", "时间", "Time"},
     {"srise", "日出", "Sunrise"},
     {"day", "白天", "Day"},

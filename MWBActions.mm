@@ -109,6 +109,7 @@ void MWBPollCmdFile(void) {
             gSlimeChunk = arg ? YES : NO;
             if (gSlimeChunk && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); }
         }
+        else if ([act isEqualToString:@"skin4d"]) gSkin4D = arg ? YES : NO;
         else if ([act isEqualToString:@"debug"]) gMWBDebug = arg ? YES : NO;
         else if ([act isEqualToString:@"time"]) gTimeMode = arg;
         else if ([act isEqualToString:@"tod"]) { if (arg >= 0) gTimeCustom010 = arg; }
