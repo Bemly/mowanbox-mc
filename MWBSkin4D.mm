@@ -109,6 +109,9 @@ static void MWBSkinBuild(void *model) {
     }
     free(parts);
     if (!root) return;
+    // 测试期：鱼挪到身侧 +30（第一人称相机在玩家脸上，不挪全被近平面裁掉，只能看到一角）。
+    // 注意轴心是渲染时现读的，建好后改也生效。
+    *(float *)((char *)root + 0x00) += 30.0f;
     // 关键：compile 里读 part+0xB8 当 Model* 调 getAABB，C1 不填它，必须调 setModel
     // （HumanoidModel 构造里每 part 都调；漏调=空指针解引用静默死，-169 闪退根因）。
     // model 传 hook 的 self（HumanoidModel*），建树点在 mini hook 内才有，见下。

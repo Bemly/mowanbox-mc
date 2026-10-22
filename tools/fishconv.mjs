@@ -41,7 +41,10 @@ c += 'const float MWBFishBoneRot[][3] = {' + kb.map((b) => '{' + (b.rotation || 
 let cb = 0;
 const cBone = [], cOrg = [], cSize = [];
 kb.forEach((b, ni) => {
-  for (const cu of (b.cubes || [])) { cb++; cBone.push(ni); cOrg.push('{' + cu.origin.map(f).join(',') + '}'); cSize.push('{' + cu.size.map(f).join(',') + '}'); }
+  for (const cu of (b.cubes || [])) {
+    // 零体积盒跳过（Bedrock 定位器，全量 41 个，退化几何是闪退嫌疑之一）
+    if (cu.size[0] === 0 || cu.size[1] === 0 || cu.size[2] === 0) continue;
+    cb++; cBone.push(ni); cOrg.push('{' + cu.origin.map(f).join(',') + '}'); cSize.push('{' + cu.size.map(f).join(',') + '}'); }
 });
 c += 'const int MWBFishCubeCount = ' + cb + ';\n';
 c += 'const int MWBFishCubeBone[] = {' + cBone.join(',') + '};\n';
