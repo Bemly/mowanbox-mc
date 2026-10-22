@@ -25,7 +25,9 @@
 
 // 渲染整棵树（递归 children），带旋转/位移（旋转点/旋转角由 render 自家读）。
 // 纯绘制：内部不绑定纹理，调用方须先绑好自家纹理（见上）。
+// scale 为 HumanoidModel::render 的 f6，render 与其内部 compile 同款透传。
 + (void)renderTree:(void *)root;
++ (void)renderTree:(void *)root scale:(float)f;
 
 // 隐藏/恢复 HumanoidModel 六件套（model 为 HumanoidModel*，hide=YES/NO）。
 + (void)setVanillaHidden:(void *)model hide:(BOOL)hide;

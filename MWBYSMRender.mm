@@ -157,7 +157,7 @@ static void hooked_hmodel_render(void *self, void *entity,
         GLint prev = 0;
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
         glBindTexture(GL_TEXTURE_2D, (GLuint)gYSMTex);
-        [MWBYSMModel renderTree:gYSMRoot];
+        [MWBYSMModel renderTree:gYSMRoot scale:f6];
         glBindTexture(GL_TEXTURE_2D, (GLuint)prev);    // 经句柄恢复, 缓存依旧自洽
         return;
     }

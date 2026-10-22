@@ -77,14 +77,13 @@ static const int kYSMConvertDeg2Rad = 0;
 static const float kYSMDeg2Rad = 0.01745329252f; // π/180
 
 // 符号名（MSFindSymbol 按名解析，不硬编码地址）
-#define YSM_SYM_PART_CTOR "___ZN9ModelPartC2Eiiii"
-// 注：Itanium 规范里无参函数符号应以 v 结尾；逆向给出字串照抄使用，
-// 若 MSFindSymbol 取不到，下面的解析函数会自动补试 "...v" 形式。
-#define YSM_SYM_PART_CTOR_ALT "__ZN9ModelPartC2Eiiii"
+// 2026-10-22 真机 nm 实锤：构造只有 C1（无 C2）；compile/render 均带一个 float 参数
+//（render 传的是 HumanoidModel::render 第 6 个参数 f6；compile 内部 3 处同样透传它）。
+#define YSM_SYM_PART_CTOR "__ZN9ModelPartC1Eiiii"
 #define YSM_SYM_ADDCHILD "__ZN9ModelPart8addChildEPS_"
-#define YSM_SYM_CUBE_CTOR "__ZN4CubeC2EP9ModelPartiifffiiiiif"
-#define YSM_SYM_COMPILE "__ZN9ModelPart7compileE"
-#define YSM_SYM_RENDER "__ZN9ModelPart6renderE"
+#define YSM_SYM_CUBE_CTOR "__ZN4CubeC1EP9ModelPartiifffiiif"
+#define YSM_SYM_COMPILE "__ZN9ModelPart7compileEf"
+#define YSM_SYM_RENDER "__ZN9ModelPart6renderEf"
 // hook 层用符号（本文件只在注释里引用，不解析；解析归 hook 层）：
 //   Textures::bindTexture =
 //   "__ZN8Textures11bindTextureERKNSt3__112basic_stringIcNS0_11char_traitsIcEENS_0_9allocatorIcEEEE"
@@ -99,8 +98,10 @@ typedef void (*YSMPartCtorFn)(void *thiz, int texU, int texV, int texW, int texH
 typedef void (*YSMAddChildFn)(void *thiz, void *child);
 typedef void (*YSMCubeCtorFn)(void *thiz, void *part, int texU, int texV,
                               float x, float y, float z, int w, int h, int d, float inflate);
-typedef void (*YSMCompileFn)(void *thiz);
-typedef void (*YSMRenderFn)(void *thiz);
+// compile/render 均多带一个 float（render 收 HumanoidModel::render 的 f6；
+// compile 内部 3 处调用同样透传它；建树时用最近一帧的 f6，首帧默认 0.0625）。
+typedef void (*YSMCompileFn)(void *thiz, float f);
+typedef void (*YSMRenderFn)(void *thiz, float f);
 
 // 符号缓存（首次调用时 MSFindSymbol 解析）
 static YSMPartCtorFn sPartCtor = NULL;
@@ -109,6 +110,9 @@ static YSMCubeCtorFn sCubeCtor = NULL;
 static YSMCompileFn sCompile = NULL;
 static YSMRenderFn sRender = NULL;
 static int sSymResolved = 0;
+// 最近一帧 render 传进来的 f6（compile/render 同款参数）；建树时 compile 用它，
+// 首帧尚未渲染过则默认 0.0625（MC 标准 scale，待真机标定）。
+static float sYSMScale = 0.0625f;
 
 // 根 part → 自家纹理名登记表（freeTree 按根查表删纹理；只记根，不记中间节点）
 static NSMutableDictionary *sYSMTexMap(void) {
@@ -122,10 +126,7 @@ static NSMutableDictionary *sYSMTexMap(void) {
 static int YSMResolveSyms(void) {
     if (sSymResolved) return (sPartCtor && sCubeCtor) ? 1 : 0;
     sSymResolved = 1;
-    // 构造符号逆向字串带三下划线前缀，先照抄试，取不到再试标准双下划线形式。
-    void *p = MSFindSymbol(NULL, YSM_SYM_PART_CTOR);
-    if (!p) p = MSFindSymbol(NULL, YSM_SYM_PART_CTOR_ALT);
-    sPartCtor = (YSMPartCtorFn)p;
+    sPartCtor = (YSMPartCtorFn)MSFindSymbol(NULL, YSM_SYM_PART_CTOR);
     sAddChild = (YSMAddChildFn)MSFindSymbol(NULL, YSM_SYM_ADDCHILD);
     sCubeCtor = (YSMCubeCtorFn)MSFindSymbol(NULL, YSM_SYM_CUBE_CTOR);
     sCompile  = (YSMCompileFn)MSFindSymbol(NULL, YSM_SYM_COMPILE);
@@ -442,7 +443,7 @@ static void YSMFreePart(void *part) {
                     }
                 }
                 // 写完必须调一次 compile，否则 render 脏检查会画旧 Mesh。
-                if (sCompile) sCompile(part);
+                if (sCompile) sCompile(part, sYSMScale);
             }
         }
         // 父子串联：parent 名查表，addChild 串起来；无 parent 的第一个即根。
@@ -475,17 +476,23 @@ static void YSMFreePart(void *part) {
 }
 
 + (void)renderTree:(void *)root {
+    [self renderTree:root scale:sYSMScale];
+}
+
++ (void)renderTree:(void *)root scale:(float)f {
     // 纯绘制：假设调用方已绑好自家纹理，内部不做任何绑定/恢复。
     // 旋转/位移由各 part 自家的 render 读旋转点/角完成，本函数只做递归。
+    // f 为 HumanoidModel::render 进来的 f6，render 与其内部 compile 同款透传。
     if (!root) return;
     if (!sRender && !YSMResolveSyms()) return;
     if (!sRender) return;
-    sRender(root);
-    void **f = YSMVecField(root, 0x38);
-    uint8_t *b = (uint8_t *)f[0], *e = (uint8_t *)f[1];
+    sYSMScale = f;
+    sRender(root, f);
+    void **vec = YSMVecField(root, 0x38);
+    uint8_t *b = (uint8_t *)vec[0], *e = (uint8_t *)vec[1];
     if (b && e > b) {
         for (void **p = (void **)b; (uint8_t *)p < e; p++) {
-            if (*p && *p != root) [self renderTree:*p];
+            if (*p && *p != root) [self renderTree:*p scale:f];
         }
     }
 }
