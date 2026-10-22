@@ -749,6 +749,10 @@ void MWB010SpawnMob(int typeId) {
 // kuna 实锤: Options::update 取 a0[0xb4](即+0x2D0)做 %f 解析; MinecraftClient::init 把 Options* 存 MC+0x39(即+0x1C8)
 // gamma 是光照表重算输入之一, 改它即触发重算+上传, 关时恢复原值(纯显示零 gameplay 副作用)
 static float gSavedGamma010 = -1.0f;   // 首次开启时捕获的原值
+// 夜视存档值: 存档只许写原值 (存档 float 重载 hook 用; 从没捕获过回游戏默认 0)
+float MWB010GammaSaveValue(void) {
+    return (gSavedGamma010 > -0.5f) ? gSavedGamma010 : 0.0f;
+}
 static void *MWB010Options(void) {
     void *mc = MWB010Minecraft();
     if (!mc) return NULL;

@@ -139,6 +139,7 @@ void MWB010SpawnReactor(void);
 void MWB010SpawnMob(int typeId);
 void MWB010Explode(void);
 void MWB010NightVisionTick(void);   // 夜视: 改游戏 gamma(Options+0x2D0), 开关都要调(关时恢复)
+float MWB010GammaSaveValue(void);  // 夜视存档替换值 (存档 hook 用)
 void MWB010Sink(int dy);            // 穿墙验证: 原地垂直传送(正下/负上)
 // 穿墙透视诊断计数 (定义在 MWBHooks010.mm, glinfo flag 打)
 int MWB010GLCalls(void);
