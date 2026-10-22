@@ -10,7 +10,6 @@
 // - 均匀层缩放 P1 已证死（glinfo calls=1，吃不到矩阵），留桩不动，改走几何替换。
 #import "MWBSkin4D.h"
 #import "MWBCommon.h"
-#import "MWBFishData.h"
 #import <string.h>
 #import <math.h>
 #import <dlfcn.h> // render 命中调用者反查用
@@ -45,11 +44,8 @@ static void MWBSkinResolve(void) {
                    sPartCtor, sCubeCtor, sAddChild, sPartRender, sSetModel);
 }
 
-// ---- 自家树（建一次，逐帧复用，零每帧分配；parts 表留着逐帧重绑 Model） ----
-static void *sCubeRoot = NULL;
-static void **sPartsKept = NULL;
-static int sPartsCount = 0;
-static void *sLastModel = NULL; // 上次绑定的 model，变了才重绑（setModel 每调一次就摘除重挂，逐帧调等于慢性自杀）
+// ---- 自家双立方体（建一次，逐帧复用，零每帧分配） ----
+static void *sCubeRoot = NULL; // 根 part（1 立方体）+ 子 part（1 立方体）连在一起
 
 // 手动给 part 的 cube 指针向量塞一个指针（C1 已清零向量，自家 malloc 指针数组拥有）
 static void MWBSkinPushCube(void *part, void *cube) {
@@ -71,61 +67,42 @@ static void MWBSkinPushCube(void *part, void *cube) {
     f[1] = end + 8;
 }
 
-// 大肥鱼烘焙表（MWBFishData.c，机器生成）：建树=纯循环填表，无解析无解码。
 static void MWBSkinBuild(void *model) {
     if (sCubeRoot || !sPartCtor || !sCubeCtor || !sAddChild || !sSetModel || !model) return;
-    // 先搭全部 part（指针表留着第二遍串父子/setModel）
-    void **parts = (void **)malloc(sizeof(void *) * (size_t)MWBFishBoneCount);
-    if (!parts) return;
-    for (int i = 0; i < MWBFishBoneCount; i++) parts[i] = NULL;
-    for (int i = 0; i < MWBFishBoneCount; i++) {
-        void *p = malloc(0xC0);
-        if (!p) { free(parts); return; } // 失败即整树作废（sCubeRoot 保持空，永不藏原版）
-        memset(p, 0, 0xC0);
-        sPartCtor(p, 0, 0, 64, 64);
-        *(float *)((char *)p + 0x00) = MWBFishBonePivot[i][0];
-        *(float *)((char *)p + 0x04) = MWBFishBonePivot[i][1];
-        *(float *)((char *)p + 0x08) = MWBFishBonePivot[i][2];
-        *(float *)((char *)p + 0x0C) = MWBFishBoneRot[i][0];
-        *(float *)((char *)p + 0x10) = MWBFishBoneRot[i][1];
-        *(float *)((char *)p + 0x14) = MWBFishBoneRot[i][2];
-        parts[i] = p;
-    }
-    MWBLogFile(@"[4D皮肤] 建树阶段1 parts就绪");
-    // 再挂全部盒子（堆分配+原地构造+指针 push，照抄 HumanoidModel 亲传）
-    for (int i = 0; i < MWBFishCubeCount; i++) {
-        void *p = parts[MWBFishCubeBone[i]];
-        void *c = malloc(0x2C8);
-        if (!c || !p) continue;
-        memset(c, 0, 0x2C8);
-        const float *o = MWBFishCubeOrigin[i], *s = MWBFishCubeSize[i];
-        sCubeCtor(c, p, 0, 0, o[0], o[1], o[2], (int)s[0], (int)s[1], (int)s[2], 0.0f);
-        MWBSkinPushCube(p, c);
-    }
-    MWBLogFile(@"[4D皮肤] 建树阶段2 cubes就绪");
-    // 最后串父子+填 Model（根=首个无父骨，即 Root）
-    // 注意：model（HumanoidModel*）会随进出世界重建，parts 表留着逐帧重绑（见 hook），
-    // 否则切世界后 +0xB8 成野指针，进新世界必死（-174 老是卡死闪退根因）。
-    void *root = NULL;
-    for (int i = 0; i < MWBFishBoneCount; i++) {
-        if (!parts[i]) continue;
-        sSetModel(parts[i], model);
-        int par = MWBFishBoneParent[i];
-        if (par < 0) { if (!root) root = parts[i]; }
-        else if (parts[par]) sAddChild(parts[par], parts[i]);
-    }
-    if (!root) { free(parts); return; }
-    if (sPartsKept) free(sPartsKept);
-    sPartsKept = parts;
-    sPartsCount = MWBFishBoneCount;
-    // 测试期：鱼挪到身侧 +30（第一人称相机在玩家脸上，不挪全被近平面裁掉，只能看到一角）。
-    // 注意轴心是渲染时现读的，建好后改也生效。
-    *(float *)((char *)root + 0x00) += 30.0f;
+    // 根：轴心 (0,12,0)，8 立方体占 y 12..20
+    void *root = malloc(0xC0);
+    if (!root) return;
+    memset(root, 0, 0xC0);
+    sPartCtor(root, 0, 0, 64, 64);
+    *(float *)((char *)root + 0x00) = 0;
+    *(float *)((char *)root + 0x04) = 12;
+    *(float *)((char *)root + 0x08) = 0;
+    void *cubeA = malloc(0x2C8);
+    if (!cubeA) { free(root); return; }
+    memset(cubeA, 0, 0x2C8);
+    sCubeCtor(cubeA, root, 0, 0, -4.0f, 0.0f, -4.0f, 8, 8, 8, 0.0f);
+    MWBSkinPushCube(root, cubeA);
+    // 子：相对轴心 (0,8,0)，4 立方体接在根顶上（y 20..24），连在一起
+    void *child = malloc(0xC0);
+    if (!child) return; // root 已挂，泄漏 1 part 也比野指针强（只走一次）
+    memset(child, 0, 0xC0);
+    sPartCtor(child, 0, 0, 64, 64);
+    *(float *)((char *)child + 0x00) = 0;
+    *(float *)((char *)child + 0x04) = 8;
+    *(float *)((char *)child + 0x08) = 0;
+    void *cubeB = malloc(0x2C8);
+    if (!cubeB) return;
+    memset(cubeB, 0, 0x2C8);
+    sCubeCtor(cubeB, child, 0, 0, -2.0f, 0.0f, -2.0f, 4, 4, 4, 0.0f);
+    MWBSkinPushCube(child, cubeB);
+    sAddChild(root, child);
+    sSetModel(root, model);
+    sSetModel(child, model);
     // 关键：compile 里读 part+0xB8 当 Model* 调 getAABB，C1 不填它，必须调 setModel
     // （HumanoidModel 构造里每 part 都调；漏调=空指针解引用静默死，-169 闪退根因）。
     // model 传 hook 的 self（HumanoidModel*），建树点在 mini hook 内才有，见下。
     sCubeRoot = root;
-    MWBLogFile(@"[4D皮肤] 大肥鱼建好 root=%p 骨=%d 盒=%d", root, MWBFishBoneCount, MWBFishCubeCount);
+    MWBLogFile(@"[4D皮肤] 双立方体建好 root=%p child=%p", root, child);
 }
 
 // 原版六件套显隐（HumanoidModel::render hook 内调，self 即 model；
@@ -154,27 +131,17 @@ static void hooked_mini_render(void *self, void *entity,
     // 先把六个向量存局部（无调用，v0-v5 原样落栈），之后随便调函数，透传时再全量装回去。
     M16Skin s1 = p1, s2 = p2, s3 = p3, s4 = p4, s5 = p5, s6 = p6;
     // 本地玩家：先建树（一次，渲染线程，malloc+叶子构造），树在才藏原版（防隐身）。
-    // Model 随进出世界重建：self 变了才重绑全树，平时零开销（setModel 自带摘除重挂，逐帧调必死）。
     if (entity && entity == gLocalPlayer) {
         MWBSkinResolve();
         if (gSkin4D && sPartRender) MWBSkinBuild(self);
-        if (sCubeRoot && sPartsKept && sSetModel && self != sLastModel) {
-            for (int i = 0; i < sPartsCount; i++)
-                if (sPartsKept[i]) sSetModel(sPartsKept[i], self);
-            sLastModel = self;
-            MWBLogFile(@"[4D皮肤] 重绑 Model=%p", self);
-        }
         MWBSkinSetVanilla(self, gSkin4D && sCubeRoot);
     }
     orig_mini_render(self, entity, s1, s2, s3, s4, s5, s6);
     // 自家树画在 orig 之后、同一 hook 内：栈顶还压着实体变换，用游戏真矩阵 v5 落在玩家身上。
     if (entity && entity == gLocalPlayer && gSkin4D && sCubeRoot && sPartRender) {
         ((MPartRenderFnV)sPartRender)(sCubeRoot, s6);
-        static int sFrames = 0;
-        sFrames++;
-        // 存活计数：前 10 帧逐帧记，之后每 600 帧记一行（定位第几帧死，平时不刷屏）
-        if (sFrames <= 10 || (sFrames % 600) == 0)
-            MWBLogFile(@"[4D皮肤] 存活帧=%d", sFrames);
+        static BOOL sLogged = NO;
+        if (!sLogged) { sLogged = YES; MWBLogFile(@"[4D皮肤] 自家双立方体首渲（真矩阵）"); }
     }
 }
 
@@ -212,5 +179,5 @@ void MWBSkin4DInstall(void) {
              hooked_mob_render, orig_mob_render);
     MWB_HOOK("__ZN19HumanoidMobRenderer6renderER6EntityRK4Vec3ff",
              hooked_hmob_render, orig_hmob_render);
-    MWBLogFile(@"[4D皮肤] 大肥鱼挂载就绪（开关 skin4d）");
+    MWBLogFile(@"[4D皮肤] 双立方体挂载就绪（开关 skin4d）");
 }
