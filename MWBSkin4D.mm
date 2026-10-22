@@ -113,10 +113,20 @@ static HModelRenderFn orig_mini_render = NULL;
 
 static void hooked_mini_render(void *self, void *entity,
                                float f1, float f2, float f3, float f4, float f5, float f6) {
-    // 本地玩家：树建好才藏（建树失败则永不藏，防隐身史蒂夫）；关则恢复（幂等防粘藏）
-    if (entity && entity == gLocalPlayer)
+    // 本地玩家：先建树（一次，渲染线程，malloc+叶子构造），树在才藏原版（防隐身）。
+    // 自家树画在 orig 之后、同一 hook 内：此时栈顶还压着实体变换，立方体落在玩家身上；
+    // 若搬到外层 hmob hook 里等 orig 返回再画，实体变换已出栈，会画到世界原点去（-168 前的 bug）。
+    if (entity && entity == gLocalPlayer) {
+        MWBSkinResolve();
+        if (gSkin4D && sPartRender) MWBSkinBuild();
         MWBSkinSetVanilla(self, gSkin4D && sCubeRoot);
+    }
     orig_mini_render(self, entity, f1, f2, f3, f4, f5, f6);
+    if (entity && entity == gLocalPlayer && gSkin4D && sCubeRoot && sPartRender) {
+        sPartRender(kSkinIdentity, sCubeRoot);
+        static BOOL sLogged = NO;
+        if (!sLogged) { sLogged = YES; MWBLogFile(@"[4D皮肤] 自家双立方体首渲（模型内）"); }
+    }
 }
 
 // 上层透传（占位不断链）
@@ -126,23 +136,10 @@ static void hooked_mob_render(void *self, void *entity, const void *pos, float f
     orig_mob_render(self, entity, pos, f1, f2);
 }
 
-// 窗口所有者：HumanoidMobRenderer::render（逐实体）
-// 开则先建树（一次），原版走完（已被藏画不出），再画自家双立方体；关则纯原路。
+// 外层透传（建树与绘制已搬进 HumanoidModel::render hook 内，那里栈顶有实体变换）
 typedef void (*HMobRenderFn)(void *self, void *entity, const void *pos, float f1, float f2);
 static HMobRenderFn orig_hmob_render = NULL;
 static void hooked_hmob_render(void *self, void *entity, const void *pos, float f1, float f2) {
-    if (gSkin4D && entity && entity == gLocalPlayer) {
-        MWBSkinResolve();
-        if (!sPartRender) { orig_hmob_render(self, entity, pos, f1, f2); return; }
-        MWBSkinBuild();
-        orig_hmob_render(self, entity, pos, f1, f2);
-        if (sCubeRoot) {
-            sPartRender(kSkinIdentity, sCubeRoot);
-            static BOOL sLogged = NO;
-            if (!sLogged) { sLogged = YES; MWBLogFile(@"[4D皮肤] 自家双立方体首渲"); }
-        }
-        return;
-    }
     orig_hmob_render(self, entity, pos, f1, f2);
 }
 
