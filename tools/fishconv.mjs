@@ -5,6 +5,8 @@ import fs from 'fs';
 const [jsonPath, outPrefix, limitArg] = process.argv.slice(2);
 if (!jsonPath || !outPrefix) { console.error('用法：node tools/fishconv.mjs <main.json> <out前缀> [骨上限]'); process.exit(1); }
 const limit = limitArg ? parseInt(limitArg) : -1;
+const SCALE = 3;
+const g = (arr) => arr.map((v) => f(v * SCALE)); // 整体放大（坐标/尺寸/轴心同乘，旋转/UV不动）
 const j = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 const bones = j['minecraft:geometry'][0].bones;
 const idx = new Map(bones.map((b, i) => [b.name, i]));
@@ -41,7 +43,7 @@ c += 'const int MWBFishBoneParent[] = {' + kb.map((b) => {
   const p = newIdx.get(b.parent);
   return p === undefined ? -1 : p;
 }).join(',') + '};\n';
-c += 'const float MWBFishBonePivot[][3] = {' + kb.map((b) => '{' + (b.pivot || [0,0,0]).map(f).join(',') + '}').join(',') + '};\n';
+c += 'const float MWBFishBonePivot[][3] = {' + kb.map((b) => '{' + g(b.pivot || [0,0,0]).join(',') + '}').join(',') + '};\n';
 c += 'const float MWBFishBoneRot[][3] = {' + kb.map((b) => '{' + (b.rotation || [0,0,0]).map(f).join(',') + '}').join(',') + '};\n';
 let cb = 0;
 const cBone = [], cOrg = [], cSize = [];
@@ -50,7 +52,7 @@ kb.forEach((b, ni) => {
     // 截断后任一维度为 0 即跳过（0.9 之类小盒截断成 0 会退化，全量 41 个原生零盒另算在内）
     const td = cu.size.map((v) => Math.trunc(v));
     if (td[0] <= 0 || td[1] <= 0 || td[2] <= 0) continue;
-    cb++; cBone.push(ni); cOrg.push('{' + cu.origin.map(f).join(',') + '}'); cSize.push('{' + cu.size.map(f).join(',') + '}'); }
+    cb++; cBone.push(ni); cOrg.push('{' + g(cu.origin).join(',') + '}'); cSize.push('{' + g(cu.size).join(',') + '}'); }
 });
 c += 'const int MWBFishCubeCount = ' + cb + ';\n';
 c += 'const int MWBFishCubeBone[] = {' + cBone.join(',') + '};\n';
