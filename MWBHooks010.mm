@@ -16,6 +16,8 @@ static void hooked_normalTick(void *self) {
     if (gInvincible) abil[ABIL_INVULNERABLE] = 1;
     if (gFly) { abil[ABIL_FLYING] = 1; abil[ABIL_MAY_FLY] = 1; }
     if (gFastBreak) abil[ABIL_INSTABUILD] = 1;
+    // 夜视: 0.10 无药水系统, 改游戏自家 gamma(Options+0x2D0)
+    MWB010NightVisionTick();   // 开关内外都要调: 关时负责恢复原值(函数内部分支)
     if (gMinimap && (gTickCount % 40) == 1) {
         if (MWB010_SampleMinimap() >= 0) MWBMinimapRefresh();
     }
@@ -126,9 +128,26 @@ void MWBApplySpeed(BOOL on) {
           on ? @"已开启" : @"已关闭", gOrigBaseSpeed, *p);
 }
 
+// 穿墙: Entity::move(x0=self,x1~3=dx/dy/dz) 头部 `ldrb w8,[x19,#0x12a];cbz` 即免碰撞分支
+// (Java 系 noClip 同款; LocalPlayer::move 自己也在特定分支置 1 后调它).
+// 0.10 能力表只有 4 项无 noclip 位, 故在 hook 内对本地玩家置位后调原函数, 零重实现、零副作用他人
+typedef void (*Move010Fn)(void *self, float dx, float dy, float dz);
+static Move010Fn orig_move010 = NULL;
+static void hooked_move010(void *self, float dx, float dy, float dz) {
+    if (gNoclip && self == gLocalPlayer) ((char *)self)[0x12A] = 1;
+    orig_move010(self, dx, dy, dz);
+}
+
 // 0.10 hook 安装 (%ctor 调用)
 void MWBInstallHooks010(void) {
     MWB_HOOK("__ZN11LocalPlayer10normalTickEv", hooked_normalTick, orig_normalTick);
     MWB_HOOK("__ZN5Level4tickEv", hooked_levelTick, orig_levelTick);
     MWB_HOOK("__ZN15MinecraftClient4tickEii", hooked_mc010Tick, orig_mc010Tick);
+    // Entity::move 0x1000 字节大函数, 跳板安全; 只拦截本地玩家的碰撞
+    void *mv = MSFindSymbol(NULL, "__ZN6Entity4moveEfff");
+    if (mv) { MSHookFunction(mv, (void *)hooked_move010, (void **)&orig_move010);
+        NSLog(@"[魔玩盒子] 已 hook: Entity::move -> %p", mv);
+        MWBLogFile(@"[Toolbox] hook 成功: Entity::move @ %p", mv); }
+    else { NSLog(@"[魔玩盒子] 警告: 未找到 Entity::move");
+        MWBLogFile(@"[Toolbox] hook 失败: 未找到 Entity::move"); }
 }
