@@ -1,0 +1,43 @@
+// tools/fishconv.mjs — YSM/geo.json → 烘焙 C 数组（一次性转换，勿在设备上跑）
+// 用法：node tools/fishconv.mjs <main.json> <out前缀> [骨上限]
+// 骨上限带父级闭包：只保留前 N 个骨，父被砍掉的挂到根（-1），保证无孤儿。
+import fs from 'fs';
+const [jsonPath, outPrefix, limitArg] = process.argv.slice(2);
+if (!jsonPath || !outPrefix) { console.error('用法：node tools/fishconv.mjs <main.json> <out前缀> [骨上限]'); process.exit(1); }
+const limit = limitArg ? parseInt(limitArg) : -1;
+const j = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+const bones = j['minecraft:geometry'][0].bones;
+const idx = new Map(bones.map((b, i) => [b.name, i]));
+const keep = new Set();
+for (let i = 0; i < bones.length && (limit < 0 || keep.size < limit); i++) keep.add(i);
+const f = (n) => (typeof n !== 'number' || !isFinite(n)) ? '0' : (+n.toFixed(4)).toString();
+const par = (b) => {
+  if (!b.parent) return -1;
+  const p = idx.get(b.parent);
+  return (p === undefined || !keep.has(p)) ? -1 : p;
+};
+let h = '// ' + outPrefix + '.h — 烘焙几何（机器生成，勿手改，用 tools/fishconv.mjs 重生）\n#pragma once\n';
+h += 'extern const int MWBFishBoneCount;\nextern const int MWBFishBoneParent[];\nextern const float MWBFishBonePivot[][3];\nextern const float MWBFishBoneRot[][3];\nextern const int MWBFishCubeCount;\nextern const int MWBFishCubeBone[];\nextern const float MWBFishCubeOrigin[][3];\nextern const float MWBFishCubeSize[][3];\n';
+let c = '// ' + outPrefix + '.c — 烘焙几何数据（机器生成，勿手改）\n#include "' + outPrefix.split('/').pop() + '.h"\n';
+const kb = bones.filter((_, i) => keep.has(i));
+const newIdx = new Map(kb.map((b, i) => [b.name, i]));
+c += 'const int MWBFishBoneCount = ' + kb.length + ';\n';
+c += 'const int MWBFishBoneParent[] = {' + kb.map((b) => {
+  if (!b.parent) return -1;
+  const p = newIdx.get(b.parent);
+  return p === undefined ? -1 : p;
+}).join(',') + '};\n';
+c += 'const float MWBFishBonePivot[][3] = {' + kb.map((b) => '{' + (b.pivot || [0,0,0]).map(f).join(',') + '}').join(',') + '};\n';
+c += 'const float MWBFishBoneRot[][3] = {' + kb.map((b) => '{' + (b.rotation || [0,0,0]).map(f).join(',') + '}').join(',') + '};\n';
+let cb = 0;
+const cBone = [], cOrg = [], cSize = [];
+kb.forEach((b, ni) => {
+  for (const cu of (b.cubes || [])) { cb++; cBone.push(ni); cOrg.push('{' + cu.origin.map(f).join(',') + '}'); cSize.push('{' + cu.size.map(f).join(',') + '}'); }
+});
+c += 'const int MWBFishCubeCount = ' + cb + ';\n';
+c += 'const int MWBFishCubeBone[] = {' + cBone.join(',') + '};\n';
+c += 'const float MWBFishCubeOrigin[][3] = {' + cOrg.join(',') + '};\n';
+c += 'const float MWBFishCubeSize[][3] = {' + cSize.join(',') + '};\n';
+fs.writeFileSync(outPrefix + '.h', h);
+fs.writeFileSync(outPrefix + '.c', c);
+console.log('bones=' + kb.length + ' cubes=' + cb);

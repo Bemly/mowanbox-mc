@@ -1,5 +1,4 @@
-// MWBFishData.h — 大肥鱼烘焙几何（YSM 一次性转换，运行时零解析零解码）
-// 骨：parent 预解为下标（-1=根），轴心/旋转度数直传；盒：只烘焙几何，UV/贴图挂原版。
+// MWBFishData.h — 烘焙几何（机器生成，勿手改，用 tools/fishconv.mjs 重生）
 #pragma once
 extern const int MWBFishBoneCount;
 extern const int MWBFishBoneParent[];
