@@ -70,7 +70,36 @@ static void MWBSkinPushCube(void *part, void *cube) {
 }
 
 // 大肥鱼烘焙表（MWBFishData.c，机器生成）：建树=纯循环填表，无解析无解码。
-static void MWBSkinBuild(void *model) {
+// 坐标轴标定模型（单 part 三盒，无层级零递归）：X臂 origin(0,-1,-1) size(40,2,2) 最长，
+// Y臂 origin(-1,0,-1) size(2,24,2)，Z臂 origin(-1,-1,0) size(2,2,16) 最短，长短即身份。
+// 轴心 (0,0,0) 落在玩家脚下，俯视即可断出三轴正负与比例。鱼群验证时把调用换回鱼版。
+static void MWBSkinBuildAxis(void *model) {
+    if (sCubeRoot || !sPartCtor || !sCubeCtor || !sSetModel || !model) return;
+    void *p = malloc(0xC0);
+    if (!p) return;
+    memset(p, 0, 0xC0);
+    sPartCtor(p, 0, 0, 64, 64);
+    static const float kOrg[3][3] = {{0,-1,-1},{-1,0,-1},{-1,-1,0}};
+    static const int kSize[3][3] = {{40,2,2},{2,24,2},{2,2,16}};
+    for (int i = 0; i < 3; i++) {
+        void *c = malloc(0x2C8);
+        if (!c) continue;
+        memset(c, 0, 0x2C8);
+        sCubeCtor(c, p, 0, 0, kOrg[i][0], kOrg[i][1], kOrg[i][2],
+                  kSize[i][0], kSize[i][1], kSize[i][2], 0.0f);
+        MWBSkinPushCube(p, c);
+    }
+    sSetModel(p, model);
+    void **tbl = (void **)malloc(sizeof(void *));
+    if (!tbl) return;
+    tbl[0] = p;
+    if (sPartsKept) free(sPartsKept);
+    sPartsKept = tbl;
+    sPartsCount = 1;
+    sCubeRoot = p;
+    MWBLogFile(@"[4D皮肤] 坐标轴建好");
+}
+__attribute__((unused)) static void MWBSkinBuild(void *model) {
     if (sCubeRoot || !sPartCtor || !sCubeCtor || !sAddChild || !sSetModel || !model) return;
     // 先搭全部 part（指针表留着第二遍串父子/setModel）
     void **parts = (void **)malloc(sizeof(void *) * (size_t)MWBFishBoneCount);
@@ -155,7 +184,7 @@ static void hooked_mini_render(void *self, void *entity,
     // Model 随进出世界重建，每帧用当前 self 重绑（几十次指针写，可忽略），防野指针。
     if (entity && entity == gLocalPlayer) {
         MWBSkinResolve();
-        if (gSkin4D && sPartRender) MWBSkinBuild(self);
+        if (gSkin4D && sPartRender) MWBSkinBuildAxis(self); // 标定期：坐标轴，鱼版函数留着
         if (sCubeRoot && sPartsKept && sSetModel)
             for (int i = 0; i < sPartsCount; i++)
                 if (sPartsKept[i]) sSetModel(sPartsKept[i], self);
@@ -163,15 +192,8 @@ static void hooked_mini_render(void *self, void *entity,
     }
     orig_mini_render(self, entity, s1, s2, s3, s4, s5, s6);
     // 自家树画在 orig 之后、同一 hook 内：栈顶还压着实体变换，用游戏真矩阵 v5 落在玩家身上。
-    // 定位期：一帧画 4 遍（上/下/左/右各一），哪个方位进视野即知轴向真相（轴心渲染时现读，切着画安全）。
     if (entity && entity == gLocalPlayer && gSkin4D && sCubeRoot && sPartRender) {
-        static const float kFour[4][3] = {{0,40,0},{0,-40,0},{40,0,0},{-40,0,0}};
-        for (int q = 0; q < 4; q++) {
-            *(float *)((char *)sCubeRoot + 0x00) = kFour[q][0];
-            *(float *)((char *)sCubeRoot + 0x04) = kFour[q][1];
-            *(float *)((char *)sCubeRoot + 0x08) = kFour[q][2];
-            ((MPartRenderFnV)sPartRender)(sCubeRoot, s6);
-        }
+        ((MPartRenderFnV)sPartRender)(sCubeRoot, s6);
         static int sDbg = 0;
         // 定位用：前 3 帧 dump 真矩阵 v5 四 lane + 玩家坐标 + 根轴心（只 3 行）
         if (sDbg < 3 && gLocalPlayer) {
