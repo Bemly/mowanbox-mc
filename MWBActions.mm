@@ -102,9 +102,9 @@ void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"jump"]) gSuperJump = arg ? YES : NO;
         else if ([act isEqualToString:@"noclip"]) gNoclip = arg ? YES : NO;
         else if ([act isEqualToString:@"night"]) gNightVision = arg ? YES : NO;
-        else if ([act isEqualToString:@"ysm"]) { gYSM = arg ? YES : NO; NSLog(@"[YSM] 本版已剥离,不加载"); }
-        else if ([act isEqualToString:@"ysmreload"]) { NSLog(@"[YSM] 本版已剥离,不加载"); }
-        else if ([act isEqualToString:@"ysmgeo"]) { NSLog(@"[YSM] 本版已剥离,不加载"); }
+        else if ([act isEqualToString:@"ysm"]) { gYSM = arg ? YES : NO; if (gYSM) MWBYSMReload(); }
+        else if ([act isEqualToString:@"ysmreload"]) { MWBYSMReload(); }
+        else if ([act isEqualToString:@"ysmgeo"]) { gYSM = YES; MWBYSMReloadGeo(); }
         else if ([act isEqualToString:@"aura"]) gKillAura = arg ? YES : NO;
         else if ([act isEqualToString:@"map"]) { gMinimap = arg ? YES : NO; MWBMinimapShow(gMinimap); }
         else if ([act isEqualToString:@"lang"]) { gChinese = arg ? YES : NO; MWBSetPluginLang(arg ? 0 : 1); MWBApplyLang(); }
