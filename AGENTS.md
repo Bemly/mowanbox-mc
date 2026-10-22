@@ -45,6 +45,7 @@
   10. YSM：ModelPart/Cube 只有 C1（无 C2），compile/render 均带 float（f6 透传首帧默认 0.0625）；禁手动调 compile（进程无日志死亡改走 render 内脏检查自动编译）；日志禁 writeToURL 追加（会截断+NUL 空洞只留句柄追加）。
   11. 【重点】查日志一律 scp 拉回本机再 grep，禁在设备上 grep/扫全日志（A7 弱＋日志 MB 级每秒刷屏，必卡死 SSH）；设备侧只许 `tail -n 200 | grep` 有界读。
   12. 4D皮肤均匀层此路不通：GOT 改写 _glUniformMatrix4fv 成功（slots=1）但主二进制几乎不调它（glinfo calls=1），模型矩阵另有上传路；迷你缩放/穿墙近平面重建都吃不到矩阵，换路（贴图替换/ModelPart 几何）勿再调均匀层。
+  13. 手搓模型三铁律（-170 双立方体实锤）：render 真签名是 x0=part、v0=16字节矩阵，hook 后六参按向量类型全量透传（按 float 转发丢高 12 字节）；cube vector 存指针（new 堆分配+原地构造+指针push，禁内嵌搬运）；每 part 必调 setModel（compile 读 +0xB8 当 Model* 调 getAABB，漏调空解引用静默死）。
 
 ## 0.10.0 逆向符号速查（MSFindSymbol 直解，imagebase=0x100000000）
 
