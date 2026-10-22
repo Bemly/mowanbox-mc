@@ -26,7 +26,6 @@ typedef struct { int x, y, z; } MWBBlockPos;
 // ---- 全局开关/状态 (定义在 Tweak.xm) ----
 extern BOOL gInvincible, gFly, gFastBreak, gSpeed, gSuperJump;
 extern BOOL gNoclip, gNightVision, gKillAura, gMinimap, gSlimeChunk, gChinese;
-extern BOOL gYSM;   // YSM 穿戴开关 (定义在 Tweak.xm, 仅 0.10)
 extern BOOL gFlyUp, gFlyDown, gPadJump;   // 触控板跳/升/降按住状态 (定义在 Tweak.xm)
 extern int gGV, gTimeMode, gWeatherMode;
 extern int gTimeCustom010;   // 0.10 绝对时刻跳转 (Tweak.xm 定义, MWBHooks010 消费)
@@ -50,9 +49,6 @@ BOOL MWBIsInWorld(void);
 
 // ---- 各版本 hook 安装 (定义在各 MWBHooks*.mm, %ctor 调用) ----
 void MWBInstallHooks010(void);
-void MWBYSMInstall(void);   // YSM 渲染接管 (定义在 MWBYSMRender.mm, 0.10 才装)
-void MWBYSMReload(void);    // 重载 mwbmodels 下第一个 .ysm (定义在 MWBYSMRender.mm)
-void MWBYSMReloadGeo(void); // 重载第一个 .geo.json (小模型先验证渲染链, 定义在 MWBYSMRender.mm)
 void MWBInstallHooks1133(void);
 void MWBInstallHooks117(void);
 void MWBInstallHooks143(void);
