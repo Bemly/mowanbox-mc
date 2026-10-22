@@ -43,7 +43,6 @@ static void MWBSkinResolve(void) {
 
 // ---- 自家双立方体（建一次，逐帧复用，零每帧分配） ----
 static void *sCubeRoot = NULL; // 根 part（1 立方体）+ 子 part（1 立方体）连在一起
-static const float kSkinIdentity[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1};
 
 // 手动给 part 的 cube 指针向量塞一个指针（C1 已清零向量，自家 malloc 指针数组拥有）
 static void MWBSkinPushCube(void *part, void *cube) {
@@ -107,25 +106,34 @@ static void MWBSkinSetVanilla(void *model, BOOL hide) {
         ((char *)model)[kOff[i] + 0x80] = hide ? 1 : 0;
 }
 
+// HumanoidModel::render 真签名：后六参是 16 字节向量（v0-v5），不是 float！
+// 反编译实锤：入口 mov v8,v5，且喂 part 的矩阵就是 v5（lane0 即 f6=0.0625）。
+// 按 float 声明转发会丢每个向量的高 12 字节，且自家 render 拿不到真矩阵（-168 隐身 bug 的根因）。
+// 故 hook 与原函数一律用向量类型全量透传，自家树直接用游戏的 v5 矩阵画。
+typedef float M16Skin __attribute__((vector_size(16)));
 typedef void (*HModelRenderFn)(void *self, void *entity,
-                               float f1, float f2, float f3, float f4, float f5, float f6);
+                               M16Skin p1, M16Skin p2, M16Skin p3,
+                               M16Skin p4, M16Skin p5, M16Skin p6);
 static HModelRenderFn orig_mini_render = NULL;
+typedef void (*MPartRenderFnV)(void *part, M16Skin m); // x0=part, v0=矩阵，与游戏调用点一致
 
 static void hooked_mini_render(void *self, void *entity,
-                               float f1, float f2, float f3, float f4, float f5, float f6) {
+                               M16Skin p1, M16Skin p2, M16Skin p3,
+                               M16Skin p4, M16Skin p5, M16Skin p6) {
+    // 先把六个向量存局部（无调用，v0-v5 原样落栈），之后随便调函数，透传时再全量装回去。
+    M16Skin s1 = p1, s2 = p2, s3 = p3, s4 = p4, s5 = p5, s6 = p6;
     // 本地玩家：先建树（一次，渲染线程，malloc+叶子构造），树在才藏原版（防隐身）。
-    // 自家树画在 orig 之后、同一 hook 内：此时栈顶还压着实体变换，立方体落在玩家身上；
-    // 若搬到外层 hmob hook 里等 orig 返回再画，实体变换已出栈，会画到世界原点去（-168 前的 bug）。
     if (entity && entity == gLocalPlayer) {
         MWBSkinResolve();
         if (gSkin4D && sPartRender) MWBSkinBuild();
         MWBSkinSetVanilla(self, gSkin4D && sCubeRoot);
     }
-    orig_mini_render(self, entity, f1, f2, f3, f4, f5, f6);
+    orig_mini_render(self, entity, s1, s2, s3, s4, s5, s6);
+    // 自家树画在 orig 之后、同一 hook 内：栈顶还压着实体变换，用游戏真矩阵 v5 落在玩家身上。
     if (entity && entity == gLocalPlayer && gSkin4D && sCubeRoot && sPartRender) {
-        sPartRender(kSkinIdentity, sCubeRoot);
+        ((MPartRenderFnV)sPartRender)(sCubeRoot, s6);
         static BOOL sLogged = NO;
-        if (!sLogged) { sLogged = YES; MWBLogFile(@"[4D皮肤] 自家双立方体首渲（模型内）"); }
+        if (!sLogged) { sLogged = YES; MWBLogFile(@"[4D皮肤] 自家双立方体首渲（真矩阵）"); }
     }
 }
 
