@@ -9,7 +9,12 @@ const j = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 const bones = j['minecraft:geometry'][0].bones;
 const idx = new Map(bones.map((b, i) => [b.name, i]));
 const keep = new Set();
-if (process.env.FISHMODE === 'cubed' && limit > 0) {
+if (process.env.FISHMODE === 'single' && limit > 0) {
+  // 单个首个带盒骨，父强制 -1，无子无递归（定位递归/层级嫌疑）
+  for (let i = 0; i < bones.length && keep.size < limit; i++) {
+    if ((bones[i].cubes || []).length) keep.add(i);
+  }
+} else if (process.env.FISHMODE === 'cubed' && limit > 0) {
   // 前 limit 个带盒骨 + 全部祖先（保证看得见东西且不断链）
   const addAnc = (i) => { let g = i; while (g >= 0 && !keep.has(g)) { keep.add(g); const p = bones[g].parent; g = p ? (idx.get(p) ?? -1) : -1; } };
   let n = 0;
