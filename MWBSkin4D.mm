@@ -163,8 +163,15 @@ static void hooked_mini_render(void *self, void *entity,
     }
     orig_mini_render(self, entity, s1, s2, s3, s4, s5, s6);
     // 自家树画在 orig 之后、同一 hook 内：栈顶还压着实体变换，用游戏真矩阵 v5 落在玩家身上。
+    // 定位期：一帧画 4 遍（上/下/左/右各一），哪个方位进视野即知轴向真相（轴心渲染时现读，切着画安全）。
     if (entity && entity == gLocalPlayer && gSkin4D && sCubeRoot && sPartRender) {
-        ((MPartRenderFnV)sPartRender)(sCubeRoot, s6);
+        static const float kFour[4][3] = {{0,40,0},{0,-40,0},{40,0,0},{-40,0,0}};
+        for (int q = 0; q < 4; q++) {
+            *(float *)((char *)sCubeRoot + 0x00) = kFour[q][0];
+            *(float *)((char *)sCubeRoot + 0x04) = kFour[q][1];
+            *(float *)((char *)sCubeRoot + 0x08) = kFour[q][2];
+            ((MPartRenderFnV)sPartRender)(sCubeRoot, s6);
+        }
         static int sDbg = 0;
         // 定位用：前 3 帧 dump 真矩阵 v5 四 lane + 玩家坐标 + 根轴心（只 3 行）
         if (sDbg < 3 && gLocalPlayer) {
