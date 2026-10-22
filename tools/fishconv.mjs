@@ -25,7 +25,7 @@ if (process.env.FISHMODE === 'single' && limit > 0) {
   }
 } else if (process.env.FISHMODE === 'avatar') {
   // 穿戴体：砍场景件（Gui/Brand/电饭煲/雨滴/武器/鞘翅）连带整棵子树，保证无孤儿错位
-  const rx = /Gui|Brand|riceCooker|Rainfall|raindrop|Rifle|Pistol|Elytra|molang/i;
+  const rx = /Gui|Rainfall|raindrop|^molang$/i;
   const drop = new Set();
   const isDrop = (i) => {
     if (drop.has(i)) return true;
@@ -86,6 +86,6 @@ fs.writeFileSync(outPrefix + '.h', h);
 fs.writeFileSync(outPrefix + '.c', c);
 const jb = kb.map((b, ni) => ({name: b.name, parent: (() => { const p = newIdx.get(b.parent); return p === undefined ? -1 : p; })(), pivot: relPiv[ni], rot: (b.rotation || [0,0,0])}));
 const jc = [];
-kb.forEach((b, ni) => { for (const cu of (b.cubes || [])) { const t = cu.size.map((v) => Math.trunc(v)); if (t[0] <= 0 || t[1] <= 0 || t[2] <= 0) continue; jc.push({bone: ni, o: cu.origin, s: cu.size}); } });
+kb.forEach((b, ni) => { for (const cu of (b.cubes || [])) { const t = cu.size.map((v) => Math.trunc(v)); if (t[0] <= 0 || t[1] <= 0 || t[2] <= 0) continue; jc.push({bone: ni, o: cu.origin, s: cu.size, uv: cu.uv}); } });
 fs.writeFileSync(outPrefix + '.json', JSON.stringify({bones: jb, cubes: jc}));
 console.log('bones=' + kb.length + ' cubes=' + cb);
