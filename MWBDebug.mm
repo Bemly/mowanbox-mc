@@ -230,6 +230,7 @@
 + (void)dbgTime:(int)v { gTimeMode = v; }
 + (void)dbgWeather:(int)v { gWeatherMode = v; }
 + (void)dbgHeal { MWBHealNow(); }
++ (void)dbgGameMode:(int)mode { MWBSetGameMode010(mode); }
 + (void)dbgEnchant { MWBEnchantHeld255(); }
 + (void)dbgGive117:(int)itemId {
     if (gGV != (int)MWBGameV1_1_7) return;

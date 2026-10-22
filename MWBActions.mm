@@ -34,11 +34,11 @@ void MWBApplyTimeTag(int tag) {
 
 // flag文件通道 (绕过cycript两次调用上限: ssh touch /tmp/mwbcmd-<动作>[-<参数>] 即可触发)
 // 支持: inv-0/1 fly break speed jump noclip night aura map slime-0/1 debug time-0/1/2 weather-0/1/2/3
-//       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5 reactor diff-0/1/2/3 mob-32 explode
+//       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5 reactor diff-0/1/2/3 mob-32 explode gamemode-0/1
 //       dayinfo(0.10时间三值) light010(0.10门控+光照表只读) cmp010(0.10重算链三方对比) tod-N(0.10跳绝对时刻) dottime-tag(走按钮同语义) menupage-N(开菜单跳页) touchtime-tag(直调菜单时间按钮) hitmenu blkreg1133 scaninv117 held117
 // 注意: 游戏调用必须在tick返回后异步执行 (tick内同步调容器函数会死锁, -19冻屏教训)
 static int gPendGive117 = -1, gPendGive143 = -1, gPendEffect143 = -1, gPendEffect1133 = -1;
-static int gPendDiff010 = -1, gPendMob010 = -1;
+static int gPendDiff010 = -1, gPendMob010 = -1, gPendGameMode010 = -1;
 static BOOL gPendHeal = NO, gPendEnchant = NO, gPendTeleport = NO, gPendFill = NO, gPendReactor = NO, gPendExplode = NO;
 static void MWBFlushPending(void) {
     NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
@@ -73,6 +73,7 @@ static void MWBFlushPending(void) {
     if (gPendFill) { gPendFill = NO; MWBFillStone5(); }
     if (gPendReactor) { gPendReactor = NO; MWB010SpawnReactor(); }
     if (gPendDiff010 >= 0) { int difficulty = gPendDiff010; gPendDiff010 = -1; MWBSetDifficulty010(difficulty); }
+    if (gPendGameMode010 >= 0) { int mode = gPendGameMode010; gPendGameMode010 = -1; MWBSetGameMode010(mode); }
     if (gPendMob010 >= 0) { int typeId = gPendMob010; gPendMob010 = -1; MWB010SpawnMob(typeId); }
     if (gPendExplode) { gPendExplode = NO; MWB010Explode(); }
 }
@@ -117,6 +118,7 @@ void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"fill5"]) { gPendFill = YES; needFlush = YES; }
         else if ([act isEqualToString:@"reactor"]) { gPendReactor = YES; needFlush = YES; }
         else if ([act isEqualToString:@"diff"]) { gPendDiff010 = arg; needFlush = YES; }
+        else if ([act isEqualToString:@"gamemode"]) { gPendGameMode010 = arg; needFlush = YES; }
         else if ([act isEqualToString:@"mob"]) { gPendMob010 = arg; needFlush = YES; }
         else if ([act isEqualToString:@"explode"]) { gPendExplode = YES; needFlush = YES; }
         else if ([act isEqualToString:@"fillnat5"] && gPlayer1133) {
@@ -244,6 +246,20 @@ void MWBPollCmdFile(void) {
                 NSString *line = [NSString stringWithFormat:
                     @"%@ [010夜视] dark1638=%.3f gamma=%.3f gamma+4=%.3f mc=%p P=%p ob=%p\n",
                     [NSDate date], dk, ga, ga2, mc, P, ob];
+                [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
+                [lfh closeFile];
+            }
+        }
+        else if ([act isEqualToString:@"glinfo"]) {
+            // 穿墙透视诊断: GOT 槽数/矩阵上传总数/透视矩阵数/埋头命中数/实际改写数 (全 ASCII)
+            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
+            if (lfh) {
+                [lfh seekToEndOfFile];
+                NSString *line = [NSString stringWithFormat:
+                    @"%@ [010gl] slots=%d calls=%d persp=%d buried=%d patched=%d\n",
+                    [NSDate date], MWB010GOTSlots(), MWB010GLCalls(), MWB010GLPersp(),
+                    MWB010GLBuried(), MWB010GLPatched()];
                 [lfh writeData:[line dataUsingEncoding:NSUTF8StringEncoding]];
                 [lfh closeFile];
             }
@@ -614,6 +630,19 @@ void MWBSetDifficulty010(int difficulty) {
     } else {
         MWBLogFile(@"[010难度] 符号与回退地址全空, 未调用");
     }
+}
+// 生存/创造切换: Minecraft::setIsCreativeMode 换 GameMode 对象+flag,
+// 但它不管 ability (尾调 slot 0x98 只是 isCreativeType 无操作), 必须手写 abil 4 字节落位
+// (创造 abil=[1,0,1,1]: 无敌/可飞/瞬挖; 生存清零, 开着的开关下个 tick 由 hook 补回)
+void MWBSetGameMode010(int mode) {
+    if (gGV != (int)MWBGameV0_10 || !gLocalPlayer) {
+        MWBLogFile(@"[010模式] 跳过 gv=%d player=%p m=%d", gGV, gLocalPlayer, mode);
+        return;
+    }
+    if (mode != 0 && mode != 1) return;
+    MWB010SetCreativeFull(mode == 1);
+    MWB010SetCreative(NULL, mode == 1);
+    MWBLogFile(@"[010模式] 切%@", mode ? @"创造" : @"生存");
 }
 
 // 0.10 一键反应核: 在玩家脚下按游戏校验图案搭平台+核, 再直调 NetherReactorTile::use 激活

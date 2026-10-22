@@ -132,6 +132,7 @@ void *MWB010Minecraft(void);   // MinecraftClient::tick 捕获的 MC (只读探�
 extern int gMcTick010Count;    // MinecraftClient::tick 调用计数 (client tick 存活探针)
 void MWB010SetCreative(void *player, bool creative);
 void MWB010SetCreativeFull(bool creative);
+void MWBSetGameMode010(int mode);   // 生存/创造切换 (定义在 MWBActions.mm, 0=生存 1=创造)
 bool MWB010Teleport(void *player, float x, float y, float z);
 void MWBSetDifficulty010(int difficulty);
 void MWB010SpawnReactor(void);
@@ -139,3 +140,9 @@ void MWB010SpawnMob(int typeId);
 void MWB010Explode(void);
 void MWB010NightVisionTick(void);   // 夜视: 改游戏 gamma(Options+0x2D0), 开关都要调(关时恢复)
 void MWB010Sink(int dy);            // 穿墙验证: 原地垂直传送(正下/负上)
+// 穿墙透视诊断计数 (定义在 MWBHooks010.mm, glinfo flag 打)
+int MWB010GLCalls(void);
+int MWB010GLPersp(void);
+int MWB010GLBuried(void);
+int MWB010GLPatched(void);
+int MWB010GOTSlots(void);

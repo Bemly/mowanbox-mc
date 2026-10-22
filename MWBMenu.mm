@@ -324,7 +324,7 @@
         actBtn.frame = (CGRect){{pw-33-430+i*105,tBase+100},{95,56}};
         [p3 addSubview:actBtn];
     }
-    p3.frame = (CGRect){{0,0},{pw,tBase+368}};
+    p3.frame = (CGRect){{0,0},{pw,tBase+432}};
     NSArray *diffTitles = @[@"和平", @"简单", @"普通", @"困难"];
     // 难度: 和平 / 简单 / 普通 / 困难 四个像素按钮 (tag 15-18, 目前只接了 0.10 后端)
     UILabel *diffLabel = [self makeRowLabel:@"难度"];
@@ -370,6 +370,24 @@
         explodeBtn.userInteractionEnabled = NO;
     }
     [p3 addSubview:explodeBtn];
+    // 游戏模式: 生存 / 创造 (tag 27/28, 目前只接了 0.10 后端; 存档 GameType 不改, 重进读档位)
+    UILabel *modeLabel = [self makeRowLabel:@"模式"];
+    modeLabel.frame = (CGRect){{33,tBase+292},{200,60}};
+    [p3 addSubview:modeLabel];
+    NSArray *modeTitles = @[@"生存", @"创造"];
+    for (int i = 0; i < 2; i++) {
+        MWBPixelButton *modeBtn = [[MWBPixelButton alloc] init];
+        [modeBtn setAttributedTitle:MWBPixelText(modeTitles[i], MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
+                                                3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
+        modeBtn.tag = 27 + i;
+        [modeBtn addTarget:self action:@selector(setGameMode:) forControlEvents:UIControlEventTouchUpInside];
+        modeBtn.frame = (CGRect){{pw-33-430+i*105,tBase+292},{95,56}};
+        if (!MWB010Only()) {
+            modeBtn.alpha = 0.35;
+            modeBtn.userInteractionEnabled = NO;
+        }
+        [p3 addSubview:modeBtn];
+    }
     // (刷怪行已迁往页4刷怪蛋页, 后端 tag 20-23/doAction 保留供 flag/旧链路用)
     [pages addObject:p3];
 
@@ -576,6 +594,11 @@
     MWBSetDifficulty010(d);
     NSArray *names = @[@"和平", @"简单", @"普通", @"困难"];
     if (d >= 0 && d < 4) [self toast:[names[d] stringByAppendingString:@"(已发送)"]];
+}
+- (void)setGameMode:(MWBPixelButton *)sender {
+    int m = (int)sender.tag - 27;
+    MWBSetGameMode010(m);
+    if (m == 0 || m == 1) [self toast:[@[@"生存", @"创造"][m] stringByAppendingString:@"(已发送)"]];
 }
 // 菜单内轻提示: 走悬浮窗 VC 的 showToast (无引用, 用 performSelector 避循环依赖)
 - (void)toast:(NSString *)msg {
