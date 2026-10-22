@@ -166,8 +166,11 @@ static void hooked_mini_render(void *self, void *entity,
     // 自家树画在 orig 之后、同一 hook 内：栈顶还压着实体变换，用游戏真矩阵 v5 落在玩家身上。
     if (entity && entity == gLocalPlayer && gSkin4D && sCubeRoot && sPartRender) {
         ((MPartRenderFnV)sPartRender)(sCubeRoot, s6);
-        static BOOL sLogged = NO;
-        if (!sLogged) { sLogged = YES; MWBLogFile(@"[4D皮肤] 自家双立方体首渲（真矩阵）"); }
+        static int sFrames = 0;
+        sFrames++;
+        // 存活计数：前 10 帧逐帧记，之后每 600 帧记一行（定位第几帧死，平时不刷屏）
+        if (sFrames <= 10 || (sFrames % 600) == 0)
+            MWBLogFile(@"[4D皮肤] 存活帧=%d", sFrames);
     }
 }
 
