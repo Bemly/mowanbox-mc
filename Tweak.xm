@@ -18,6 +18,7 @@ BOOL gNoclip      = NO;
 BOOL gNightVision = NO;
 BOOL gKillAura    = NO;
 BOOL gMinimap     = NO;
+BOOL gSlimeChunk  = NO;   // 史莱姆区块叠加 (0.10 小地图用)
 int  gGV          = 0;   // 当前游戏版本 (MWBGameVersion 数值, %ctor 内赋值, 跨版本分发用)
 int  gTimeMode    = 0;   // 点按语义: 1=跳白天 2=跳夜晚, 下一个 tick 写一次即清零, 时间自然流
 int  gTimeCustom010 = -1; // 0.10 绝对时刻跳转 (>=0 有效, hook 写一次即清零)

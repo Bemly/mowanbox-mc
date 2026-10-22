@@ -92,6 +92,36 @@ int MWB010_SampleMinimap(void) {
     return air;
 }
 
+// 史莱姆区块判定: 复刻游戏 Slime::canSpawn@0x10021382c 区块分支
+// chunkHash=(chunkX*0x1F1F1F1F)^chunkZ(不掺世界种子) → MT19937 重播种 → 首输出%10==0
+// 游戏 Random 即标准 MT19937 (乘子 0x6c078965=1812433253, 状态624, 反编译 init 循环实锤)
+static uint32_t sMT010[624];
+static void MWBMTSeed010(uint32_t s) {
+    sMT010[0] = s;
+    for (int i = 1; i < 624; i++)
+        sMT010[i] = 1812433253U * (sMT010[i - 1] ^ (sMT010[i - 1] >> 30)) + (uint32_t)i;
+}
+// 新种子后首次 genrand_int32: 整表 twist 一次 + 取首输出 temper (标准 MT19937)
+static uint32_t MWBMTNext010(void) {
+    for (int i = 0; i < 624; i++) {
+        uint32_t y = (sMT010[i] & 0x80000000U) | (sMT010[(i + 1) % 624] & 0x7fffffffU);
+        sMT010[i] = sMT010[(i + 397) % 624] ^ (y >> 1);
+        if (y & 1U) sMT010[i] ^= 0x9908b0dfU;
+    }
+    uint32_t y = sMT010[0];
+    y ^= (y >> 11);
+    y ^= (y << 7) & 0x9d2c5680U;
+    y ^= (y << 15) & 0xefc60000U;
+    y ^= (y >> 18);
+    return y;
+}
+BOOL MWBIsSlimeChunk(int chunkX, int chunkZ) {
+    // 与游戏一致: (int)截断取整后再算术右移 (同 arch/同编译器, 语义相同)
+    uint32_t h = (uint32_t)((int32_t)chunkX * (int32_t)0x1f1f1f1f) ^ (uint32_t)chunkZ;
+    MWBMTSeed010(h);
+    return MWBMTNext010() % 10 == 0;
+}
+
 // 原版地图风配色 (Map Atlases 即原版渲染): 方块基色 x 明暗(255/220/180) , 水按深度加深
 static UIColor *MWBMapVanilla(int blockId, int depth, float shade) {
     CGFloat r = 128, g = 128, b = 128;
@@ -204,7 +234,44 @@ void MWBMinimapRefresh(void) {
         UILabel *coords = (UILabel *)[box viewWithTag:0x6D64];
         float nightDim = is010 ? MWBMinimapNightDim() : 1.0f;
         float yawDeg = 0;
-        if (is010 && gLocalPlayer) yawDeg = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);
+        float fpx = 0, fpz = 0;
+        if (is010 && gLocalPlayer) {
+            yawDeg = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);
+            fpx = *(float *)((char *)gLocalPlayer + 0x28);
+            fpz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+        }
+        // 史莱姆区块叠加: 48x48 最多跨 4x4=16 个区块, 每区块判定一次 (逐格算 MT 太贵);
+        // 取整与游戏一致用 (int)截断 (canSpawn 内即 (int)强转, 非 floor)
+        int slimeCC[16][2]; int slimeN = 0;
+        int pcx = 0, pcz = 0, itx = 0, itz = 0;
+        if (is010 && gSlimeChunk && gLocalPlayer) {
+            itx = (int)fpx; itz = (int)fpz;
+            pcx = itx >> 4; pcz = itz >> 4;
+            int x0 = (itx - 24) >> 4, x1 = (itx + 23) >> 4;
+            int z0 = (itz - 24) >> 4, z1 = (itz + 23) >> 4;
+            for (int ccx = x0; ccx <= x1 && slimeN < 16; ccx++)
+                for (int ccz = z0; ccz <= z1 && slimeN < 16; ccz++)
+                    if (MWBIsSlimeChunk(ccx, ccz)) {
+                        slimeCC[slimeN][0] = ccx; slimeCC[slimeN][1] = ccz;
+                        slimeN++;
+                    }
+        }
+        // block 内不可引用 C 数组: 预压成像素矩形(堆上, block 同步执行完即 free)
+        int *slimePx = NULL;
+        if (slimeN > 0) {
+            slimePx = (int *)malloc((size_t)slimeN * 4 * sizeof(int));
+            if (slimePx) {
+                for (int k = 0; k < slimeN; k++) {
+                    int lx0 = slimeCC[k][0] * 16 - (itx - 24);
+                    int lz0 = slimeCC[k][1] * 16 - (itz - 24);
+                    int lx1 = lx0 + 16, lz1 = lz0 + 16;
+                    if (lx0 < 0) lx0 = 0; if (lz0 < 0) lz0 = 0;
+                    if (lx1 > 48) lx1 = 48; if (lz1 > 48) lz1 = 48;
+                    slimePx[k * 4] = lx0; slimePx[k * 4 + 1] = lz0;
+                    slimePx[k * 4 + 2] = lx1; slimePx[k * 4 + 3] = lz1;
+                }
+            }
+        }
         uint8_t *map = is010 ? gMiniMap010 : gMiniMap1133;
         UIGraphicsImageRenderer *rr = [[UIGraphicsImageRenderer alloc] initWithSize:(CGSize){MWB_MAP_IMG, MWB_MAP_IMG}];
         UIImage *img = [rr imageWithActions:^(UIGraphicsImageRendererContext *ctx) {
@@ -223,6 +290,25 @@ void MWBMinimapRefresh(void) {
                     }
                     CGContextFillRect(ctx.CGContext, (CGRect){{(CGFloat)(x * 4), (CGFloat)(z * 4)}, {4, 4}});
                 }
+            if (slimePx) {
+                // 史莱姆区块: 半透明绿罩 + 亮绿边框 (矩形已压到 48x48 图内)
+                CGContextRef c2 = ctx.CGContext;
+                CGContextSetFillColorWithColor(c2, [UIColor colorWithRed:0.2 green:1.0 blue:0.3 alpha:0.30].CGColor);
+                for (int k = 0; k < slimeN; k++) {
+                    int lx0 = slimePx[k * 4], lz0 = slimePx[k * 4 + 1];
+                    int lx1 = slimePx[k * 4 + 2], lz1 = slimePx[k * 4 + 3];
+                    CGContextFillRect(c2, (CGRect){{(CGFloat)(lx0 * 4), (CGFloat)(lz0 * 4)},
+                                                  {(CGFloat)((lx1 - lx0) * 4), (CGFloat)((lz1 - lz0) * 4)}});
+                }
+                CGContextSetStrokeColorWithColor(c2, [UIColor colorWithRed:0.3 green:1.0 blue:0.3 alpha:0.95].CGColor);
+                CGContextSetLineWidth(c2, 2.0f);
+                for (int k = 0; k < slimeN; k++) {
+                    int lx0 = slimePx[k * 4], lz0 = slimePx[k * 4 + 1];
+                    int lx1 = slimePx[k * 4 + 2], lz1 = slimePx[k * 4 + 3];
+                    CGContextStrokeRect(c2, (CGRect){{(CGFloat)(lx0 * 4), (CGFloat)(lz0 * 4)},
+                                                    {(CGFloat)((lx1 - lx0) * 4), (CGFloat)((lz1 - lz0) * 4)}});
+                }
+            }
             if (is010) {
                 // 玩家箭头: 北朝上, 按 yaw 旋转; 真机标定: yaw=0朝南增量顺时针(Java 同款),
                 // 屏角(视觉顺时针从正北)=(180+yaw), 经 4 组真机截图+程序量角闭环 (39/155/31/275 全对上)
@@ -248,6 +334,7 @@ void MWBMinimapRefresh(void) {
                 CGContextRestoreGState(c);
             }
         }];
+        if (slimePx) { free(slimePx); slimePx = NULL; }   // block 已同步执行完
         int px = 0, py = 0, pz = 0;
         if (is010 && gLocalPlayer) {
             px = (int)floorf(*(float *)((char *)gLocalPlayer + 0x28));
@@ -258,8 +345,10 @@ void MWBMinimapRefresh(void) {
             py = (int)floorf(*(float *)((char *)gPlayer1133 + 0x41C + 4));
             pz = (int)floorf(*(float *)((char *)gPlayer1133 + 0x41C + 8));
         }
-        NSString *pos = [NSString stringWithFormat:@"%d, %d, %d%@", px, py, pz,
-                         (is010 && gMiniMapCave010) ? @"·洞" : @""];
+        BOOL inSlime = (is010 && gSlimeChunk && gLocalPlayer) ? MWBIsSlimeChunk(pcx, pcz) : NO;
+        NSString *pos = [NSString stringWithFormat:@"%d, %d, %d%@%@", px, py, pz,
+                         (is010 && gMiniMapCave010) ? @"·洞" : @"",
+                         inSlime ? @"·史" : @""];
         if (is010 && gMWBDebug) pos = [pos stringByAppendingFormat:@" yaw%.0f", yawDeg];
         dispatch_async(dispatch_get_main_queue(), ^{
             iv.image = img;

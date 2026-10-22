@@ -86,6 +86,41 @@ void MWBPlayClick(void) {
     if (gMWBClickPlayer) { gMWBClickPlayer.currentTime = 0; [gMWBClickPlayer play]; }
 }
 
+// 游戏原版图标: 运行时从游戏 bundle 切图 (CgBI 的 PNG 用 UIImage 直接读,
+// iOS 会自己处理; 按像素矩形裁剪, 最近邻放大保持像素风)
+UIImage *MWBGameIcon(NSString *file, CGRect rect) {
+    static NSCache *cache = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cache = [NSCache new]; });
+    NSString *key = [NSString stringWithFormat:@"%@-%@",
+                     file, NSStringFromCGRect(rect)];
+    UIImage *hit = [cache objectForKey:key];
+    if (hit) return hit;
+    NSString *res = [[[NSBundle mainBundle] resourcePath]
+                     stringByAppendingPathComponent:file];
+    UIImage *full = [UIImage imageWithContentsOfFile:res];
+    if (!full) return nil;
+    // rect 按 256 基准给出, 实际图可能是 2x Retina (@2x 后缀同名文件 iOS 自动选,
+    // 但包内是 CgBI 无 @2x, 按 full.scale 换算)
+    CGFloat sc = full.scale ?: 1.0;
+    CGSize px = (CGSize){full.size.width * sc, full.size.height * sc};
+    if (px.width < 1 || px.height < 1) return nil;
+    // 把 256 基准矩形映射到实际像素
+    CGFloat k = px.width / 256.0;
+    CGRect pr = (CGRect){{rect.origin.x * k, rect.origin.y * k},
+                         {rect.size.width * k, rect.size.height * k}};
+    if (pr.origin.x < 0 || pr.origin.y < 0 ||
+        CGRectGetMaxX(pr) > px.width + 1 || CGRectGetMaxY(pr) > px.height + 1)
+        return nil;
+    CGImageRef sub = CGImageCreateWithImageInRect(full.CGImage, pr);
+    if (!sub) return nil;
+    UIImage *out = [UIImage imageWithCGImage:sub scale:1.0
+                               orientation:full.imageOrientation];
+    CGImageRelease(sub);
+    if (out) [cache setObject:out forKey:key];
+    return out;
+}
+
 // 创建带像素阴影的属性字符串
 NSAttributedString *MWBPixelText(NSString *text, UIFont *font, UIColor *color,
                                         CGFloat shadowX, CGFloat shadowY, UIColor *shadowColor) {
@@ -182,33 +217,65 @@ UIBezierPath *MWBPathFromSVG(NSString *d) {
 
 #pragma mark - 像素开关 (两格 i/b 样式)
 
+// 游戏原生开关拨钮 (运行时从 touchgui 切图, 不进仓库; 读不到回落像素格)
+static UIImage *MWBTOGOff_(void) {
+    static UIImage *im; static dispatch_once_t o;
+    dispatch_once(&o, ^{ im = MWBGameIcon(@"touchgui.png", (CGRect){{162,205},{36,20}}); });
+    return im;
+}
+static UIImage *MWBTOGOn_(void) {
+    static UIImage *im; static dispatch_once_t o;
+    dispatch_once(&o, ^{ im = MWBGameIcon(@"touchgui.png", (CGRect){{199,205},{36,20}}); });
+    return im;
+}
+
 @implementation MWBPixelToggle {
-    UIView *_i, *_b;  // 左格 / 右格
+    UIView *_i, *_b;  // 左格 / 右格 (无游戏图时回落用)
+    UIImageView *_togImg;  // 游戏拨钮 (有图时用)
 }
 - (instancetype)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
-        self.backgroundColor = MWB_COLOR(0x9c,0x96,0x95);
-        self.layer.borderWidth = 5;
-        self.layer.borderColor = MWB_COLOR(0x68,0x63,0x66).CGColor;
-        // 外框内阴影
-        UIView *hl = [[UIView alloc] init]; hl.backgroundColor = MWB_COLOR(0xc7,0xc0,0xbd);
-        UIView *sh = [[UIView alloc] init]; sh.backgroundColor = MWB_COLOR(0x4f,0x4c,0x4e);
-        hl.autoresizingMask = UIViewAutoresizingFlexibleRightMargin|UIViewAutoresizingFlexibleBottomMargin;
-        sh.autoresizingMask = UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleLeftMargin;
-        [self addSubview:hl]; [self addSubview:sh];
-        objc_setAssociatedObject(hl, "isHL", @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-        _i = [[UIView alloc] init]; _b = [[UIView alloc] init];
-        _i.layer.borderWidth = 4; _b.layer.borderWidth = 4;
-        [self addSubview:_i]; [self addSubview:_b];
         [self addTarget:self action:@selector(toggle) forControlEvents:UIControlEventTouchUpInside];
+        if (MWBTOGOff_() && MWBTOGOn_()) {
+            // 游戏原生拨钮模式: 自带石钮边框, 本体透明
+            self.backgroundColor = [UIColor clearColor];
+            self.layer.borderWidth = 0;
+            _togImg = [[UIImageView alloc] init];
+            _togImg.contentMode = UIViewContentModeScaleAspectFit;
+            _togImg.layer.magnificationFilter = kCAFilterNearest;
+            _togImg.userInteractionEnabled = NO;
+            [self addSubview:_togImg];
+        } else {
+            self.backgroundColor = MWB_COLOR(0x9c,0x96,0x95);
+            self.layer.borderWidth = 5;
+            self.layer.borderColor = MWB_COLOR(0x68,0x63,0x66).CGColor;
+            // 外框内阴影
+            UIView *hl = [[UIView alloc] init]; hl.backgroundColor = MWB_COLOR(0xc7,0xc0,0xbd);
+            UIView *sh = [[UIView alloc] init]; sh.backgroundColor = MWB_COLOR(0x4f,0x4c,0x4e);
+            hl.autoresizingMask = UIViewAutoresizingFlexibleRightMargin|UIViewAutoresizingFlexibleBottomMargin;
+            sh.autoresizingMask = UIViewAutoresizingFlexibleTopMargin|UIViewAutoresizingFlexibleLeftMargin;
+            [self addSubview:hl]; [self addSubview:sh];
+            objc_setAssociatedObject(hl, "isHL", @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+            _i = [[UIView alloc] init]; _b = [[UIView alloc] init];
+            _i.layer.borderWidth = 4; _b.layer.borderWidth = 4;
+            [self addSubview:_i]; [self addSubview:_b];
+        }
         [self applyStyle];
     }
     return self;
 }
 - (void)layoutSubviews {
     [super layoutSubviews];
-    CGFloat w=self.bounds.size.width, h=self.bounds.size.height, pad=7;
+    CGFloat w=self.bounds.size.width, h=self.bounds.size.height;
+    if (_togImg) {
+        // 36x20 原生比, 按高适配居中 (行高77 -> 图高63)
+        CGFloat ih = h - 14, iw = ih * 36.0 / 20.0;
+        if (iw > w) { iw = w; ih = iw * 20.0 / 36.0; }
+        _togImg.frame = (CGRect){{(w-iw)/2,(h-ih)/2},{iw,ih}};
+        return;
+    }
+    CGFloat pad=7;
     // 内阴影条
     for (UIView *v in self.subviews) {
         if (v == _i || v == _b) continue;
@@ -222,6 +289,7 @@ UIBezierPath *MWBPathFromSVG(NSString *d) {
 - (void)toggle { MWBPlayClick(); self.on = !_on; [self sendActionsForControlEvents:UIControlEventValueChanged]; }
 - (void)setOn:(BOOL)on { _on = on; [self applyStyle]; }
 - (void)applyStyle {
+    if (_togImg) { _togImg.image = _on ? MWBTOGOn_() : MWBTOGOff_(); return; }
     if (_on) {
         _i.backgroundColor = MWB_COLOR(0xe7,0xdd,0xdc);
         _i.layer.borderColor = MWB_COLOR(0xa5,0x9f,0xa0).CGColor;
@@ -280,6 +348,24 @@ UIBezierPath *MWBPathFromSVG(NSString *d) {
 
 @implementation MWBSideButton {
     NSMutableArray<CAShapeLayer *> *_shapeLayers;
+    UIView *_iconView;
+}
+- (instancetype)initWithImage:(UIImage *)img {
+    UIImageView *iv = [[UIImageView alloc] initWithImage:img];
+    iv.contentMode = UIViewContentModeScaleAspectFit;
+    return [self initWithIconView:iv];
+}
+- (instancetype)initWithIconView:(UIView *)icon {
+    if ((self = [super init])) {
+        self.backgroundColor = MWB_COLOR(0xad,0xa4,0xa0);
+        self.layer.borderWidth = 0;
+        _shapeLayers = [NSMutableArray new];
+        _iconView = icon;
+        _iconView.userInteractionEnabled = NO;
+        _iconView.layer.magnificationFilter = kCAFilterNearest;
+        [self addSubview:_iconView];
+    }
+    return self;
 }
 - (instancetype)initWithSVGPaths:(NSArray<NSString *> *)paths {
     if ((self = [super init])) {
@@ -302,6 +388,11 @@ UIBezierPath *MWBPathFromSVG(NSString *d) {
 - (void)layoutSubviews {
     [super layoutSubviews];
     CGFloat w=self.bounds.size.width, h=self.bounds.size.height, pad=w*0.13;
+    if (_iconView) {
+        // 游戏原版图标: 居中占 74%, 最近邻放大保像素风
+        CGFloat s = MIN(w,h) * 0.89;  // 1.2x (用户嫌小)
+        _iconView.frame = (CGRect){{(w-s)/2,(h-s)/2},{s,s}};
+    }
     CGFloat s = MIN(w,h) - pad*2;
     CGFloat ox = (w-s)/2, oy=(h-s)/2;
     // 缩放 64x64 viewBox 到实际尺寸

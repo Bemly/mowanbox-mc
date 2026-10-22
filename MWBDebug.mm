@@ -224,6 +224,7 @@
 + (void)dbgNight:(BOOL)v { gNightVision = v; }
 + (void)dbgAura:(BOOL)v { gKillAura = v; }
 + (void)dbgMap:(BOOL)v { gMinimap = v; MWBMinimapShow(v); }
++ (void)dbgSlime:(BOOL)v { gSlimeChunk = v; if (v && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); } }
 + (void)dbgDebug:(BOOL)v { gMWBDebug = v; }
 + (void)dbgTime:(int)v { gTimeMode = v; }
 + (void)dbgWeather:(int)v { gWeatherMode = v; }

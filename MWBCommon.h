@@ -25,7 +25,7 @@ typedef struct { int x, y, z; } MWBBlockPos;
 
 // ---- 全局开关/状态 (定义在 Tweak.xm) ----
 extern BOOL gInvincible, gFly, gFastBreak, gSpeed, gSuperJump;
-extern BOOL gNoclip, gNightVision, gKillAura, gMinimap;
+extern BOOL gNoclip, gNightVision, gKillAura, gMinimap, gSlimeChunk;
 extern int gGV, gTimeMode, gWeatherMode;
 extern int gTimeCustom010;   // 0.10 绝对时刻跳转 (Tweak.xm 定义, MWBHooks010 消费)
 extern void *gLevel;
@@ -74,6 +74,7 @@ void MWBTeleportUp10(void);
 void MWBFillStone5(void);
 void MWBMinimapShow(BOOL on);
 void MWBMinimapRefresh(void);
+BOOL MWBIsSlimeChunk(int chunkX, int chunkZ);   // 史莱姆区块判定 (定义在 MWBMinimap.mm, 与游戏同算法)
 void MWBPollCmdFile(void);
 BOOL MWBWeatherSupported(void);
 BOOL MWB010Only(void);

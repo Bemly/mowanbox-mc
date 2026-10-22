@@ -33,7 +33,7 @@ void MWBApplyTimeTag(int tag) {
 }
 
 // flag文件通道 (绕过cycript两次调用上限: ssh touch /tmp/mwbcmd-<动作>[-<参数>] 即可触发)
-// 支持: inv-0/1 fly break speed jump noclip night aura map debug time-0/1/2 weather-0/1/2/3
+// 支持: inv-0/1 fly break speed jump noclip night aura map slime-0/1 debug time-0/1/2 weather-0/1/2/3
 //       heal enchant give117-264 give143-264 effect143-16 teleport1133 fill5 reactor diff-0/1/2/3 mob-32 explode
 //       dayinfo(0.10时间三值) light010(0.10门控+光照表只读) cmp010(0.10重算链三方对比) tod-N(0.10跳绝对时刻) dottime-tag(走按钮同语义) menupage-N(开菜单跳页) touchtime-tag(直调菜单时间按钮) hitmenu blkreg1133 scaninv117 held117
 // 注意: 游戏调用必须在tick返回后异步执行 (tick内同步调容器函数会死锁, -19冻屏教训)
@@ -99,6 +99,10 @@ void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"night"]) gNightVision = arg ? YES : NO;
         else if ([act isEqualToString:@"aura"]) gKillAura = arg ? YES : NO;
         else if ([act isEqualToString:@"map"]) { gMinimap = arg ? YES : NO; MWBMinimapShow(gMinimap); }
+        else if ([act isEqualToString:@"slime"]) {
+            gSlimeChunk = arg ? YES : NO;
+            if (gSlimeChunk && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); }
+        }
         else if ([act isEqualToString:@"debug"]) gMWBDebug = arg ? YES : NO;
         else if ([act isEqualToString:@"time"]) gTimeMode = arg;
         else if ([act isEqualToString:@"tod"]) { if (arg >= 0) gTimeCustom010 = arg; }

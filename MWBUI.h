@@ -20,6 +20,10 @@ void MWBRegisterFont(void);
 NSAttributedString *MWBPixelText(NSString *text, UIFont *font, UIColor *color,
                                  CGFloat shadowX, CGFloat shadowY, UIColor *shadowColor);
 UIBezierPath *MWBPathFromSVG(NSString *d);
+// 游戏原版图标 (运行时从游戏 bundle 切图, 不打包版权素材;
+// file=包内文件名如 touchgui.png, rect=256基准像素区;
+// 找不到文件/越界一律回 nil, 调用方用 SVG 兜底; 切图矩形见 MWBMenu.mm 图标表, 真机截图调)
+UIImage *MWBGameIcon(NSString *file, CGRect rect);
 
 // MC 原版点击音 (运行时从游戏 bundle 加载 click.m4a, 不打包版权素材)
 void MWBPlayClick(void);
@@ -48,4 +52,8 @@ void MWBEnsureClickLoaded(void);
 @interface MWBSideButton : UIControl
 @property (nonatomic, getter=isActive) BOOL active;
 - (instancetype)initWithSVGPaths:(NSArray<NSString *> *)paths;
+// 游戏原版图标按钮 (img 居中显示, 像素风最近邻放大; img=nil 时调用方改用 SVG 版)
+- (instancetype)initWithImage:(UIImage *)img;
+// 任意图标视图 (EMI 立方体/物品图标等, 居中嵌入, 触摸穿透)
+- (instancetype)initWithIconView:(UIView *)icon;
 @end
