@@ -5,7 +5,7 @@ import fs from 'fs';
 const [jsonPath, outPrefix, limitArg] = process.argv.slice(2);
 if (!jsonPath || !outPrefix) { console.error('用法：node tools/fishconv.mjs <main.json> <out前缀> [骨上限]'); process.exit(1); }
 const limit = limitArg ? parseInt(limitArg) : -1;
-const SCALE = 3;
+const SCALE = 1;
 const g = (arr) => arr.map((v) => f(v * SCALE)); // 整体放大（坐标/尺寸/轴心同乘，旋转/UV不动）
 const j = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 const bones = j['minecraft:geometry'][0].bones;
