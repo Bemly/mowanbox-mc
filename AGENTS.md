@@ -6,7 +6,7 @@
 
 - 魔玩我的世界盒子 / mowanbox：已越狱 iPad mini 2 上给 MCPE 国际版注游戏内修改器悬浮窗，对标 docs/toolbox-reference.png（左 TMI 菜单、右开关面板）。
 - 主攻 0.10.0（moe.bemly.mcpe.0.10）；另适配 1.1.7/1.2.15/真1.4.3/1.13.3/1.20.62（MWBVersion 运行时识别，Filter 覆盖 6 包）。
-- 现状：菜单/悬浮窗/EMI 骨架完成；0.10 全功能（无敌飞行速破加速跳跃时间难度反应核刷怪爆炸治疗模式切换夜视穿墙小地图汉化）；EMI 分类已与原版创造栏对齐（emivrfy 错位 0）。设备现装 -149，世界内只剩 1 个全新测试世界。
+- 现状：菜单/悬浮窗/EMI 骨架完成；0.10 全功能（无敌飞行速破加速跳跃时间难度反应核刷怪爆炸治疗模式切换夜视穿墙小地图汉化）；EMI 分类已与原版创造栏对齐（emivrfy 错位 0）。设备现装 -153，世界内只剩 1 个全新测试世界。
 - 用户长期授权：可直接操作测试世界（进世界/切时间/截图/增删测试世界/装自家插件），无需逐条请示；只动测试世界。
 
 ## 目标设备与连接
@@ -42,6 +42,7 @@
   7. Recipes 懒加载（单例 0x10034d0c0，new 0x18 + __ZN7RecipesC2Ev；Recipe 0x48，产物 vector@0x30，虚表+0x40 取格）。
   8. flag 通道 /tmp/mwbcmd-*（touch+chown mobile，tick 内 poll、tick 后异步泻洪）；tick 内禁调容器函数（死锁）；cycript 每进程约 2 次调用上限；killall 只用 SIGTERM。
   9. appendFormat 拼大数据行会被吞改 C 缓冲 snprintf；tapGameAtX 点不动自家 UIKit 菜单（走 flag）。
+  10. YSM：ModelPart/Cube 只有 C1（无 C2），compile/render 均带 float（f6 透传首帧默认 0.0625）；禁手动调 compile（进程无日志死亡改走 render 内脏检查自动编译）；日志禁 writeToURL 追加（会截断+NUL 空洞只留句柄追加）。
 
 ## 0.10.0 逆向符号速查（MSFindSymbol 直解，imagebase=0x100000000）
 

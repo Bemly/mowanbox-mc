@@ -54,8 +54,9 @@ static void MWBYSMWriteLog(NSString *line) {
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:url error:&err];
     if (!fh) { NSLog(@"[YSM] 日志打开失败: %@", err); return; }
     [fh seekToEndOfFile];
+    // 注意：禁 writeToURL 追加——它会从头覆盖截断文件并与本句柄竞态造出 NUL 空洞
+    //（真机 528K 日志只剩两行即此 bug），只走句柄追加。
     NSString *out = [line stringByAppendingString:@"\n"];
-    [out writeToURL:url atomically:NO encoding:NSUTF8StringEncoding error:nil]; // 兜底直写（小日志）
     [fh writeData:[out dataUsingEncoding:NSUTF8StringEncoding]];
     [fh closeFile];
 }
@@ -443,7 +444,7 @@ static void YSMFreePart(void *part) {
                     }
                 }
                 // 写完必须调一次 compile，否则 render 脏检查会画旧 Mesh。
-                if (sCompile) sCompile(part, sYSMScale);
+                if (0) { (void)part; (void)name; } // 手动 compile 已停用：真机上它一调进程就无日志死亡（疑似退出口/看门狗非信号崩溃）；改走 render 内脏检查自动编译，若首渲画旧 Mesh 再把脏位直写
             }
         }
         // 父子串联：parent 名查表，addChild 串起来；无 parent 的第一个即根。
