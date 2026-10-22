@@ -45,8 +45,10 @@ static void MWBSkinResolve(void) {
                    sPartCtor, sCubeCtor, sAddChild, sPartRender, sSetModel);
 }
 
-// ---- 自家双立方体（建一次，逐帧复用，零每帧分配） ----
-static void *sCubeRoot = NULL; // 根 part（1 立方体）+ 子 part（1 立方体）连在一起
+// ---- 自家树（建一次，逐帧复用，零每帧分配；parts 表留着逐帧重绑 Model） ----
+static void *sCubeRoot = NULL;
+static void **sPartsKept = NULL;
+static int sPartsCount = 0;
 
 // 手动给 part 的 cube 指针向量塞一个指针（C1 已清零向量，自家 malloc 指针数组拥有）
 static void MWBSkinPushCube(void *part, void *cube) {
@@ -99,6 +101,8 @@ static void MWBSkinBuild(void *model) {
         MWBSkinPushCube(p, c);
     }
     // 最后串父子+填 Model（根=首个无父骨，即 Root）
+    // 注意：model（HumanoidModel*）会随进出世界重建，parts 表留着逐帧重绑（见 hook），
+    // 否则切世界后 +0xB8 成野指针，进新世界必死（-174 老是卡死闪退根因）。
     void *root = NULL;
     for (int i = 0; i < MWBFishBoneCount; i++) {
         if (!parts[i]) continue;
@@ -107,8 +111,10 @@ static void MWBSkinBuild(void *model) {
         if (par < 0) { if (!root) root = parts[i]; }
         else if (parts[par]) sAddChild(parts[par], parts[i]);
     }
-    free(parts);
-    if (!root) return;
+    if (!root) { free(parts); return; }
+    if (sPartsKept) free(sPartsKept);
+    sPartsKept = parts;
+    sPartsCount = MWBFishBoneCount;
     // 测试期：鱼挪到身侧 +30（第一人称相机在玩家脸上，不挪全被近平面裁掉，只能看到一角）。
     // 注意轴心是渲染时现读的，建好后改也生效。
     *(float *)((char *)root + 0x00) += 30.0f;
@@ -145,9 +151,13 @@ static void hooked_mini_render(void *self, void *entity,
     // 先把六个向量存局部（无调用，v0-v5 原样落栈），之后随便调函数，透传时再全量装回去。
     M16Skin s1 = p1, s2 = p2, s3 = p3, s4 = p4, s5 = p5, s6 = p6;
     // 本地玩家：先建树（一次，渲染线程，malloc+叶子构造），树在才藏原版（防隐身）。
+    // Model 随进出世界重建，每帧用当前 self 重绑（几十次指针写，可忽略），防野指针。
     if (entity && entity == gLocalPlayer) {
         MWBSkinResolve();
         if (gSkin4D && sPartRender) MWBSkinBuild(self);
+        if (sCubeRoot && sPartsKept && sSetModel)
+            for (int i = 0; i < sPartsCount; i++)
+                if (sPartsKept[i]) sSetModel(sPartsKept[i], self);
         MWBSkinSetVanilla(self, gSkin4D && sCubeRoot);
     }
     orig_mini_render(self, entity, s1, s2, s3, s4, s5, s6);
