@@ -69,7 +69,10 @@ export THEOS=~/theos PATH="$THEOS/bin:$PATH"
 make package
 sshpass -p alpine scp packages/*.deb root@192.168.1.81:/tmp/mowanbox.deb
 sshpass -p alpine ssh root@192.168.1.81 "dpkg -i /tmp/mowanbox.deb"
-PID=$(sshpass -p alpine ssh root@192.168.1.81 "launchctl list" | grep -i minecraftpe | awk '{print $1}'); sshpass -p alpine ssh root@192.168.1.81 "kill -15 $PID"; sleep 3
-sshpass -p alpine ssh root@192.168.1.81 "uiopen moe.bemly.mcpe.0.10"
+# 重启（禁 killall/ps aux，本机必卡死）：job 名是 bundle id，用 mcpe 匹配（minecraft 匹配不到 moe.bemly.mcpe.0.10）
+sshpass -p alpine ssh root@192.168.1.81 "launchctl list | grep -i mcpe" # 记下 pid
+sshpass -p alpine ssh root@192.168.1.81 "kill -15 <pid>" # SIGTERM
+sshpass -p alpine ssh root@192.168.1.81 "launchctl list | grep -i mcpe" # pid 位变 - 即已死
+sshpass -p alpine ssh root@192.168.1.81 "uiopen moe.bemly.mcpe.0.10" # 拉起，新 pid 出现即活
 sshpass -p alpine ssh root@192.168.1.81 "activator send libactivator.system.take-screenshot"
 ```
