@@ -99,6 +99,7 @@ void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"night"]) gNightVision = arg ? YES : NO;
         else if ([act isEqualToString:@"aura"]) gKillAura = arg ? YES : NO;
         else if ([act isEqualToString:@"map"]) { gMinimap = arg ? YES : NO; MWBMinimapShow(gMinimap); }
+        else if ([act isEqualToString:@"lang"]) { gChinese = arg ? YES : NO; MWBApplyLang(); }
         else if ([act isEqualToString:@"slime"]) {
             gSlimeChunk = arg ? YES : NO;
             if (gSlimeChunk && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); }

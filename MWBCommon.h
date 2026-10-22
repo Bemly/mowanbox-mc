@@ -25,7 +25,7 @@ typedef struct { int x, y, z; } MWBBlockPos;
 
 // ---- 全局开关/状态 (定义在 Tweak.xm) ----
 extern BOOL gInvincible, gFly, gFastBreak, gSpeed, gSuperJump;
-extern BOOL gNoclip, gNightVision, gKillAura, gMinimap, gSlimeChunk;
+extern BOOL gNoclip, gNightVision, gKillAura, gMinimap, gSlimeChunk, gChinese;
 extern int gGV, gTimeMode, gWeatherMode;
 extern int gTimeCustom010;   // 0.10 绝对时刻跳转 (Tweak.xm 定义, MWBHooks010 消费)
 extern void *gLevel;
@@ -75,6 +75,14 @@ void MWBFillStone5(void);
 void MWBMinimapShow(BOOL on);
 void MWBMinimapRefresh(void);
 BOOL MWBIsSlimeChunk(int chunkX, int chunkZ);   // 史莱姆区块判定 (定义在 MWBMinimap.mm, 与游戏同算法)
+void MWBApplyLang(void);   // 汉化: 按 gChinese 把中文表/英文原表写入 I18n 静态 map (定义在 MWBZhLang.mm)
+
+// 汉化表条目 (表定义在 MWBZhBlocks.mm / MWBZhGui.mm, 数据行不计入手写代码行数)
+typedef struct { const char *k; const char *v; } MWBZhEntry;
+extern const MWBZhEntry MWBZhBlocks[];
+extern const int MWBZhBlocksCount;
+extern const MWBZhEntry MWBZhGui[];
+extern const int MWBZhGuiCount;
 void MWBPollCmdFile(void);
 BOOL MWBWeatherSupported(void);
 BOOL MWB010Only(void);
@@ -119,6 +127,7 @@ bool MWB1215_AddXP(void *player, int pts);
 void MWB120ProbeMobEffect(void);
 
 // ---- 0.10 后端 (定义在 MWBHooks010.mm) ----
+uint8_t MWB010GetTile(void *ts, MWBBlockPos *pos);   // 方块读取 (定义在 MWBMinimap.mm, 渲染线程只读可调)
 void *MWB010Minecraft(void);   // MinecraftClient::tick 捕获的 MC (只读探针用, 可为 NULL)
 extern int gMcTick010Count;    // MinecraftClient::tick 调用计数 (client tick 存活探针)
 void MWB010SetCreative(void *player, bool creative);

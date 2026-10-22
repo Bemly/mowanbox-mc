@@ -1,6 +1,10 @@
 /* MWBHooks010.mm — 0.10 hook (normalTick/levelTick/加速常量) */
 #import "MWBCommon.h"
 #import <mach/mach.h>
+#import <math.h>
+#import <string.h>
+#import <mach-o/dyld.h>
+#import <mach-o/loader.h>
 
 #pragma mark - C++ 游戏函数 hook
 
@@ -16,6 +20,11 @@ static void hooked_normalTick(void *self) {
     if (gInvincible) abil[ABIL_INVULNERABLE] = 1;
     if (gFly) { abil[ABIL_FLYING] = 1; abil[ABIL_MAY_FLY] = 1; }
     if (gFastBreak) abil[ABIL_INSTABUILD] = 1;
+    // 穿墙悬停: 免碰撞后重力会把人往下拉穿地心, 把下坠速度清零即悬空 (只清负值, 跳跃上升不受影响)
+    if (gNoclip) {
+        float *vy = (float *)((char *)self + ENTITY_VELOCITY_Y_OFFSET);
+        if (*vy < 0.0f) *vy = 0.0f;
+    }
     // 夜视: 0.10 无药水系统, 改游戏自家 gamma(Options+0x2D0)
     MWB010NightVisionTick();   // 开关内外都要调: 关时负责恢复原值(函数内部分支)
     if (gMinimap && (gTickCount % 40) == 1) {
@@ -138,11 +147,160 @@ static void hooked_move010(void *self, float dx, float dy, float dz) {
     orig_move010(self, dx, dy, dz);
 }
 
+#pragma mark - 穿墙旁观视角 (近平面外推, GL 层 fishhook 式改写)
+
+// 眼睛是否埋进不透明方块 (空气/水/树叶/玻璃/雪层不算埋)
+static BOOL MWB010EyeBlocked(void) {
+    void *p = gLocalPlayer;
+    if (!p) return NO;
+    void *ts = *(void **)((char *)p + 0x48);
+    if (!ts) return NO;
+    float px = *(float *)((char *)p + 0x28);
+    float py = *(float *)((char *)p + 0x28 + 4);
+    float pz = *(float *)((char *)p + 0x28 + 8);
+    MWBBlockPos bp = {(int)floorf(px), (int)floorf(py + 1.6f), (int)floorf(pz)};
+    uint8_t id = MWB010GetTile(ts, &bp);
+    return !(id == 0 || id == 8 || id == 9 || id == 18 || id == 20 || id == 78);
+}
+
+typedef void (*GLUniMat4Fn)(int, int, unsigned char, const float *);
+static GLUniMat4Fn orig_glUniformMatrix4fv = NULL;
+
+// 透视矩阵签名: 列主序 m[11]==-1, m[15]==0 (modelview 仿射矩阵 m[11]==0, 不会误伤)
+static void patched_glUniformMatrix4fv(int loc, int count, unsigned char tr, const float *m) {
+    if (count == 1 && !tr && m && gNoclip &&
+        m[3] == 0.0f && m[7] == 0.0f &&
+        fabsf(m[11] + 1.0f) < 1e-6f && m[15] == 0.0f) {
+        if (MWB010EyeBlocked()) {
+            // 从矩阵反推参数重建 (fov/aspect/far 全保留, 只把 near 推到 2.5):
+            // m[5]=1/tan, m[0]=1/(a*tan), m[14]=-2fn/(f-n), m[10]=-(f+n)/(f-n)
+            float t = 1.0f / m[5];
+            float aspect = m[5] / m[0];
+            float f = m[14] / (m[10] + 1.0f);
+            if (t > 0.0f && t < 10.0f && aspect > 0.1f && aspect < 10.0f && f > 10.0f && f < 100000.0f) {
+                float r[16];
+                memcpy(r, m, sizeof(r));
+                float n = 2.5f;
+                r[0] = 1.0f / (aspect * t);
+                r[5] = 1.0f / t;
+                r[10] = -(f + n) / (f - n);
+                r[14] = -2.0f * f * n / (f - n);
+                orig_glUniformMatrix4fv(loc, count, tr, r);
+                return;
+            }
+        }
+    }
+    orig_glUniformMatrix4fv(loc, count, tr, m);
+}
+
+// fishhook 精简版: 只改写主二进制里 _glUniformMatrix4fv 一个导入槽位
+// (Substrate 跳板要 16 字节, 12 字节的 dyld stub 不能 hook, 只能改 GOT)
+static uint64_t MWBReadUleb(const uint8_t **pp, const uint8_t *end) {
+    uint64_t v = 0; int sh = 0;
+    while (*pp < end) { uint8_t b = **pp; (*pp)++; v |= (uint64_t)(b & 0x7F) << sh; if (!(b & 0x80)) break; sh += 7; }
+    return v;
+}
+static void MWBRebindOne(const uint8_t *base, const uint8_t *end, uint64_t *segVA, uintptr_t slide) {
+    const uint8_t *p = base;
+    uint64_t segIdx = 0, segOff = 0; const char *sym = NULL; int type = 0;
+    while (p < end) {
+        uint8_t op = *p & 0xF0, imm = *p & 0x0F; p++;
+        switch (op) {
+            case BIND_OPCODE_DONE: return;
+            case BIND_OPCODE_SET_DYLIB_ORDINAL_IMM: break;
+            case BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB: MWBReadUleb(&p, end); break;
+            case BIND_OPCODE_SET_DYLIB_SPECIAL_IMM: break;
+            case BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM: sym = (const char *)p; p += strlen(sym) + 1; break;
+            case BIND_OPCODE_SET_TYPE_IMM: type = imm; break;
+            case BIND_OPCODE_SET_ADDEND_SLEB: MWBReadUleb(&p, end); break;
+            case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB: segIdx = imm; segOff = MWBReadUleb(&p, end); break;
+            case BIND_OPCODE_ADD_ADDR_ULEB: segOff += MWBReadUleb(&p, end); break;
+            case BIND_OPCODE_DO_BIND:
+                if (type == BIND_TYPE_POINTER && sym && !strcmp(sym, "_glUniformMatrix4fv")) {
+                    void **slot = (void **)(segVA[segIdx] + slide + segOff);
+                    vm_address_t page = ((vm_address_t)slot) & ~(vm_page_size - 1);
+                    if (vm_protect(mach_task_self(), page, vm_page_size, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS) {
+                        orig_glUniformMatrix4fv = (GLUniMat4Fn)*slot;
+                        *slot = (void *)patched_glUniformMatrix4fv;
+                        MWBLogFile(@"[010穿墙] GOT 改写 _glUniformMatrix4fv @ %p (原 %p)", slot, orig_glUniformMatrix4fv);
+                    }
+                }
+                segOff += 8; break;
+            case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB: segOff += 8; MWBReadUleb(&p, end); break;
+            case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED: segOff += (uint64_t)imm * 8 + 8; break;
+            case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB: {
+                uint64_t n = MWBReadUleb(&p, end), skip = MWBReadUleb(&p, end);
+                for (uint64_t i = 0; i < n; i++) {
+                    if (type == BIND_TYPE_POINTER && sym && !strcmp(sym, "_glUniformMatrix4fv")) {
+                        void **slot = (void **)(segVA[segIdx] + slide + segOff);
+                        vm_address_t page = ((vm_address_t)slot) & ~(vm_page_size - 1);
+                        if (vm_protect(mach_task_self(), page, vm_page_size, 0, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) == KERN_SUCCESS) {
+                            orig_glUniformMatrix4fv = (GLUniMat4Fn)*slot;
+                            *slot = (void *)patched_glUniformMatrix4fv;
+                        }
+                    }
+                    segOff += skip + 8;
+                }
+                break;
+            }
+            default: return;
+        }
+    }
+}
+static void MWBRebindGLUniform(void) {
+    if (orig_glUniformMatrix4fv) return;
+    const char *exe = NULL;
+    for (uint32_t i = 0; i < _dyld_image_count(); i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (name && strstr(name, "minecraftpe.app/minecraftpe")) { exe = name; break; }
+    }
+    if (!exe) return;
+    uintptr_t slide = MWBMainSlide();
+    struct mach_header_64 *mh = (struct mach_header_64 *)(slide + 0x100000000UL);
+    if (mh->magic != MH_MAGIC_64) return;
+    uint64_t segVA[8] = {0};
+    struct dyld_info_command *dyldinfo = NULL;
+    uint64_t linkeditBase = 0, linkeditFileOff = 0;
+    struct load_command *lc = (struct load_command *)(mh + 1);
+    for (uint32_t i = 0, idx = 0; i < mh->ncmds; i++) {
+        if (lc->cmd == LC_SEGMENT_64) {
+            struct segment_command_64 *sg = (struct segment_command_64 *)lc;
+            if (idx < 8) segVA[idx++] = sg->vmaddr;
+            if (!strncmp(sg->segname, "__LINKEDIT", 16)) { linkeditBase = sg->vmaddr; linkeditFileOff = sg->fileoff; }
+        } else if (lc->cmd == LC_DYLD_INFO_ONLY) {
+            dyldinfo = (struct dyld_info_command *)lc;
+        }
+        lc = (struct load_command *)((char *)lc + lc->cmdsize);
+    }
+    if (!dyldinfo || !linkeditBase) return;
+    if (dyldinfo->bind_off) {
+        const uint8_t *base = (const uint8_t *)(linkeditBase + slide + (dyldinfo->bind_off - linkeditFileOff));
+        MWBRebindOne(base, base + dyldinfo->bind_size, segVA, slide);
+    }
+    if (!orig_glUniformMatrix4fv && dyldinfo->lazy_bind_off) {
+        const uint8_t *base = (const uint8_t *)(linkeditBase + slide + (dyldinfo->lazy_bind_off - linkeditFileOff));
+        MWBRebindOne(base, base + dyldinfo->lazy_bind_size, segVA, slide);
+    }
+    NSLog(@"[魔玩盒子] 穿墙透视 hook: %s", orig_glUniformMatrix4fv ? "GOT 改写成功" : "未找到导入槽");
+    MWBLogFile(@"[010穿墙] GOT 改写 %s", orig_glUniformMatrix4fv ? "成功" : "失败: 未找到槽位");
+}
+
+// 汉化: fillTranslations(AppPlatform, lang, bool) 跑完后把中文表/英文原表复写进 I18n 静态 map
+// (MinecraftClient::init 内调两次, 启动期生效; 游戏内无语言切换UI, 开关走菜单/flag)
+typedef void (*I18nFillFn)(void *app, const void *lang, BOOL b);
+static I18nFillFn orig_fill010 = NULL;
+static void hooked_fill010(void *app, const void *lang, BOOL b) {
+    orig_fill010(app, lang, b);
+    MWBApplyLang();
+}
+
 // 0.10 hook 安装 (%ctor 调用)
 void MWBInstallHooks010(void) {
     MWB_HOOK("__ZN11LocalPlayer10normalTickEv", hooked_normalTick, orig_normalTick);
     MWB_HOOK("__ZN5Level4tickEv", hooked_levelTick, orig_levelTick);
     MWB_HOOK("__ZN15MinecraftClient4tickEii", hooked_mc010Tick, orig_mc010Tick);
+    MWB_HOOK("__ZN4I18n16fillTranslationsEP11AppPlatformRKNSt3__112basic_stringIcNS2_11char_traitsIcEENS2_9allocatorIcEEEEb",
+             hooked_fill010, orig_fill010);
     // Entity::move 0x1000 字节大函数, 跳板安全; 只拦截本地玩家的碰撞
     void *mv = MSFindSymbol(NULL, "__ZN6Entity4moveEfff");
     if (mv) { MSHookFunction(mv, (void *)hooked_move010, (void **)&orig_move010);
@@ -150,4 +308,6 @@ void MWBInstallHooks010(void) {
         MWBLogFile(@"[Toolbox] hook 成功: Entity::move @ %p", mv); }
     else { NSLog(@"[魔玩盒子] 警告: 未找到 Entity::move");
         MWBLogFile(@"[Toolbox] hook 失败: 未找到 Entity::move"); }
+    // 穿墙旁观视角: GOT 改写 glUniformMatrix4fv, 眼睛埋住时把透视近平面推到 2.5
+    MWBRebindGLUniform();
 }

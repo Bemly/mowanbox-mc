@@ -429,13 +429,20 @@
     UILabel *langLabel = [self makeRowLabel:@"语言"];
     langLabel.frame = (CGRect){{33,fBase+210},{200,60}};
     [pF addSubview:langLabel];
-    MWBPixelButton *langBtn = [[MWBPixelButton alloc] init];
-    [langBtn setAttributedTitle:MWBPixelText(@"即将到来", MWBPixelFont(24), MWB_COLOR(0xef,0xed,0xeb),
-                                             3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
-    langBtn.alpha = 0.35;
-    langBtn.userInteractionEnabled = NO;
-    langBtn.frame = (CGRect){{pw-33-390,fBase+210},{160,60}};
-    [pF addSubview:langBtn];
+    NSArray *langTitles = @[@"中文", @"英文"];
+    for (int i = 0; i < 2; i++) {
+        MWBPixelButton *langBtn = [[MWBPixelButton alloc] init];
+        [langBtn setAttributedTitle:MWBPixelText(langTitles[i], MWBPixelFont(28), MWB_COLOR(0xef,0xed,0xeb),
+                                                3, 3, MWB_COLOR(0x39,0x36,0x38)) forState:UIControlStateNormal];
+        langBtn.tag = 37 + i;
+        [langBtn addTarget:self action:@selector(setLang:) forControlEvents:UIControlEventTouchUpInside];
+        langBtn.frame = (CGRect){{pw-33-255+i*135,fBase+210},{120,60}};
+        if (!MWB010Only()) {
+            langBtn.alpha = 0.35;
+            langBtn.userInteractionEnabled = NO;
+        }
+        [pF addSubview:langBtn];
+    }
     pF.frame = (CGRect){{0,0},{pw,fBase+280}};
     [pages addObject:pF];
 
@@ -592,6 +599,12 @@
     (void)sender;
     MWBFloatReset();
     [self toast:@"悬浮窗已复位"];
+}
+- (void)setLang:(MWBPixelButton *)sender {
+    if (!MWB010Only()) return;
+    gChinese = ((int)sender.tag == 37);
+    MWBApplyLang();
+    [self toast:(gChinese ? @"已切中文" : @"已切英文")];
 }
 - (void)eggTap:(UIButton *)sender {
     int i = (int)sender.tag - 100;
