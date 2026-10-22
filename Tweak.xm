@@ -54,7 +54,7 @@ uint8_t gMiniMap010D[48 * 48];    // 0.10 水深
 
     // 0.10 永远安装 (符号 hook); 其余版本按识别结果安装
     MWBInstallHooks010();
-    MWBYSMInstall();   // YSM 穿戴 (仅 0.10 生效, 其他版本内直接返回)
+    // MWBYSMInstall();   // YSM 已剥离(-155 起不编入, 见 MWBCommon.h), 先验本体稳定
     if (gv == MWBGameV1_13_3) MWBInstallHooks1133();
     if (gv == MWBGameV1_1_7)  MWBInstallHooks117();
     if (gv == MWBGameV1_4_3)  MWBInstallHooks143();
