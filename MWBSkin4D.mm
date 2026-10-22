@@ -79,7 +79,7 @@ static void MWBSkinBuild(void *model) {
     for (int i = 0; i < MWBFishBoneCount; i++) parts[i] = NULL;
     for (int i = 0; i < MWBFishBoneCount; i++) {
         void *p = malloc(0xC0);
-        if (!p) { sCubeRoot = NULL; return; } // 失败即整树作废（sCubeRoot 保持空，永不藏原版）
+        if (!p) { free(parts); return; } // 失败即整树作废（sCubeRoot 保持空，永不藏原版）
         memset(p, 0, 0xC0);
         sPartCtor(p, 0, 0, 64, 64);
         *(float *)((char *)p + 0x00) = MWBFishBonePivot[i][0];
@@ -90,6 +90,7 @@ static void MWBSkinBuild(void *model) {
         *(float *)((char *)p + 0x14) = MWBFishBoneRot[i][2];
         parts[i] = p;
     }
+    MWBLogFile(@"[4D皮肤] 建树阶段1 parts就绪");
     // 再挂全部盒子（堆分配+原地构造+指针 push，照抄 HumanoidModel 亲传）
     for (int i = 0; i < MWBFishCubeCount; i++) {
         void *p = parts[MWBFishCubeBone[i]];
@@ -100,6 +101,7 @@ static void MWBSkinBuild(void *model) {
         sCubeCtor(c, p, 0, 0, o[0], o[1], o[2], (int)s[0], (int)s[1], (int)s[2], 0.0f);
         MWBSkinPushCube(p, c);
     }
+    MWBLogFile(@"[4D皮肤] 建树阶段2 cubes就绪");
     // 最后串父子+填 Model（根=首个无父骨，即 Root）
     // 注意：model（HumanoidModel*）会随进出世界重建，parts 表留着逐帧重绑（见 hook），
     // 否则切世界后 +0xB8 成野指针，进新世界必死（-174 老是卡死闪退根因）。
