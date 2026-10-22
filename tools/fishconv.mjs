@@ -37,18 +37,28 @@ h += 'extern const int MWBFishBoneCount;\nextern const int MWBFishBoneParent[];\
 let c = '// ' + outPrefix + '.c — 烘焙几何数据（机器生成，勿手改）\n#include "' + outPrefix.split('/').pop() + '.h"\n';
 const kb = bones.filter((_, i) => keep.has(i));
 const newIdx = new Map(kb.map((b, i) => [b.name, i]));
+// 0.10 part 轴心/盒子坐标都是相对父骨的，Bedrock 给的是模型绝对值，此处烘焙成相对值。
+// rel_pivot = abs - parent_abs（根保持原样）；cube origin 减去所在骨的绝对轴心。
+const absPiv = kb.map((b) => (b.pivot || [0,0,0]).slice());
+const relPiv = kb.map((b, ni) => {
+  const p = newIdx.get(b.parent);
+  if (p === undefined) return absPiv[ni];
+  return [0,1,2].map((k) => absPiv[ni][k] - absPiv[p][k]);
+});
 c += 'const int MWBFishBoneCount = ' + kb.length + ';\n';
 c += 'const int MWBFishBoneParent[] = {' + kb.map((b) => {
   if (!b.parent) return -1;
   const p = newIdx.get(b.parent);
   return p === undefined ? -1 : p;
 }).join(',') + '};\n';
-c += 'const float MWBFishBonePivot[][3] = {' + kb.map((b) => '{' + g(b.pivot || [0,0,0]).join(',') + '}').join(',') + '};\n';
+c += 'const float MWBFishBonePivot[][3] = {' + kb.map((b) => '{' + g(relPiv[kb.indexOf(b)]).join(',') + '}').join(',') + '};\n';
 c += 'const float MWBFishBoneRot[][3] = {' + kb.map((b) => '{' + (b.rotation || [0,0,0]).map(f).join(',') + '}').join(',') + '};\n';
 let cb = 0;
 const cBone = [], cOrg = [], cSize = [];
 kb.forEach((b, ni) => {
+  const bp = absPiv[ni];
   for (const cu of (b.cubes || [])) {
+    cu.origin = [0,1,2].map((k) => cu.origin[k] - bp[k]);
     // 截断后任一维度为 0 即跳过（0.9 之类小盒截断成 0 会退化，全量 41 个原生零盒另算在内）
     const td = cu.size.map((v) => Math.trunc(v));
     if (td[0] <= 0 || td[1] <= 0 || td[2] <= 0) continue;

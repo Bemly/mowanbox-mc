@@ -73,7 +73,7 @@ static void MWBSkinPushCube(void *part, void *cube) {
 // 坐标轴标定模型（单 part 三盒，无层级零递归）：X臂 origin(0,-1,-1) size(40,2,2) 最长，
 // Y臂 origin(-1,0,-1) size(2,24,2)，Z臂 origin(-1,-1,0) size(2,2,16) 最短，长短即身份。
 // 轴心 (0,0,0) 落在玩家脚下，俯视即可断出三轴正负与比例。鱼群验证时把调用换回鱼版。
-static void MWBSkinBuildAxis(void *model) {
+__attribute__((unused)) static void MWBSkinBuildAxis(void *model) {
     if (sCubeRoot || !sPartCtor || !sCubeCtor || !sSetModel || !model) return;
     void *p = malloc(0xC0);
     if (!p) return;
@@ -184,7 +184,7 @@ static void hooked_mini_render(void *self, void *entity,
     // Model 随进出世界重建，每帧用当前 self 重绑（几十次指针写，可忽略），防野指针。
     if (entity && entity == gLocalPlayer) {
         MWBSkinResolve();
-        if (gSkin4D && sPartRender) MWBSkinBuildAxis(self); // 标定期：坐标轴，鱼版函数留着
+        if (gSkin4D && sPartRender) MWBSkinBuild(self); // 相对坐标已修正，切回鱼
         if (sCubeRoot && sPartsKept && sSetModel)
             for (int i = 0; i < sPartsCount; i++)
                 if (sPartsKept[i]) sSetModel(sPartsKept[i], self);
