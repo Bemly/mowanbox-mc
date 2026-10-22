@@ -43,6 +43,7 @@
   8. flag 通道 /tmp/mwbcmd-*（touch+chown mobile，tick 内 poll、tick 后异步泻洪）；tick 内禁调容器函数（死锁）；cycript 每进程约 2 次调用上限；killall 只用 SIGTERM。
   9. appendFormat 拼大数据行会被吞改 C 缓冲 snprintf；tapGameAtX 点不动自家 UIKit 菜单（走 flag）。
   10. YSM：ModelPart/Cube 只有 C1（无 C2），compile/render 均带 float（f6 透传首帧默认 0.0625）；禁手动调 compile（进程无日志死亡改走 render 内脏检查自动编译）；日志禁 writeToURL 追加（会截断+NUL 空洞只留句柄追加）。
+  11. YSM渲染首帧进程无报告消失（1骨testbox与452骨大肥鱼一致，非尺寸问题；解码/建树/藏原版/绑纹理全通，死在自家sRender内，无ips/Jetsam，-156复验2次）；换版必须杀进程重载（活进程沿用旧dylib，曾误判-155为-156）；本机ps/killall挂，改launchctl拿pid+kill直杀；游戏读容器内mwbmodels（/var/mobile/Documents下同名目录不可见）。
 
 ## 0.10.0 逆向符号速查（MSFindSymbol 直解，imagebase=0x100000000）
 
