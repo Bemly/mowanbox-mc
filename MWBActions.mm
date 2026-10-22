@@ -767,13 +767,23 @@ void MWB010NightVisionTick(void) {
             gSavedGamma010 = *g;
             MWBLogFile(@"[010夜视] 捕获原 gamma=%.2f", gSavedGamma010);
         }
-        *g = 5.0f;
-    } else if (gSavedGamma010 > -0.5f) {
+        if (*g != 5.0f) *g = 5.0f;
+    } else {
         void *opt = MWB010Options();
         if (!opt) return;
         float *g = (float *)((char *)opt + 0x2D0);
         if (*g < 0.0f || *g > 20.0f) return;
-        *g = gSavedGamma010;
+        if (gSavedGamma010 > -0.5f) {
+            if (*g != gSavedGamma010) {
+                *g = gSavedGamma010;
+                MWBLogFile(@"[010夜视] 已恢复 gamma=%.2f", gSavedGamma010);
+            }
+        } else if (*g > 1.0f) {
+            // 从没捕获过但 gamma 离谱: 存档 options.txt 被毒化(gfx_gamma:5, 设置滑杆最高1.0到不了);
+            // 回游戏默认 0, 游戏下次存档自愈文件, 本分支只在开夜视前中毒时跑一次
+            MWBLogFile(@"[010夜视] 发现毒化 gamma=%.1f, 已回 0", *g);
+            *g = 0.0f;
+        }
     }
 }
 
