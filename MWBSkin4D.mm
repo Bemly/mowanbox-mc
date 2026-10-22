@@ -24,10 +24,12 @@ typedef void (*MCubeCtorFn)(void *thiz, void *part, int texU, int texV,
                              float x, float y, float z, int w, int h, int d, float inflate);
 typedef void (*MAddChildFn)(void *thiz, void *child);
 typedef void (*MPartRenderFn)(const float *m16, void *part);
+typedef void (*MSetModelFn)(void *thiz, void *model);
 static MPartCtorFn sPartCtor = NULL;
 static MCubeCtorFn sCubeCtor = NULL;
 static MAddChildFn sAddChild = NULL;
 static MPartRenderFn sPartRender = NULL;
+static MSetModelFn sSetModel = NULL;
 static int sSymOK = 0;
 static void MWBSkinResolve(void) {
     if (sSymOK) return;
@@ -36,9 +38,10 @@ static void MWBSkinResolve(void) {
     sCubeCtor = (MCubeCtorFn)MSFindSymbol(NULL, "__ZN4CubeC1EP9ModelPartiifffiiif");
     sAddChild = (MAddChildFn)MSFindSymbol(NULL, "__ZN9ModelPart8addChildEPS_");
     sPartRender = (MPartRenderFn)MSFindSymbol(NULL, "__ZN9ModelPart6renderEf");
-    if (!sPartCtor || !sCubeCtor || !sAddChild || !sPartRender)
-        MWBLogFile(@"[4D皮肤] 符号缺失 part=%p cube=%p add=%p render=%p",
-                   sPartCtor, sCubeCtor, sAddChild, sPartRender);
+    sSetModel = (MSetModelFn)MSFindSymbol(NULL, "__ZN9ModelPart8setModelEP5Model");
+    if (!sPartCtor || !sCubeCtor || !sAddChild || !sPartRender || !sSetModel)
+        MWBLogFile(@"[4D皮肤] 符号缺失 part=%p cube=%p add=%p render=%p setmodel=%p",
+                   sPartCtor, sCubeCtor, sAddChild, sPartRender, sSetModel);
 }
 
 // ---- 自家双立方体（建一次，逐帧复用，零每帧分配） ----
@@ -64,8 +67,8 @@ static void MWBSkinPushCube(void *part, void *cube) {
     f[1] = end + 8;
 }
 
-static void MWBSkinBuild(void) {
-    if (sCubeRoot || !sPartCtor || !sCubeCtor || !sAddChild) return;
+static void MWBSkinBuild(void *model) {
+    if (sCubeRoot || !sPartCtor || !sCubeCtor || !sAddChild || !sSetModel || !model) return;
     // 根：轴心 (0,12,0)，8 立方体占 y 12..20
     void *root = malloc(0xC0);
     if (!root) return;
@@ -93,6 +96,11 @@ static void MWBSkinBuild(void) {
     sCubeCtor(cubeB, child, 0, 0, -2.0f, 0.0f, -2.0f, 4, 4, 4, 0.0f);
     MWBSkinPushCube(child, cubeB);
     sAddChild(root, child);
+    sSetModel(root, model);
+    sSetModel(child, model);
+    // 关键：compile 里读 part+0xB8 当 Model* 调 getAABB，C1 不填它，必须调 setModel
+    // （HumanoidModel 构造里每 part 都调；漏调=空指针解引用静默死，-169 闪退根因）。
+    // model 传 hook 的 self（HumanoidModel*），建树点在 mini hook 内才有，见下。
     sCubeRoot = root;
     MWBLogFile(@"[4D皮肤] 双立方体建好 root=%p child=%p", root, child);
 }
@@ -125,7 +133,7 @@ static void hooked_mini_render(void *self, void *entity,
     // 本地玩家：先建树（一次，渲染线程，malloc+叶子构造），树在才藏原版（防隐身）。
     if (entity && entity == gLocalPlayer) {
         MWBSkinResolve();
-        if (gSkin4D && sPartRender) MWBSkinBuild();
+        if (gSkin4D && sPartRender) MWBSkinBuild(self);
         MWBSkinSetVanilla(self, gSkin4D && sCubeRoot);
     }
     orig_mini_render(self, entity, s1, s2, s3, s4, s5, s6);
