@@ -165,6 +165,19 @@ static void hooked_mini_render(void *self, void *entity,
     // 自家树画在 orig 之后、同一 hook 内：栈顶还压着实体变换，用游戏真矩阵 v5 落在玩家身上。
     if (entity && entity == gLocalPlayer && gSkin4D && sCubeRoot && sPartRender) {
         ((MPartRenderFnV)sPartRender)(sCubeRoot, s6);
+        static int sDbg = 0;
+        // 定位用：前 3 帧 dump 真矩阵 v5 四 lane + 玩家坐标 + 根轴心（只 3 行）
+        if (sDbg < 3 && gLocalPlayer) {
+            sDbg++;
+            float px = *(float *)((char *)gLocalPlayer + 0x28);
+            float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
+            float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+            float rx = *(float *)((char *)sCubeRoot + 0x00);
+            float ry = *(float *)((char *)sCubeRoot + 0x04);
+            float rz = *(float *)((char *)sCubeRoot + 0x08);
+            MWBLogFile(@"[4D皮肤] 矩阵v5=%.4f,%.4f,%.4f,%.4f 玩家=(%.1f,%.1f,%.1f) 根轴心=(%.1f,%.1f,%.1f)",
+                       s6[0], s6[1], s6[2], s6[3], px, py, pz, rx, ry, rz);
+        }
         static int sFrames = 0;
         sFrames++;
         // 存活计数：前 10 帧逐帧记，之后每 600 帧记一行（定位第几帧死，平时不刷屏）
