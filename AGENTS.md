@@ -40,7 +40,7 @@
   5. ItemInstance 布局 count@0/aux@4/Item*@8/info@0x10/valid@0x18，无独立 id 字段。
   6. 合成触摸禁合成 UIEvent sendEvent（SIGSEGV），直调游戏 VC touchesBegan。
   7. Recipes 懒加载（单例 0x10034d0c0，new 0x18 + __ZN7RecipesC2Ev；Recipe 0x48，产物 vector@0x30，虚表+0x40 取格）。
-  8. flag 通道 /tmp/mwbcmd-*（touch+chown mobile，tick 内 poll、tick 后异步泻洪）；tick 内禁调容器函数（死锁）；cycript 每进程约 2 次调用上限；killall 只用 SIGTERM。
+  8. flag 通道 /tmp/mwbcmd-*（touch+chown mobile，tick 内 poll、tick 后异步泻洪）；tick 内禁调容器函数（死锁）；cycript 每进程约 2 次调用上限；【重点】killall/ps 在本机经常卡住，杀进程一律 launchctl 拿 pid + kill -15（SIGTERM 正常退出），禁 killall/ps aux。
   9. appendFormat 拼大数据行会被吞改 C 缓冲 snprintf；tapGameAtX 点不动自家 UIKit 菜单（走 flag）。
   10. YSM：ModelPart/Cube 只有 C1（无 C2），compile/render 均带 float（f6 透传首帧默认 0.0625）；禁手动调 compile（进程无日志死亡改走 render 内脏检查自动编译）；日志禁 writeToURL 追加（会截断+NUL 空洞只留句柄追加）。
   11. 【重点】查日志一律 scp 拉回本机再 grep，禁在设备上 grep/扫全日志（A7 弱＋日志 MB 级每秒刷屏，必卡死 SSH）；设备侧只许 `tail -n 200 | grep` 有界读。
