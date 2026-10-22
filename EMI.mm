@@ -239,34 +239,45 @@ static NSString *MWBDescOfItem(void *item) {
         : "memory", "cc", "x1", "x2", "x3", "x4", "x5", "x6", "x7",
           "x9", "x10", "x11", "x12", "x13", "x14", "x15", "x16", "x17");
     uint8_t *s = (uint8_t *)tmp;
-    if (s[23] & 1) {   // libc++ 短串: 数据在位, 长度在末字节 >>1
-        size_t n = s[23] >> 1;
-        if (n > 23) return nil;
-        return [[NSString alloc] initWithBytes:tmp length:n encoding:NSUTF8StringEncoding];
+    // libc++ 布局: 末字节低位 1=长串 ([0]=指针 [8]=长度), 0=短串 (数据在位, 长度=末字节>>1)
+    // (之前分支写反 + 长串偏移错, 读出野指针导致进程静默死亡, 真名全变问号)
+    if (s[23] & 1) {
+        void *p = *(void **)s;
+        size_t n = *(size_t *)(s + 8);
+        if (!p || n == 0 || n > 256) return nil;
+        return [[NSString alloc] initWithBytes:p length:n encoding:NSUTF8StringEncoding];
     }
-    void *p = *(void **)(s + 16);   // 长串: 指针+16, 长度+8
-    size_t n = *(size_t *)(s + 8);
-    if (!p || n == 0 || n > 256) return nil;
-    return [[NSString alloc] initWithBytes:p length:n encoding:NSUTF8StringEncoding];
+    size_t n = s[23] >> 1;
+    if (n > 23) return nil;
+    return [[NSString alloc] initWithBytes:tmp length:n encoding:NSUTF8StringEncoding];
 }
 
 // dumpitems: 扫 Item::items[512] 落盘全部已注册 id+真名 (与 EMI 表做 diff, 找原版缺口;
 // 索引即 id, <256 为方块, >=256 为物品; preload 和世界 tick 里都接, 以世界内为准)
+// C 缓冲分行拼 (appendFormat 拼百项大行会被吞, 见小地图教训; 真名走 getDescriptionId 只读调)
 void MWBDumpItemRegistry(void) {
     if (![[NSFileManager defaultManager] fileExistsAtPath:@"/tmp/mwbcmd-dumpitems"]) return;
     [[NSFileManager defaultManager] removeItemAtPath:@"/tmp/mwbcmd-dumpitems" error:nil];
     void **reg = mwb_items_registry();
     if (!reg) { MWBDLog(@"[dumpitems] 注册表未解析"); return; }
-    NSMutableString *b = [NSMutableString stringWithString:@"[dumpitems] blocks:"]; int nb = 0;
-    NSMutableString *t = [NSMutableString stringWithString:@"[dumpitems] items:"]; int ni = 0;
-    for (int i = 0; i < 512; i++) {
-        if (!reg[i]) continue;
-        NSString *d = MWBDescOfItem(reg[i]);
-        if (i < 256) { [b appendFormat:@" %d=%@", i, d ?: @"?"]; nb++; }
-        else { [t appendFormat:@" %d=%@", i, d ?: @"?"]; ni++; }
+    static char buf[2048];
+    int total = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        int lo = pass ? 256 : 0, hi = pass ? 512 : 256;
+        int n = snprintf(buf, sizeof(buf), "[dumpitems] %s:", pass ? "I" : "B");
+        int cnt = 0;
+        for (int i = lo; i < hi && n > 0 && n < (int)sizeof(buf) - 128; i++) {
+            if (!reg[i]) continue;
+            NSString *d = MWBDescOfItem(reg[i]);
+            const char *nm = d ? [d UTF8String] : "?";
+            n += snprintf(buf + n, sizeof(buf) - n, " %d=%s", i, nm);
+            if (++cnt % 12 == 0) { MWBDLog(@"%s", buf); n = 0; }
+        }
+        if (n > 0) MWBDLog(@"%s", buf);
+        total += cnt;
+        MWBDLog(@"[dumpitems] %s共%d项", pass ? "物品" : "方块", cnt);
     }
-    MWBDLog(@"%@ (共%d)", b, nb);
-    MWBDLog(@"%@ (共%d)", t, ni);
+    MWBDLog(@"[dumpitems] 合计%d项已注册", total);
 }
 
 // dumpcats: 复刻原版 CreativeInventoryScreen::populateItems 尾部分发扫全表分类
