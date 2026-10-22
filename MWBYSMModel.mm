@@ -488,7 +488,9 @@ static void YSMFreePart(void *part) {
     if (!sRender && !YSMResolveSyms()) return;
     if (!sRender) return;
     sYSMScale = f;
+    MWBYSMLog(@"调自家 render root=%p", root);
     sRender(root, f);
+    MWBYSMLog(@"自家 render 返回");
     void **vec = YSMVecField(root, 0x38);
     uint8_t *b = (uint8_t *)vec[0], *e = (uint8_t *)vec[1];
     if (b && e > b) {

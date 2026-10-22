@@ -154,10 +154,13 @@ static void hooked_hmodel_render(void *self, void *entity,
     if (gYSM && gYSMRoot && gYSMTex && entity && entity == gLocalPlayer) {
         [MWBYSMModel setVanillaHidden:self hide:YES];   // 藏六件套 (幂等)
         orig_hmodel_render(self, entity, f1, f2, f3, f4, f5, f6);  // setup 照跑, 部件被藏画不出
+        MWBLogFile(@"[YSM] 原版走完");
         GLint prev = 0;
         glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
         glBindTexture(GL_TEXTURE_2D, (GLuint)gYSMTex);
+        MWBLogFile(@"[YSM] 纹理已绑 tex=%u", gYSMTex);
         [MWBYSMModel renderTree:gYSMRoot scale:f6];
+        MWBLogFile(@"[YSM] 自家树画完");
         glBindTexture(GL_TEXTURE_2D, (GLuint)prev);    // 经句柄恢复, 缓存依旧自洽
         return;
     }
