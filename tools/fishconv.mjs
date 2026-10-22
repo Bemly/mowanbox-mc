@@ -9,7 +9,16 @@ const j = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
 const bones = j['minecraft:geometry'][0].bones;
 const idx = new Map(bones.map((b, i) => [b.name, i]));
 const keep = new Set();
-for (let i = 0; i < bones.length && (limit < 0 || keep.size < limit); i++) keep.add(i);
+if (process.env.FISHMODE === 'cubed' && limit > 0) {
+  // 前 limit 个带盒骨 + 全部祖先（保证看得见东西且不断链）
+  const addAnc = (i) => { let g = i; while (g >= 0 && !keep.has(g)) { keep.add(g); const p = bones[g].parent; g = p ? (idx.get(p) ?? -1) : -1; } };
+  let n = 0;
+  for (let i = 0; i < bones.length && n < limit; i++) {
+    if ((bones[i].cubes || []).length) { addAnc(i); n++; }
+  }
+} else {
+  for (let i = 0; i < bones.length && (limit < 0 || keep.size < limit); i++) keep.add(i);
+}
 const f = (n) => (typeof n !== 'number' || !isFinite(n)) ? '0' : (+n.toFixed(4)).toString();
 const par = (b) => {
   if (!b.parent) return -1;
