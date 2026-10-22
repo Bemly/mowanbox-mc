@@ -64,7 +64,8 @@ c += 'const int MWBFishBoneParent[] = {' + kb.map((b) => {
   return p === undefined ? -1 : p;
 }).join(',') + '};\n';
 c += 'const float MWBFishBonePivot[][3] = {' + kb.map((b) => '{' + g(relPiv[kb.indexOf(b)]).join(',') + '}').join(',') + '};\n';
-c += 'const float MWBFishBoneRot[][3] = {' + kb.map((b) => '{' + (b.rotation || [0,0,0]).map(f).join(',') + '}').join(',') + '};\n';
+const D2R = Math.PI/180;
+c += 'const float MWBFishBoneRot[][3] = {' + kb.map((b) => '{' + (b.rotation || [0,0,0]).map((v) => f(v*D2R)).join(',') + '}').join(',') + '};\n';
 let cb = 0;
 const cBone = [], cOrg = [], cSize = [];
 kb.forEach((b, ni) => {
