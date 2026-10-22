@@ -47,8 +47,9 @@ let cb = 0;
 const cBone = [], cOrg = [], cSize = [];
 kb.forEach((b, ni) => {
   for (const cu of (b.cubes || [])) {
-    // 零体积盒跳过（Bedrock 定位器，全量 41 个，退化几何是闪退嫌疑之一）
-    if (cu.size[0] === 0 || cu.size[1] === 0 || cu.size[2] === 0) continue;
+    // 截断后任一维度为 0 即跳过（0.9 之类小盒截断成 0 会退化，全量 41 个原生零盒另算在内）
+    const td = cu.size.map((v) => Math.trunc(v));
+    if (td[0] <= 0 || td[1] <= 0 || td[2] <= 0) continue;
     cb++; cBone.push(ni); cOrg.push('{' + cu.origin.map(f).join(',') + '}'); cSize.push('{' + cu.size.map(f).join(',') + '}'); }
 });
 c += 'const int MWBFishCubeCount = ' + cb + ';\n';
