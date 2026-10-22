@@ -49,6 +49,7 @@ static void MWBSkinResolve(void) {
 static void *sCubeRoot = NULL;
 static void **sPartsKept = NULL;
 static int sPartsCount = 0;
+static void *sLastModel = NULL; // 上次绑定的 model，变了才重绑（setModel 每调一次就摘除重挂，逐帧调等于慢性自杀）
 
 // 手动给 part 的 cube 指针向量塞一个指针（C1 已清零向量，自家 malloc 指针数组拥有）
 static void MWBSkinPushCube(void *part, void *cube) {
@@ -153,13 +154,16 @@ static void hooked_mini_render(void *self, void *entity,
     // 先把六个向量存局部（无调用，v0-v5 原样落栈），之后随便调函数，透传时再全量装回去。
     M16Skin s1 = p1, s2 = p2, s3 = p3, s4 = p4, s5 = p5, s6 = p6;
     // 本地玩家：先建树（一次，渲染线程，malloc+叶子构造），树在才藏原版（防隐身）。
-    // Model 随进出世界重建，每帧用当前 self 重绑（几十次指针写，可忽略），防野指针。
+    // Model 随进出世界重建：self 变了才重绑全树，平时零开销（setModel 自带摘除重挂，逐帧调必死）。
     if (entity && entity == gLocalPlayer) {
         MWBSkinResolve();
         if (gSkin4D && sPartRender) MWBSkinBuild(self);
-        if (sCubeRoot && sPartsKept && sSetModel)
+        if (sCubeRoot && sPartsKept && sSetModel && self != sLastModel) {
             for (int i = 0; i < sPartsCount; i++)
                 if (sPartsKept[i]) sSetModel(sPartsKept[i], self);
+            sLastModel = self;
+            MWBLogFile(@"[4D皮肤] 重绑 Model=%p", self);
+        }
         MWBSkinSetVanilla(self, gSkin4D && sCubeRoot);
     }
     orig_mini_render(self, entity, s1, s2, s3, s4, s5, s6);
