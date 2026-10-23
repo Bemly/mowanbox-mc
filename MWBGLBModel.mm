@@ -18,19 +18,6 @@
 #import <map>
 #import <string>
 
-// 游戏 MatrixStack 栈顶（V·E 来源）：deque<64B 矩阵>，公式照抄反编译
-// top = map[(start+size-1)>>6] + ((start+size-1)&0x3f)*0x40，对象在 slide+0x10034f5a0
-static float *GLBStackTop(void) {
-    long *s = (long *)(MWBMainSlide() + 0x10034f5a0UL);
-    long v3 = s[4], v4 = s[5];
-    if (v4 <= 0) return NULL;
-    unsigned long v8 = (unsigned long)(v3 + v4 - 1);
-    long *map = (long *)s[1];
-    if (!map) return NULL;
-    long chunk = *(long *)((uint8_t *)map + ((v8 >> 3) & 0x1ffffffffffffff8UL));
-    if (!chunk) return NULL;
-    return (float *)(chunk + (v8 & 0x3f) * 0x40);
-}
 // 自家 shader（ES3 合法；MVP 全 CPU 算好一次传进去，不碰游戏 program）
 static GLuint sProg = 0; static GLint sUMVP = -1, sUTex = -1;
 static GLuint sProgFor = 0; static GLint sProjLoc = -1; static BOOL sProjScanned = NO;
@@ -496,13 +483,13 @@ static BOOL GLBInitGL(void) {
     return YES;
 }
 
-// ---- 绘制（VBO + 自家 shader，全 ES3 合法；MVP = P读回 · 栈顶V·E · 节点世界） ----
+// ---- 绘制（VBO + 自家 shader，全 ES3 合法；MVP = 游戏 WVP读回 · 节点世界） ----
 static char sGLVer[128] = {0}, sGLRen[128] = {0}; // GL 线程缓存版本串（诊断用）
 void MWBGLBLogDiag(void) {
     extern int MWB010GLCalls(void);
-    MWBLogFile(@"[GLB] 诊断 开关=%d 解析=%d 网格=%lu 投影loc=%d P读回=%d uniform调用=%d 版本=%s 渲染器=%s",
+    MWBLogFile(@"[GLB] 诊断 开关=%d 解析=%d 网格=%lu WVP读回loc=%d uniform调用=%d 版本=%s 渲染器=%s",
                gGLBModel, sParsed, (unsigned long)sMeshes.size(),
-               sProjLoc, sHasP, MWB010GLCalls(), sGLVer, sGLRen);
+               sProjLoc, MWB010GLCalls(), sGLVer, sGLRen);
 }
 // 开关+解析齐就藏原版（画不出时诊断会说，不再静默）
 BOOL MWBGLBCanDraw(void) {
@@ -612,35 +599,18 @@ void MWBGLBDraw(void) {
         float W[16]; GLBMatMul(&sWorld[pi*16], &sWorld[ni*16], W);
         memcpy(&sWorld[ni*16], W, sizeof(W));
     }
-    // 栈顶 V·E（hook 之后 orig 已平衡，栈顶回到实体级；读不到则记一次并跳过）
-    float *Top = GLBStackTop();
-    static int sTopLogged = 0;
-    if (!Top) { if (!sTopLogged) { sTopLogged = 1; MWBLogFile(@"[GLB] 栈顶读不到"); } return; }
-    float ET[16]; memcpy(ET, Top, sizeof(ET));
-    { // V·E 自检：平移分量长度应≈第三人称相机距离（几格）；差太远说明栈顶不是 V·E
-        float tl = sqrtf(ET[12]*ET[12] + ET[13]*ET[13] + ET[14]*ET[14]);
-        static int sTopChk = 0;
-        if (sTopChk < 3) { sTopChk++; MWBLogFile(@"[GLB] 栈顶平移=%.1f (%.1f,%.1f,%.1f)", tl, ET[12], ET[13], ET[14]); }
-    }
-    // 游戏 program 读 P（换 program 才重扫，每帧刷新值；找不到就按 fov 猜一个先画出来再调）
+    // WVP 直读：游戏刚为最后一个原版 part 上传的 P·V·E·partN（loc 按名查，每帧重读值）
+    // partN 偏差（最后画的原版部件位移）看截图再补修正矩阵，先原样画出来
     GLint gprog = 0; glGetIntegerv(GL_CURRENT_PROGRAM, &gprog);
     if (!sProjScanned || (GLuint)gprog != sProgFor) GLBScanProgram((GLuint)gprog);
-    static int sPLogged = 0; static int sPLogged2 = 0;
-    if (!sHasP || sProjLoc < 0) {
-        if (!sPLogged) { sPLogged = 1; MWBLogFile(@"[GLB] P 没定位到，走猜测 fov=70"); }
-        GLint vp[4] = {0, 0, 0, 0};
-        glGetIntegerv(GL_VIEWPORT, vp);
-        float aspect = (vp[2] > 0 && vp[3] > 0) ? (float)vp[2] / (float)vp[3] : 4.0f/3.0f;
-        float t = tanf(70.0f * (float)M_PI / 360.0f);
-        float nn = 0.1f, ff = 2000.0f;
-        memset(sPMat, 0, sizeof(sPMat));
-        sPMat[0] = 1.0f / (aspect * t); sPMat[5] = 1.0f / t;
-        sPMat[10] = -(ff + nn) / (ff - nn); sPMat[11] = -1.0f; sPMat[14] = -2.0f*ff*nn/(ff-nn);
-        if (!sPLogged2) { sPLogged2 = 1; MWBLogFile(@"[GLB] 猜测 P aspect=%.2f", aspect); }
-    } else {
-        glGetUniformfv((GLuint)gprog, sProjLoc, sPMat);
+    static GLint sWVPLocCache = -2; static GLuint sWVPProgCache = 0;
+    if (sWVPProgCache != (GLuint)gprog) {
+        sWVPProgCache = (GLuint)gprog;
+        sWVPLocCache = glGetUniformLocation((GLuint)gprog, "WORLDVIEWPROJ");
     }
-    float PE[16]; GLBMatMul(sPMat, ET, PE); // PE = P · V·E（每 mesh 再乘节点世界）
+    static int sWVPLogged = 0;
+    if (sWVPLocCache < 0) { if (!sWVPLogged) { sWVPLogged = 1; MWBLogFile(@"[GLB] 无 WORLDVIEWPROJ"); } return; }
+    float WVP[16]; glGetUniformfv((GLuint)gprog, sWVPLocCache, WVP);
 
     // ES3 现场保存（只动用到的状态）
     GLint oldProg = 0, oldTex = 0, oldActive = 0, oldAB = 0, oldEB = 0;
@@ -686,7 +656,7 @@ void MWBGLBDraw(void) {
         if (mi < 0 || mi >= (int)sMeshes.size()) continue;
         GLBMesh &m = sMeshes[mi];
         if (!m.vbo[0]) continue;
-        float M[16]; GLBMatMul(PE, &sWorld[ni*16], M);
+        float M[16]; GLBMatMul(WVP, &sWorld[ni*16], M);
         glUniformMatrix4fv(sUMVP, 1, GL_FALSE, M);
         glBindBuffer(GL_ARRAY_BUFFER, m.vbo[0]);
         glEnableVertexAttribArray(0);
