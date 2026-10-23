@@ -1,4 +1,4 @@
-// MWBCamera010.mm — 0.10 相机三视角：设置里第三人称开关改 3 段滑条（第一/第三背面/第三正面）
+// MWBCamera010.mm — 0.10 相机四视角：设置里第三人称开关改 4 段滑条（第一/第三背面/第三正面/跟脸正面）
 // 逆向实锤（kuna 反 0.10 二进制，imagebase=0x100000000）：
 // - 选项表静态 0x10034dd00，条目 {int 类型@+0, string 名@+8, int id@+0x20} 步长 0x28；
 //   thirdperson 条目在 0x10034ebc8（类型 0=开关，id 12），难度在 0x10034eb50（类型 3=步进滑条，id 8）。
@@ -25,19 +25,20 @@ static void *MWBCamOptions(void *mc) {
     return *(void **)((char *)mc + CAM_MC_OPT_OFF);
 }
 
-// 当前值反推：0=第一，1=第三背面，2=第三正面
+// 当前值反推：0=第一，1=第三背面，2=第三正面，3=跟脸正面（2d6==2，原版到不了的值）
 int MWBCamValue(void) {
     void *opt = MWBCamOptions(NULL);
     if (!opt) return 0;
     uint8_t t = *(uint8_t *)((char *)opt + CAM_F_THIRD);
     if (!t) return 0;
-    return (*(uint8_t *)((char *)opt + CAM_F_FRONT)) ? 2 : 1;
+    uint8_t f = *(uint8_t *)((char *)opt + CAM_F_FRONT);
+    return f >= 2 ? 3 : (f ? 2 : 1);
 }
 
-// 值写入：0→第一，1→第三背面，2→第三正面（越界钳制）
+// 值写入：0→第一，1→第三背面，2→第三正面，3→跟脸正面（越界钳制）
 void MWBSetCamValue01(int v) {
     if (v < 0) v = 0;
-    if (v > 2) v = 2;
+    if (v > 3) v = 3;
     void *opt = MWBCamOptions(NULL);
     if (!opt) { MWBLogFile(@"[相机] Options 为空，跳过"); return; }
     if (v == 0) {
@@ -45,9 +46,12 @@ void MWBSetCamValue01(int v) {
     } else if (v == 1) {
         *(uint8_t *)((char *)opt + CAM_F_THIRD) = 1;
         *(uint8_t *)((char *)opt + CAM_F_FRONT) = 0;
-    } else {
+    } else if (v == 2) {
         *(uint8_t *)((char *)opt + CAM_F_THIRD) = 1;
         *(uint8_t *)((char *)opt + CAM_F_FRONT) = 1;
+    } else {
+        *(uint8_t *)((char *)opt + CAM_F_THIRD) = 1;
+        *(uint8_t *)((char *)opt + CAM_F_FRONT) = 2;
     }
     MWBLogFile(@"[相机] 视角切 %d (2cd=%d 2d6=%d)", v,
                *(uint8_t *)((char *)opt + CAM_F_THIRD),
@@ -64,25 +68,26 @@ static void MWBCamPatchFlag(void) {
     MWBLogFile(@"[相机] 条目 0x10034ebc8 类型 0→3（开关改步进滑条）");
 }
 
-// Slider::C1 hook：thirdperson 进来把步伐换成自家 {0,1,2}，初值从 Options 反推
+// Slider::C1 hook：thirdperson 进来把步伐换成自家 {0,1,2,3}，初值从 Options 反推
 typedef void *(*SliderCtorFn)(void *thiz, void *mc, void *opt, void *vec);
 static SliderCtorFn orig_cam_ctor = NULL;
 static void *hooked_cam_ctor(void *thiz, void *mc, void *opt, void *vec) {
     if (opt && opt == MWBCamOpt()) {
-        static int sSteps[3] = {0, 1, 2};
-        struct { void *b, *e, *c; } v = {sSteps, sSteps + 3, sSteps + 3};
+        static int sSteps[4] = {0, 1, 2, 3};
+        struct { void *b, *e, *c; } v = {sSteps, sSteps + 4, sSteps + 4};
         thiz = orig_cam_ctor(thiz, mc, opt, &v);
         // 初值反推（照抄原构造尾巴的查表逻辑：值→下标→位置）
         void *o = MWBCamOptions(mc);
         int val = 0;
         if (o) {
             uint8_t t = *(uint8_t *)((char *)o + CAM_F_THIRD);
-            val = t ? ((*(uint8_t *)((char *)o + CAM_F_FRONT)) ? 2 : 1) : 0;
+            uint8_t f = *(uint8_t *)((char *)o + CAM_F_FRONT);
+            val = t ? (f >= 2 ? 3 : (f ? 2 : 1)) : 0;
         }
-        int idx = (val >= 0 && val <= 2) ? val : 0;
+        int idx = (val >= 0 && val <= 3) ? val : 0;
         *(int *)((char *)thiz + 0x128) = idx;          // [0x4a] 当前值
         *(int *)((char *)thiz + 0x12c) = idx;          // [0x4b] 下标
-        *(float *)((char *)thiz + 0x124) = idx / 2.0f; // [0x49] knob 位置
+        *(float *)((char *)thiz + 0x124) = idx / 3.0f; // [0x49] knob 位置
         MWBLogFile(@"[相机] 滑条创建 初值=%d", idx);
         return thiz;
     }
@@ -97,12 +102,13 @@ static void hooked_cam_set(void *thiz, void *mc) {
     if (opt && opt == MWBCamOpt()) {
         int v = *(int *)((char *)thiz + 0x128);   // [0x4a] 当前值
         if (v < 0) v = 0;
-        if (v > 2) v = 2;
+        if (v > 3) v = 3;
         void *o = MWBCamOptions(mc);
         if (!o) return;
         if (v == 0) *(uint8_t *)((char *)o + CAM_F_THIRD) = 0;
         else if (v == 1) { *(uint8_t *)((char *)o + CAM_F_THIRD) = 1; *(uint8_t *)((char *)o + CAM_F_FRONT) = 0; }
-        else { *(uint8_t *)((char *)o + CAM_F_THIRD) = 1; *(uint8_t *)((char *)o + CAM_F_FRONT) = 1; }
+        else if (v == 2) { *(uint8_t *)((char *)o + CAM_F_THIRD) = 1; *(uint8_t *)((char *)o + CAM_F_FRONT) = 1; }
+        else { *(uint8_t *)((char *)o + CAM_F_THIRD) = 1; *(uint8_t *)((char *)o + CAM_F_FRONT) = 2; }
         MWBLogFile(@"[相机] 滑条写 %d (2cd=%d 2d6=%d)", v,
                    *(uint8_t *)((char *)o + CAM_F_THIRD),
                    *(uint8_t *)((char *)o + CAM_F_FRONT));
@@ -130,6 +136,21 @@ static unsigned long hooked_cam_update(void *thiz) {
     if (thiz) *(uint8_t *)((char *)thiz + CAM_F_FRONT) = f ? 1 : 0;
     MWBLogFile(@"[相机] 读档接回正面位=%d", f);
     return r;
+}
+
+// 跟脸节拍（normalTick 里每帧调）：第 4 档（2d6==2）时把视角 yaw 灌进相机 yaw。
+// 根因：正面分支读玩家 +0x3c 当相机偏航，可游戏里从来没人写它（恒 0），转视角只动 +0x78，
+// 相机就钉死在出生朝向。模型脸朝 +0x78（或其镜像），故把 +0x78 拷给 +0x3c 即脸锁。
+// 只在第 4 档动手，其余档零开销（两次读一次比较）。
+#define CAM_YAW_VIEW_OFF 0x78   // 视角 yaw（ENTITY_YAW_OFF，转视角即变）
+#define CAM_YAW_CAM_OFF 0x3c    // 相机 yaw（正面分支读它，游戏不写）
+void MWBCamFaceTick(void) {
+    if (!gLocalPlayer) return;
+    void *o = MWBCamOptions(NULL);
+    if (!o) return;
+    if (*(uint8_t *)((char *)o + CAM_F_FRONT) != 2) return;
+    float vy = *(float *)((char *)gLocalPlayer + CAM_YAW_VIEW_OFF);
+    *(float *)((char *)gLocalPlayer + CAM_YAW_CAM_OFF) = vy;
 }
 
 // 诊断：条目类型 + 双字段（caminfo flag 打）

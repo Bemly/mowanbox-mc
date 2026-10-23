@@ -67,6 +67,7 @@ void MWBInstallCamera010(void);
 int MWBCamValue(void);        // 0=第一 1=第三背面 2=第三正面
 void MWBSetCamValue01(int v); // 同上语义写入 (flag cam-N 共用)
 void MWBCamDiag(void);        // 条目类型+双字段诊断 (flag caminfo 打)
+void MWBCamFaceTick(void);    // 跟脸节拍 (normalTick 每帧调，仅第 4 档动手)
 
 // ---- 文件日志 (定义在 MWBActions.mm) ----
 void MWBLogFile(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);

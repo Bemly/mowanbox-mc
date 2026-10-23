@@ -125,6 +125,7 @@ static void hooked_normalTick(void *self) {
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) { [fh seekToEndOfFile]; [fh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
     }
+    MWBCamFaceTick();   // 跟脸正面：第 4 档时每 tick 把视角 yaw 灌进相机 yaw（+0x3c 卡死不动是正面定死的根因）
     MWBPollCmdFile();   // 0.10 也接 flag 文件通道 (time/reactor/diff/mob/explode)
 }
 
