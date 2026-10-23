@@ -746,9 +746,11 @@ void MWBGLBDraw(void) {
         float px = *(float *)((char *)gLocalPlayer + 0x28);
         float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
         float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
-        // T = 平移(玩家脚下)·绕Y(跟玩家朝向)：模型正面是 -z，玩家 yaw=0 朝南(+z，同 Java)，
-        // 故 θ=π-yaw（把 -z 转到 facing；若真机脸朝后，把 π-yaw 改成 π+yaw，见日志 yaw 值）。
-        float yawDeg = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);
+        // T = 平移(玩家脚下)·绕Y(跟身体朝向)：鱼替的是身体，必须跟身体 +0x3c（世界静止量）。
+        // 跟视角 +0x78 是错的：V 相机世界固定，T 再跟视角转，拖相机时鱼自己转一份，
+        // 与背景转动叠加就是“快1倍”（180° 见脸、360° 回背；正确应是 360° 一圈）。
+        // 模型正面是 -z，玩家 yaw=0 朝南(+z，同 Java)，故 θ=π-bodyYaw；头尾若反只改 π 常数（与速率无关）。
+        float yawDeg = *(float *)((char *)gLocalPlayer + 0x3c);
         float th = (180.0f - yawDeg) * (float)M_PI / 180.0f;
         sYawDbg = yawDeg; sThDbg = th;
         float ct = cosf(th), st = sinf(th);
