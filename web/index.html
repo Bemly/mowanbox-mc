@@ -421,11 +421,10 @@ function animate() {
   controls.update();
   rendererL.render(sceneL, cameraL);
 
-  // 右：移植绘制（MVP = WVP_SIM · 世界，WVP_SIM 由右相机 P·V 给出；插件是游戏 WORLDVIEWPROJ 直读）
+  // 右：移植绘制（MVP = WVP_SIM · 世界；移植世界与三边同为米制，右相机即左相机）
   if (parsed && progR && texR) {
-    // 右相机 = 左相机 ×16（移植世界是 ×16 游戏单位，图像可比，矩阵保持插件数值）
-    // ?m=1 米制调试：相机不放大（与三边同单位，矩阵可逐元比对）
-    const US = METERS ? 1 : 16;
+    // ?m=1 米制调试已合入主线（US 恒 1，矩阵可与三边逐元比对），保留参数兼容
+    const US = 1;
     const rc = new THREE.PerspectiveCamera(cameraL.fov, cameraL.aspect, cameraL.near * US, cameraL.far * US);
     rc.position.copy(cameraL.position).multiplyScalar(US);
     const tgt = controls.target.clone().multiplyScalar(US);

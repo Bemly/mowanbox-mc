@@ -1,7 +1,7 @@
 // web/js/plugin-glb.js — GLB 直解 + 姿势 + vis 叠加 + 自家 shader 绘制
 // 逐行对应 MWBGLBModel.mm，函数名后标 mm 行号；数学为列主序，与 GL 一致。
-// 单位：解析时位移/顶点已乘 16 进游戏单位（mm 302/349/396 行），运行时零换算。
-// UV：flipY（mm 350 行，three 同款）；绘制：alphaTest 0.5 discard + Nearest + 双面（mm 36-37/469-475/644 行）。
+// 单位：游戏渲染就是 Bedrock/米制单位，解析零换算（手搓鱼烘焙路径同证）。
+// UV：不翻转（GLTFLoader flipY=false，翻了会被 alphaTest 吃成锥体残件）。
 import { molVal } from './plugin-molang.js';
 
 // ---- 小数学（对应 mm 137-159 行，列主序） ----
@@ -138,12 +138,14 @@ function parseGLB(buf, log) {
   const f32 = (off) => fb.getFloat32(off, true);
   const u16 = (off) => fb.getUint16(off, true);
 
-  // 节点（位移解析时直接乘 16，mm 302 行）
+  // 节点（位移零换算，米制直用）
   const nodes = jNodes.map((n, i) => {
     const t = n.translation, q = n.rotation, sc = n.scale;
+    // 单位：游戏渲染就是 Bedrock/米制单位，不乘 16（手搓鱼烘焙路径同证：pivot/origin 原值直写即对）。
+    // 之前误乘 16 会把鱼放大 16 倍、相机包 inside，只能看到巨型多边形。
     return {
       name: typeof n.name === 'string' ? n.name : ('n' + i),
-      t: t ? [t[0] * 16, t[1] * 16, t[2] * 16] : [0, 0, 0],
+      t: t ? [t[0], t[1], t[2]] : [0, 0, 0],
       q: q ? [q[0], q[1], q[2], q[3]] : [0, 0, 0, 1],
       s: sc ? [sc[0], sc[1], sc[2]] : [1, 1, 1],
       mesh: (n.mesh == null ? -1 : n.mesh),
@@ -167,7 +169,7 @@ function parseGLB(buf, log) {
     nodes[cur].children.forEach((c) => stack.push(c));
   }
 
-  // 网格（只 POSITION+VEC3/TEXCOORD_0+索引 uint16；顶点乘 16，UV flipY，mm 330-357 行）
+  // 网格（只 POSITION+VEC3/TEXCOORD_0+索引 uint16；顶点/位移零换算，UV 不翻转）
   const meshes = [];
   let totalTris = 0;
   for (const jm of jMeshes) {
@@ -183,9 +185,9 @@ function parseGLB(buf, log) {
     const nv = pa.count, ni = ia.count;
     const pos = new Float32Array(nv * 3), uv = new Float32Array(nv * 2);
     for (let v = 0; v < nv; v++) {
-      pos[v * 3] = f32(pr.ptr + v * 12) * 16;
-      pos[v * 3 + 1] = f32(pr.ptr + v * 12 + 4) * 16;
-      pos[v * 3 + 2] = f32(pr.ptr + v * 12 + 8) * 16;
+      pos[v * 3] = f32(pr.ptr + v * 12);
+      pos[v * 3 + 1] = f32(pr.ptr + v * 12 + 4);
+      pos[v * 3 + 2] = f32(pr.ptr + v * 12 + 8);
       uv[v * 2] = f32(ur.ptr + v * 8);
       // 不翻转：GLTFLoader 对 glTF 贴图设 flipY=false（glTF 规定 UV 原点在左上，
       // 与 PNG 行序一致），采样即原样；之前误跟 three 通用贴图的 flipY 在此是反的，
@@ -203,7 +205,7 @@ function parseGLB(buf, log) {
     return null;
   }
 
-  // 动画（只取纯数字 rot/pos，molang 通道转的时候已跳过；pos 输出乘 16，mm 365-398 行）
+  // 动画（只取纯数字 rot/pos，molang 通道转的时候已跳过；位移与节点同单位零换算）
   const anims = new Map();
   for (const clip of jAnims) {
     const full = clip.name || '';
@@ -226,8 +228,7 @@ function parseGLB(buf, log) {
       const keys = { times: new Float32Array(nt), vals: new Float32Array(nt * comp), comp, step: sm.interpolation === 'STEP' };
       for (let f = 0; f < nt; f++) keys.times[f] = f32(tr.ptr + f * 4);
       for (let f = 0; f < nt * comp; f++) keys.vals[f] = f32(vr.ptr + f * 4);
-      if (isPos) for (let f = 0; f < keys.vals.length; f++) keys.vals[f] *= 16;
-      if (isRot) an.rot.set(ni, keys); else an.pos.set(ni, keys);
+      if (isRot) an.rot.set(ni, keys); else an.pos.set(ni, keys); // 位移与节点同单位，不换算
     }
     anims.set(bare, an);
   }
