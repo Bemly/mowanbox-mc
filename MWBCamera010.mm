@@ -167,10 +167,12 @@ static void hooked_setupcam(void *a0, void *a1) {
     if (o && *(uint8_t *)((char *)o + CAM_F_FRONT) == 2 && gLocalPlayer && a0) {
         float vy = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);   // +0x78
         float vp = *(float *)((char *)gLocalPlayer + ENTITY_PITCH_OFF); // +0x7c
+        // yaw 直给（左右已对）；pitch 取反：正脸机位与视角反向看回脸（反方向=-φ），
+        // 不取反就是“头朝上机朝下”，即上下反了。头硬连 +0x7c 改不动，只能动相机侧。
         *(float *)((char *)a0 + 0x38) = vy;
         *(float *)((char *)a0 + 0x3c) = vy;
-        *(float *)((char *)a0 + 0x40) = vp;
-        *(float *)((char *)a0 + 0x44) = vp;
+        *(float *)((char *)a0 + 0x40) = -vp;
+        *(float *)((char *)a0 + 0x44) = -vp;
     }
     orig_setupcam(a0, a1);
 }
