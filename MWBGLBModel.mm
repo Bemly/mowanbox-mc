@@ -464,8 +464,10 @@ void MWBGLBSetAnim(NSString *name) {
 // ---- 自家贴图（ES1 固定管线：游戏纹理不动，只绑自己的画完恢复；Nearest 像素风）
 static BOOL GLBInitGL(void) {
     if (sTex) return YES;
-    // 贴图上传（PNG 解码 + Nearest，不过滤，viewer 同款像素风）
+    // 贴图上传（PNG 解码 + Nearest，不过滤，viewer 同款像素风；绑定要恢复，免得污染游戏后画）
     if (sTexPNG) {
+        GLint oldBind = 0;
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldBind);
         CGImageSourceRef src = CGImageSourceCreateWithData((CFDataRef)sTexPNG, NULL);
         CGImageRef img = src ? CGImageSourceCreateImageAtIndex(src, 0, NULL) : NULL;
         if (img) {
@@ -489,6 +491,7 @@ static BOOL GLBInitGL(void) {
             free(px); CGImageRelease(img);
         }
         if (src) CFRelease(src);
+        glBindTexture(GL_TEXTURE_2D, oldBind); // 恢复，免得后画全吃错贴图
     }
     return YES;
 }
@@ -614,12 +617,29 @@ void MWBGLBDraw(void) {
     static int sTopLogged = 0;
     if (!Top) { if (!sTopLogged) { sTopLogged = 1; MWBLogFile(@"[GLB] 栈顶读不到"); } return; }
     float ET[16]; memcpy(ET, Top, sizeof(ET));
-    // 游戏 program 读 P（换 program 才重扫，每帧刷新值；找不到记一次并跳过）
+    { // V·E 自检：平移分量长度应≈第三人称相机距离（几格）；差太远说明栈顶不是 V·E
+        float tl = sqrtf(ET[12]*ET[12] + ET[13]*ET[13] + ET[14]*ET[14]);
+        static int sTopChk = 0;
+        if (sTopChk < 3) { sTopChk++; MWBLogFile(@"[GLB] 栈顶平移=%.1f (%.1f,%.1f,%.1f)", tl, ET[12], ET[13], ET[14]); }
+    }
+    // 游戏 program 读 P（换 program 才重扫，每帧刷新值；找不到就按 fov 猜一个先画出来再调）
     GLint gprog = 0; glGetIntegerv(GL_CURRENT_PROGRAM, &gprog);
     if (!sProjScanned || (GLuint)gprog != sProgFor) GLBScanProgram((GLuint)gprog);
-    static int sPLogged = 0;
-    if (!sHasP || sProjLoc < 0) { if (!sPLogged) { sPLogged = 1; MWBLogFile(@"[GLB] P 没定位到"); } return; }
-    glGetUniformfv((GLuint)gprog, sProjLoc, sPMat);
+    static int sPLogged = 0; static int sPLogged2 = 0;
+    if (!sHasP || sProjLoc < 0) {
+        if (!sPLogged) { sPLogged = 1; MWBLogFile(@"[GLB] P 没定位到，走猜测 fov=70"); }
+        GLint vp[4] = {0, 0, 0, 0};
+        glGetIntegerv(GL_VIEWPORT, vp);
+        float aspect = (vp[2] > 0 && vp[3] > 0) ? (float)vp[2] / (float)vp[3] : 4.0f/3.0f;
+        float t = tanf(70.0f * (float)M_PI / 360.0f);
+        float nn = 0.1f, ff = 2000.0f;
+        memset(sPMat, 0, sizeof(sPMat));
+        sPMat[0] = 1.0f / (aspect * t); sPMat[5] = 1.0f / t;
+        sPMat[10] = -(ff + nn) / (ff - nn); sPMat[11] = -1.0f; sPMat[14] = -2.0f*ff*nn/(ff-nn);
+        if (!sPLogged2) { sPLogged2 = 1; MWBLogFile(@"[GLB] 猜测 P aspect=%.2f", aspect); }
+    } else {
+        glGetUniformfv((GLuint)gprog, sProjLoc, sPMat);
+    }
     float PE[16]; GLBMatMul(sPMat, ET, PE); // PE = P · V·E（每 mesh 再乘节点世界）
 
     // ES3 现场保存（只动用到的状态）
