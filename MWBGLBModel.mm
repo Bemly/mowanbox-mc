@@ -639,6 +639,13 @@ void MWBGLBDraw(void) {
     if (sHasSnapWorld) { GLBMatMul(sSnapWVP, sSnapWorld, WVPuse); memcpy(WVPalt, sSnapWVP, sizeof(WVPalt)); }
     else { memcpy(WVPuse, sSnapWVP, sizeof(WVPuse)); memcpy(WVPalt, sSnapWVP, sizeof(WVPalt)); }
     float WVP[16]; memcpy(WVP, WVPuse, sizeof(WVP));
+    // 对照：draw 时（post-orig）当前 program 的 WVP 也读一份，看和 pre-orig 是否同一矩阵
+    GLint postProg = 0; glGetIntegerv(GL_CURRENT_PROGRAM, &postProg);
+    float postWVP[16]; BOOL hasPost = NO;
+    if (postProg != 0) {
+        GLint postLoc = glGetUniformLocation((GLuint)postProg, "WORLDVIEWPROJ");
+        if (postLoc >= 0) { glGetUniformfv((GLuint)postProg, postLoc, postWVP); hasPost = YES; }
+    }
     // 实体落位：节点世界是模型本地（web SIM 相机直接看原点），游戏里必须先平移到玩家脚下。
     // T 只含位移（玩家朝向不管，鱼恒朝世界方向；与 web 姿势数学一致，落位是 iPad 侧实体概念）。
     // 玩家坐标 LocalPlayer+0x28（与矩阵探针/小地图同源）。
@@ -721,10 +728,23 @@ void MWBGLBDraw(void) {
             float ay = Malt[1]*x + Malt[5]*y + Malt[9]*z + Malt[13];
             float az = Malt[2]*x + Malt[6]*y + Malt[10]*z + Malt[14];
             float aw = Malt[3]*x + Malt[7]*y + Malt[11]*z + Malt[15];
-            MWBLogFile(@"[GLB] 首顶点 prog=%u world=%d 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f) alt=(%.2f,%.2f,%.2f)",
-                       sSnapProg, sHasSnapWorld ? 1 : 0, x, y, z, cx, cy, cz, cw,
+            // post-orig 对照：同顶点用 draw 时刻 program 矩阵再算一遍；玩家坐标同行打出，对 T 落位
+            float qx = x, qy = y, qz = z, qw = 1;
+            if (hasPost) {
+                float Mp[16]; GLBMatMul(postWVP, &sWorld[ni*16], Mp);
+                qx = Mp[0]*x + Mp[4]*y + Mp[8]*z + Mp[12];
+                qy = Mp[1]*x + Mp[5]*y + Mp[9]*z + Mp[13];
+                qz = Mp[2]*x + Mp[6]*y + Mp[10]*z + Mp[14];
+                qw = Mp[3]*x + Mp[7]*y + Mp[11]*z + Mp[15];
+            }
+            float ppx = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28) : 9999;
+            float ppy = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 4) : 9999;
+            float ppz = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 8) : 9999;
+            MWBLogFile(@"[GLB] 首顶点 prog=%u world=%d post=%d 玩家=(%.1f,%.1f,%.1f) 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f) alt=(%.2f,%.2f,%.2f) postndc=(%.2f,%.2f,%.2f)",
+                       sSnapProg, sHasSnapWorld ? 1 : 0, hasPost ? (int)postProg : -1, ppx, ppy, ppz, x, y, z, cx, cy, cz, cw,
                        cw != 0 ? cx/cw : 999, cw != 0 ? cy/cw : 999, cw != 0 ? cz/cw : 999,
-                       aw != 0 ? ax/aw : 999, aw != 0 ? ay/aw : 999, aw != 0 ? az/aw : 999);
+                       aw != 0 ? ax/aw : 999, aw != 0 ? ay/aw : 999, aw != 0 ? az/aw : 999,
+                       qw != 0 ? qx/qw : 999, qw != 0 ? qy/qw : 999, qw != 0 ? qz/qw : 999);
         }
     }
 
