@@ -667,6 +667,17 @@ void MWBGLBDraw(void) {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.vbo[2]);
         glDrawElements(GL_TRIANGLES, m.nidx, GL_UNSIGNED_SHORT, 0);
         drawn++; tris += m.nidx / 3;
+        if (drawn == 1 && m.nvert > 0) {
+            // 首顶点裁剪坐标（免截图定位：NDC 在 [-1,1] 内才可见；w<=0 在镜头后；NaN 即矩阵坏）
+            float x = m.pos[0], y = m.pos[1], z = m.pos[2];
+            float cx = M[0]*x + M[4]*y + M[8]*z + M[12];
+            float cy = M[1]*x + M[5]*y + M[9]*z + M[13];
+            float cz = M[2]*x + M[6]*y + M[10]*z + M[14];
+            float cw = M[3]*x + M[7]*y + M[11]*z + M[15];
+            MWBLogFile(@"[GLB] 首顶点 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f)",
+                       x, y, z, cx, cy, cz, cw,
+                       cw != 0 ? cx/cw : 999, cw != 0 ? cy/cw : 999, cw != 0 ? cz/cw : 999);
+        }
     }
 
     // 现场恢复
