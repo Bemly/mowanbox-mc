@@ -51,6 +51,7 @@ static NSData *sTexPNG = nil;
 static NSString *sCurAnim = nil;
 static BOOL sParsed = NO;
 static float sTMain = 0, sTVis = 0; // 主动作时间 / 常驻层时间（viewer 双时钟同款）
+static GLuint sProg = 0, sTex = 0; // 自家 shader 与贴图（GL 线程建，reload 时置 0 下次重建）
 
 // ---- 小数学（列主序，与 GL 一致） ----
 static void GLBQuatToMat(const float *q, float *m) {
@@ -362,9 +363,8 @@ void MWBGLBSetAnim(NSString *name) {
     MWBLogFile(@"[GLB] 切动作 %@", sCurAnim);
 }
 
-// ---- 自家 shader（纹理 + 0.5 丢弃，不碰游戏 shader） ----
-static GLuint sProg = 0; static GLint sUMVP = -1, sUTex = -1; // attrib 固定 0/1（link 时绑定）
-static GLuint sTex = 0;
+// ---- 自家 shader（纹理 + 0.5 丢弃，不碰游戏 shader；attrib 固定 0/1，link 时绑定） ----
+static GLint sUMVP = -1, sUTex = -1;
 static GLuint GLBCompile(GLenum type, const char *src) {
     GLuint sh = glCreateShader(type);
     glShaderSource(sh, 1, &src, NULL); glCompileShader(sh);
