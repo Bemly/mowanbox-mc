@@ -648,7 +648,7 @@ void MWBGLBDraw(void) {
         // 列主序 lookAt（three.js 同款：z=normalize(eye-center)，x=normalize(up×z)，y=z×x）
         float zx = ex - cx, zy = ey - cy, zz = ez - cz;
         float zl = sqrtf(zx*zx + zy*zy + zz*zz); if (zl < 1e-6f) zl = 1; zx/=zl; zy/=zl; zz/=zl;
-        float xx = zy * 0.0f - zz * 1.0f, xy = zz * 0.0f - zx * 0.0f, xz = zx * 1.0f - zy * 0.0f; // up=(0,1,0)×z
+        float xx = zz, xy = 0.0f, xz = -zx; // up=(0,1,0)×z = (zz,0,-zx)，顺序写反会整图滚转180°
         float xl = sqrtf(xx*xx + xy*xy + xz*xz); if (xl < 1e-6f) xl = 1; xx/=xl; xy/=xl; xz/=xl;
         float yx = zy*xz - zz*xy, yy = zz*xx - zx*xz, yz = zx*xy - zy*xx;
         float V[16] = {xx,yx,zx,0, xy,yy,zy,0, xz,yz,zz,0,
@@ -679,12 +679,19 @@ void MWBGLBDraw(void) {
     // 实体落位：节点世界是模型本地（web SIM 相机直接看原点），游戏里必须先平移到玩家脚下。
     // T 只含位移（玩家朝向不管，鱼恒朝世界方向；与 web 姿势数学一致，落位是 iPad 侧实体概念）。
     // 玩家坐标 LocalPlayer+0x28（与矩阵探针/小地图同源）。
-    float WT[16]; // WT = WVP · T(玩家)，每帧一次，逐 mesh 只剩一次 4x4 乘
+    float WT[16]; // WT = WVP · T(玩家位姿)，每帧一次，逐 mesh 只剩一次 4x4 乘
+    static float sYawDbg = 0, sThDbg = 0; // 首顶点行同行打出，对朝向（符号反了截图即见脸朝后）
     if (gLocalPlayer) {
         float px = *(float *)((char *)gLocalPlayer + 0x28);
         float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
         float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
-        float T[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, px,py,pz,1};
+        // T = 平移(玩家脚下)·绕Y(跟玩家朝向)：模型正面是 -z，玩家 yaw=0 朝南(+z，同 Java)，
+        // 故 θ=π-yaw（把 -z 转到 facing；若真机脸朝后，把 π-yaw 改成 π+yaw，见日志 yaw 值）。
+        float yawDeg = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);
+        float th = (180.0f - yawDeg) * (float)M_PI / 180.0f;
+        sYawDbg = yawDeg; sThDbg = th;
+        float ct = cosf(th), st = sinf(th);
+        float T[16] = {ct,0,-st,0, 0,1,0,0, st,0,ct,0, px,py,pz,1};
         GLBMatMul(WVP, T, WT);
     } else {
         memcpy(WT, WVP, sizeof(WT));
@@ -770,8 +777,8 @@ void MWBGLBDraw(void) {
             float ppx = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28) : 9999;
             float ppy = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 4) : 9999;
             float ppz = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 8) : 9999;
-            MWBLogFile(@"[GLB] 首顶点 prog=%u world=%d post=%d 玩家=(%.1f,%.1f,%.1f) 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f) alt=(%.2f,%.2f,%.2f) postndc=(%.2f,%.2f,%.2f)",
-                       sSnapProg, sHasSnapWorld ? 1 : 0, hasPost ? (int)postProg : -1, ppx, ppy, ppz, x, y, z, cx, cy, cz, cw,
+            MWBLogFile(@"[GLB] 首顶点 prog=%u world=%d post=%d 玩家=(%.1f,%.1f,%.1f) yaw=%.1f th=%.2f 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f) alt=(%.2f,%.2f,%.2f) postndc=(%.2f,%.2f,%.2f)",
+                       sSnapProg, sHasSnapWorld ? 1 : 0, hasPost ? (int)postProg : -1, ppx, ppy, ppz, sYawDbg, sThDbg, x, y, z, cx, cy, cz, cw,
                        cw != 0 ? cx/cw : 999, cw != 0 ? cy/cw : 999, cw != 0 ? cz/cw : 999,
                        aw != 0 ? ax/aw : 999, aw != 0 ? ay/aw : 999, aw != 0 ? az/aw : 999,
                        qw != 0 ? qx/qw : 999, qw != 0 ? qy/qw : 999, qw != 0 ? qz/qw : 999);
