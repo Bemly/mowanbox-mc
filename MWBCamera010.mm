@@ -18,6 +18,7 @@
 #define CAM_MC_OPT_OFF 0x1C8       // MC+0x1C8 = Options*（gamma 夜视同路已实锤）
 
 static void *MWBCamOpt(void) { return (void *)(MWBMainSlide() + CAM_OPT_VA); }
+static void MWBCamPersist(void *opt); // 前置声明（定义在后）
 static void *MWBCamOptions(void *mc) {
     if (!mc) mc = MWB010Minecraft();
     if (!mc) return NULL;
