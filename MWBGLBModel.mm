@@ -706,6 +706,26 @@ void MWBGLBDraw(void) {
         float L[16]; GLBLocalMat(t, q, sc, L);
         memcpy(&sWorld[ni*16], L, sizeof(L));
     }
+    // 头跟视角、身跟身体（香草架构：拖视角只转头，身体不动；T 只带身体 yaw，见下落位段）。
+    // 给 Head 骨 local premultiply 一段 Δyaw=body-view（与 T 的 θ=π-ψ 同约定），头在颈部原地转向；
+    // 子件（脸/帽/耳）在 Head 之下，dfs 组装时自动继承。跟脸档 body==view 即 Δ=0 无操作。
+    if (gLocalPlayer) {
+        auto hIt = sName2Idx.find("Head");
+        if (hIt != sName2Idx.end()) {
+            float vb = *(float *)((char *)gLocalPlayer + 0x3c);
+            float vv = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);
+            float dd = (vb - vv) * (float)M_PI / 180.0f;
+            if (fabsf(dd) > 1e-4f) {
+                float cd = cosf(dd), sd = sinf(dd);
+                float Rd[16] = {cd,0,-sd,0, 0,1,0,0, sd,0,cd,0, 0,0,0,1};
+                float Lh[16]; GLBMatMul(Rd, &sWorld[hIt->second*16], Lh);
+                memcpy(&sWorld[hIt->second*16], Lh, sizeof(Lh));
+            }
+        } else {
+            static BOOL sNoHead = NO;
+            if (!sNoHead) { sNoHead = YES; MWBLogFile(@"[GLB] Head 骨没找到，头不跟视角"); }
+        }
+    }
     auto rIt = sName2Idx.find("Root");
     int rootIdx = (rIt != sName2Idx.end()) ? rIt->second : sRootSet[0];
     std::vector<int> stack; stack.push_back(rootIdx);
