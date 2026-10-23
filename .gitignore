@@ -8,6 +8,8 @@ packages/
 .video_agent/
 
 # 从设备拉取的 MC 原版贴图 (版权素材, 禁止提交)
+# 第三方模型烘焙产物 (作者注明不可修改, 本地构建用, 禁止提交)
+local/
 terrain-atlas.tga
 terrain-atlas.png
 terrain.meta
