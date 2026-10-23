@@ -27,6 +27,7 @@ typedef struct { int x, y, z; } MWBBlockPos;
 extern BOOL gInvincible, gFly, gFastBreak, gSpeed, gSuperJump;
 extern BOOL gNoclip, gNightVision, gKillAura, gMinimap, gSlimeChunk, gChinese;
 extern BOOL gSkin4D; // 4D皮肤总开关 (定义在 Tweak.xm, 后端在 MWBSkin4D.mm)
+extern BOOL gGLBModel; // GLB 直读模型总开关 (定义在 Tweak.xm, 后端在 MWBGLBModel.mm)
 extern BOOL gFlyUp, gFlyDown, gPadJump;   // 触控板跳/升/降按住状态 (定义在 Tweak.xm)
 extern int gGV, gTimeMode, gWeatherMode;
 extern int gTimeCustom010;   // 0.10 绝对时刻跳转 (Tweak.xm 定义, MWBHooks010 消费)

@@ -5,6 +5,7 @@
 #import <string.h>
 #import <mach-o/dyld.h>
 #import <mach-o/loader.h>
+#import "MWBGLBModel.h" // GLB 直画要投影/模型视图矩阵，这里只做最新一份拷贝
 
 #pragma mark - C++ 游戏函数 hook
 
@@ -273,6 +274,7 @@ int MWB010GOTSlots(void) { return gGOTSlots; }
 // 透视矩阵签名: 列主序 m[11]==-1, m[15]==0 (modelview 仿射矩阵 m[11]==0, 不会误伤)
 static void patched_glUniformMatrix4fv(int loc, int count, unsigned char tr, const float *m) {
     gGLCalls++;
+    if (count == 1 && !tr && m) MWBGLBCaptureMatrix(m); // GLB 直画：存最新投影/模型视图各一份
     // 4D皮肤优先: 窗口期内模型矩阵做列缩放 (与穿墙透视矩阵互斥, 各走各的分支)
     if (count == 1 && !tr && m) {
         float scaled[16];

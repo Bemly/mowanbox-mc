@@ -49,9 +49,11 @@ h += 'extern const int MWBFishBoneCount;\nextern const int MWBFishBoneParent[];\
 let c = '// ' + outPrefix + '.c — 烘焙几何数据（机器生成，勿手改）\n#include "' + outPrefix.split('/').pop() + '.h"\n';
 const kb = bones.filter((_, i) => keep.has(i));
 const newIdx = new Map(kb.map((b, i) => [b.name, i]));
-// 0.10 part 轴心/盒子坐标都是相对父骨的，Bedrock 给的是模型绝对值，此处烘焙成相对值。
-// rel_pivot = abs - parent_abs（根保持原样）；cube origin 减去所在骨的绝对轴心。
+// 权威语义（SPM BoneMatrixComputer：translate(pivot)*Rz*Ry*Rx sandwich）：
+// 轴心原样参与层级合成，禁止相减（相减会把脊柱压成一点，头甩到脚下）；
+// 盒子坐标与轴心同框，0.10 要 part-local，此处只减盒子：cube_local = origin - pivot。
 const absPiv = kb.map((b) => (b.pivot || [0,0,0]).slice());
+// 可见包围盒仅 33x23：轴心是模型绝对值，必须减成相对值，否则嵌套求和炸到 328 高。
 const relPiv = kb.map((b, ni) => {
   const p = newIdx.get(b.parent);
   if (p === undefined) return absPiv[ni];

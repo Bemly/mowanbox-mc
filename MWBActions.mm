@@ -5,6 +5,7 @@
 #import "MWBUI.h"
 #import "MWBMenu.h"
 #import "MWBFloat.h"
+#import "MWBGLBModel.h"
 #import <dlfcn.h>   // cmp010 探针 dladdr 符号反查用
 
 // 转视角直调 (定义在 MWBDebug.mm, flag turn-N 用)
@@ -110,6 +111,11 @@ void MWBPollCmdFile(void) {
             if (gSlimeChunk && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); }
         }
         else if ([act isEqualToString:@"skin4d"]) gSkin4D = arg ? YES : NO;
+        else if ([act isEqualToString:@"glb"]) {
+            gGLBModel = arg ? YES : NO;
+            if (gGLBModel) MWBGLBEnsureParsed(); // 只做 CPU 解析，GL 上传留到渲染线程首画
+        }
+        else if ([act isEqualToString:@"glbanim"] && parts.count > 1) MWBGLBSetAnim(parts[1]);
         else if ([act isEqualToString:@"debug"]) gMWBDebug = arg ? YES : NO;
         else if ([act isEqualToString:@"time"]) gTimeMode = arg;
         else if ([act isEqualToString:@"tod"]) { if (arg >= 0) gTimeCustom010 = arg; }

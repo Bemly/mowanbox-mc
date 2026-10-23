@@ -11,6 +11,7 @@
 #import "MWBSkin4D.h"
 #import "MWBCommon.h"
 #import "MWBFishData.h"
+#import "MWBGLBModel.h" // GLB 直画（大肥鱼），复用同一 render hook 在 orig 之后画
 #import <string.h>
 #import <math.h>
 #import <dlfcn.h> // render 命中调用者反查用
@@ -26,6 +27,11 @@ typedef void (*MCubeCtorFn)(void *thiz, void *part, int texU, int texV,
 typedef void (*MAddChildFn)(void *thiz, void *child);
 typedef void (*MPartRenderFn)(const float *m16, void *part);
 typedef void (*MSetModelFn)(void *thiz, void *model);
+// 直写 part+0xB8（compile 读它当 Model* 调 getAABB），不用 setModel：
+// setModel 会把自家 part 塞进原版 model 的链表污染原版遍历，直写等效且零污染。
+__attribute__((unused)) static void MWBSkinLinkModel(void *part, void *model) {
+    if (part) *(void **)((char *)part + 0xB8) = model;
+}
 static MPartCtorFn sPartCtor = NULL;
 static MCubeCtorFn sCubeCtor = NULL;
 static MAddChildFn sAddChild = NULL;
@@ -186,7 +192,7 @@ static void hooked_mini_render(void *self, void *entity,
         if (sCubeRoot && sPartsKept && sSetModel)
             for (int i = 0; i < sPartsCount; i++)
                 if (sPartsKept[i]) sSetModel(sPartsKept[i], self);
-        MWBSkinSetVanilla(self, gSkin4D && sCubeRoot);
+        MWBSkinSetVanilla(self, (gSkin4D && sCubeRoot) || gGLBModel);
     }
     orig_mini_render(self, entity, s1, s2, s3, s4, s5, s6);
     // 自家树画在 orig 之后、同一 hook 内：栈顶还压着实体变换，用游戏真矩阵 v5 落在玩家身上。
@@ -210,6 +216,10 @@ static void hooked_mini_render(void *self, void *entity,
         // 存活计数：前 10 帧逐帧记，之后每 600 帧记一行（定位第几帧死，平时不刷屏）
         if (sFrames <= 10 || (sFrames % 600) == 0)
             MWBLogFile(@"[4D皮肤] 存活帧=%d", sFrames);
+    }
+    // GLB 直画（大肥鱼）：同一 hook 内 orig 之后画，自家 shader，不碰游戏状态机（内部保存/恢复）
+    if (entity && entity == gLocalPlayer && gGLBModel) {
+        MWBGLBDraw();
     }
 }
 
