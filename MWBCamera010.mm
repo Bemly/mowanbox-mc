@@ -157,25 +157,8 @@ void MWBCamFaceTick(void) {
     *(float *)((char *)gLocalPlayer + CAM_YAW_BODY_OFF) = vy;
 }
 
-// setupCamera hook：只给第 4 档续命（3384 字节大函数，跳板安全）。
-// 原型按调用约定只透传两指针（首参即读 +0x38 的渲染器结构，第二参原样回传，不碰类型）。
-// 第 4 档时把玩家实时视角灌进渲染器缓存（新/旧一起写，慢机上跟手不晕），再调原函数走正面 framing。
-typedef void (*SetupCamFn)(void *a0, void *a1);
-static SetupCamFn orig_setupcam = NULL;
-static void hooked_setupcam(void *a0, void *a1) {
-    void *o = MWBCamOptions(NULL);
-    if (o && *(uint8_t *)((char *)o + CAM_F_FRONT) == 2 && gLocalPlayer && a0) {
-        float vy = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);   // +0x78
-        float vp = *(float *)((char *)gLocalPlayer + ENTITY_PITCH_OFF); // +0x7c
-        // yaw 直给（左右已对）；pitch 取反：正脸机位与视角反向看回脸（反方向=-φ），
-        // 不取反就是“头朝上机朝下”，即上下反了。头硬连 +0x7c 改不动，只能动相机侧。
-        *(float *)((char *)a0 + 0x38) = vy;
-        *(float *)((char *)a0 + 0x3c) = vy;
-        *(float *)((char *)a0 + 0x40) = -vp;
-        *(float *)((char *)a0 + 0x44) = -vp;
-    }
-    orig_setupcam(a0, a1);
-}
+// （setupCamera hook 已整组删除：它写游戏渲染器缓存，动游戏相机；4D 不碰相机。
+//  第 4 档相机回到原版行为。你说鱼落地只跟背面测，不影响。）
 
 // 诊断：条目类型 + 双字段 + 相机实体身份（caminfo flag 打）
 // v20 = *(MC+0x1b0) 是 setupCamera 读 yaw 的实体，对比它是不是 gLocalPlayer
@@ -225,7 +208,5 @@ void MWBInstallCamera010(void) {
              hooked_cam_toggle, orig_cam_toggle);
     MWB_HOOK("__ZN7Options6updateEv",
              hooked_cam_update, orig_cam_update);
-    MWB_HOOK("__ZN12GameRenderer11setupCameraEfi",
-             hooked_setupcam, orig_setupcam);
     MWBLogFile(@"[相机] 三视角滑条挂载就绪（开关 cam-N/caminfo 调试保留）");
 }
