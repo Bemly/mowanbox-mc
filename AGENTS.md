@@ -87,3 +87,6 @@ sshpass -p alpine ssh root@192.168.1.81 "launchctl list | grep -i mcpe" # pid �
 sshpass -p alpine ssh root@192.168.1.81 "uiopen moe.bemly.mcpe.0.10" # 拉起，新 pid 出现即活
 sshpass -p alpine ssh root@192.168.1.81 "activator send libactivator.system.take-screenshot"
 ```
+
+- 发布版（不写日志）：`make package FINALPACKAGE=1`；调试版不加参数。
+- CI（.github/workflows/build.yml）：推 main 编 debug+release 存制品；推 `v*` 标签或 `gh workflow run build.yml -f release=true` 发 GitHub Release（标签 v<control版本>-<提交数>）。
