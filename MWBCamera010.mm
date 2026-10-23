@@ -138,15 +138,15 @@ static unsigned long hooked_cam_update(void *thiz) {
 }
 
 // 跟脸节拍（normalTick 里每帧调）：第 4 档（2d6==2）时把视角 yaw 灌进身体朝向。
-// 机理（setupCamera 反汇编实锤）：
-// - 相机轨道/朝向一律读视角 +0x78（yaw）/+0x7c（pitch），+0x80/+0x84 只是上一 tick 旧值（插值用，不是镜像）；
-// - 身体/脸朝向是 +0x3c（只管模型，不进相机），站立拖视角时它恒定不动；
-// - 反面档（2d6=0）是自由轨道：拖视角转相机，身体不动；正面档要“固定到一起转”，
-//   就让身体跟视角走：每 tick 把 +0x78 拷给 +0x3c，拖到哪脸跟到哪，脸永远朝相机（自拍跟随）。
-// - 反向（视角=身体）是错的：它把 +0x78 钉死，转视角会被顶回，相机不动只剩头动；
-//   且禁碰 +0x80/+0x84（那是插值旧值，写成新值会丢平滑直接瞬移）。
+// 机理（setupCamera 反汇编实锤，见 0x100205bb8）：
+// - 反面档（2d6=0）走活路：每帧直读玩家 +0x78/+0x7c 做 8 向碰撞环绕，拖视角即转相机；
+// - 正面档（2d6!=0）走缓存：读渲染器 +0x38/+0x3c（yaw 新/旧）+0x40/+0x44（pitch 新/旧），
+//   这条投喂链原版是死的（无 UI 可达，_spawn 朝向后就不再更新），故正脸相机钉死在出生朝向，
+//   写玩家 +0x78 只转头（模型读它），不转机——c0/c90 同背景截图实锤；
+// - 跟脸=正面活路+脸锁：本函数管脸（+0x78→+0x3c，拖到哪脸跟到哪），
+//   下面的 setupCamera hook 管机（视角→渲染器缓存，相机跟视角走）。
 // 只在第 4 档动手，其余档零开销。
-#define CAM_YAW_VIEW_OFF 0x78   // 视角 yaw（ENTITY_YAW_OFF，相机跟它跑）
+#define CAM_YAW_VIEW_OFF 0x78   // 视角 yaw（ENTITY_YAW_OFF，模型头跟它跑）
 #define CAM_YAW_BODY_OFF 0x3c   // 身体/脸朝向（只管模型，转视角不动它，跟脸时由本函数灌）
 void MWBCamFaceTick(void) {
     if (!gLocalPlayer) return;
@@ -155,6 +155,24 @@ void MWBCamFaceTick(void) {
     if (*(uint8_t *)((char *)o + CAM_F_FRONT) != 2) return;
     float vy = *(float *)((char *)gLocalPlayer + CAM_YAW_VIEW_OFF);
     *(float *)((char *)gLocalPlayer + CAM_YAW_BODY_OFF) = vy;
+}
+
+// setupCamera hook：只给第 4 档续命（3384 字节大函数，跳板安全）。
+// 原型按调用约定只透传两指针（首参即读 +0x38 的渲染器结构，第二参原样回传，不碰类型）。
+// 第 4 档时把玩家实时视角灌进渲染器缓存（新/旧一起写，慢机上跟手不晕），再调原函数走正面 framing。
+typedef void (*SetupCamFn)(void *a0, void *a1);
+static SetupCamFn orig_setupcam = NULL;
+static void hooked_setupcam(void *a0, void *a1) {
+    void *o = MWBCamOptions(NULL);
+    if (o && *(uint8_t *)((char *)o + CAM_F_FRONT) == 2 && gLocalPlayer && a0) {
+        float vy = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);   // +0x78
+        float vp = *(float *)((char *)gLocalPlayer + ENTITY_PITCH_OFF); // +0x7c
+        *(float *)((char *)a0 + 0x38) = vy;
+        *(float *)((char *)a0 + 0x3c) = vy;
+        *(float *)((char *)a0 + 0x40) = vp;
+        *(float *)((char *)a0 + 0x44) = vp;
+    }
+    orig_setupcam(a0, a1);
 }
 
 // 诊断：条目类型 + 双字段 + 相机实体身份（caminfo flag 打）
@@ -205,5 +223,7 @@ void MWBInstallCamera010(void) {
              hooked_cam_toggle, orig_cam_toggle);
     MWB_HOOK("__ZN7Options6updateEv",
              hooked_cam_update, orig_cam_update);
+    MWB_HOOK("__ZN12GameRenderer11setupCameraEfi",
+             hooked_setupcam, orig_setupcam);
     MWBLogFile(@"[相机] 三视角滑条挂载就绪（开关 cam-N/caminfo 调试保留）");
 }
