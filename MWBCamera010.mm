@@ -137,44 +137,33 @@ static unsigned long hooked_cam_update(void *thiz) {
     return r;
 }
 
-// 跟脸节拍（normalTick 里每帧调）：第 4 档（2d6==2）时把视角 yaw 灌进身体朝向。
-// 机理（setupCamera 反汇编实锤，见 0x100205bb8）：
-// - 反面档（2d6=0）走活路：每帧直读玩家 +0x78/+0x7c 做 8 向碰撞环绕，拖视角即转相机；
-// - 正面档（2d6!=0）走缓存：读渲染器 +0x38/+0x3c（yaw 新/旧）+0x40/+0x44（pitch 新/旧），
-//   这条投喂链原版是死的（无 UI 可达，_spawn 朝向后就不再更新），故正脸相机钉死在出生朝向，
-//   写玩家 +0x78 只转头（模型读它），不转机——c0/c90 同背景截图实锤；
-// - 跟脸=正面活路+脸锁：本函数管脸（+0x78→+0x3c，拖到哪脸跟到哪），
-//   下面的 setupCamera hook 管机（视角→渲染器缓存，相机跟视角走）。
-// 只在第 4 档动手，其余档零开销。
-#define CAM_YAW_VIEW_OFF 0x78   // 视角 yaw（ENTITY_YAW_OFF，模型头跟它跑）
-#define CAM_YAW_BODY_OFF 0x3c   // 身体/脸朝向（只管模型，转视角不动它，跟脸时由本函数灌）
-void MWBCamFaceTick(void) {
-    if (!gLocalPlayer) return;
-    void *o = MWBCamOptions(NULL);
-    if (!o) return;
-    if (*(uint8_t *)((char *)o + CAM_F_FRONT) != 2) return;
-    float vy = *(float *)((char *)gLocalPlayer + CAM_YAW_VIEW_OFF);
-    *(float *)((char *)gLocalPlayer + CAM_YAW_BODY_OFF) = vy;
-}
-
-// setupCamera hook：只给第 4 档续命（3384 字节大函数，跳板安全）。
-// 原型按调用约定只透传两指针（首参即读 +0x38 的渲染器结构，第二参原样回传，不碰类型）。
-// 第 4 档时把玩家实时视角灌进渲染器缓存（新/旧一起写，慢机上跟手不晕），再调原函数走正面 framing。
-typedef void (*SetupCamFn)(void *a0, void *a1);
+// 第 4 档（跟脸正面，2d6==2）：镜像背面活路。
+// 机理（setupCamera @0x100205bb8 反汇编实锤）：
+// - 背面档（2d6=0）走活路：每帧按插值读玩家 +0x78/+0x7c（旧值 +0x80/+0x84），8 向 TileSource::clip 碰撞收距；
+// - 正面档（2d6!=0）走缓存 +0x38..+0x44 且无碰撞——旧做法往缓存灌 tick 值：不插值→抖，无 clip→穿墙；
+//   且旧 hook 按 (void*,void*) 声明，真签名是 (GameRenderer*, float 插值, int)，hook 内浮点载入踩坏 s0，更抖。
+// 现做法：调原函数期间临时 2d6=0，并把视角伪装成反方向（yaw+180、pitch 取反，新旧值一起改），
+// 原版背面活路即把机位摆到脸前、带插值与碰撞；返回后原样恢复（模型/输入/身体读的仍是真视角）。
+#define CAM_YAW_PREV_OFF 0x80    // 视角 yaw 旧值（Mob::baseTick 每 tick 拷贝，插值用）
+#define CAM_PITCH_PREV_OFF 0x84  // 俯仰旧值
+typedef void (*SetupCamFn)(void *self, float a, int b);
 static SetupCamFn orig_setupcam = NULL;
-static void hooked_setupcam(void *a0, void *a1) {
+static void hooked_setupcam(void *self, float a, int b) {
     void *o = MWBCamOptions(NULL);
-    if (o && *(uint8_t *)((char *)o + CAM_F_FRONT) == 2 && gLocalPlayer && a0) {
-        float vy = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);   // +0x78
-        float vp = *(float *)((char *)gLocalPlayer + ENTITY_PITCH_OFF); // +0x7c
-        // yaw 直给（左右已对）；pitch 取反：正脸机位与视角反向看回脸（反方向=-φ），
-        // 不取反就是“头朝上机朝下”，即上下反了。头硬连 +0x7c 改不动，只能动相机侧。
-        *(float *)((char *)a0 + 0x38) = vy;
-        *(float *)((char *)a0 + 0x3c) = vy;
-        *(float *)((char *)a0 + 0x40) = -vp;
-        *(float *)((char *)a0 + 0x44) = -vp;
+    char *lp = (char *)gLocalPlayer;
+    if (!o || !lp || *(uint8_t *)((char *)o + CAM_F_FRONT) != 2 || !*(uint8_t *)((char *)o + CAM_F_THIRD)) {
+        orig_setupcam(self, a, b);
+        return;
     }
-    orig_setupcam(a0, a1);
+    float y0 = *(float *)(lp + ENTITY_YAW_OFF), y1 = *(float *)(lp + CAM_YAW_PREV_OFF);
+    float p0 = *(float *)(lp + ENTITY_PITCH_OFF), p1 = *(float *)(lp + CAM_PITCH_PREV_OFF);
+    *(float *)(lp + ENTITY_YAW_OFF) = y0 + 180.0f; *(float *)(lp + CAM_YAW_PREV_OFF) = y1 + 180.0f;
+    *(float *)(lp + ENTITY_PITCH_OFF) = -p0;       *(float *)(lp + CAM_PITCH_PREV_OFF) = -p1;
+    *(uint8_t *)((char *)o + CAM_F_FRONT) = 0;
+    orig_setupcam(self, a, b);
+    *(uint8_t *)((char *)o + CAM_F_FRONT) = 2;
+    *(float *)(lp + ENTITY_YAW_OFF) = y0; *(float *)(lp + CAM_YAW_PREV_OFF) = y1;
+    *(float *)(lp + ENTITY_PITCH_OFF) = p0; *(float *)(lp + CAM_PITCH_PREV_OFF) = p1;
 }
 
 // 诊断：条目类型 + 双字段 + 相机实体身份（caminfo flag 打）
