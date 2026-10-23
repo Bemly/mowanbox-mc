@@ -118,6 +118,26 @@ void MWBCamDiag(void) {
                o ? *(uint8_t *)((char *)o + CAM_F_FRONT) : -1);
 }
 
+// createToggle hook：Game 组里第三人称原来写死走开关，在此改道步进滑条（步伐由 C1 hook 填）。
+// 其余选项照旧；每个路过的开关记 id（只在设置构建时跑，不刷屏）。
+typedef void (*CreateToggleFn)(void *grp, void *opt, void *mc);
+static CreateToggleFn orig_cam_toggle = NULL;
+typedef void (*CreateStepFn)(void *grp, void *opt, void *mc);
+static CreateStepFn real_cam_step = NULL;
+static void hooked_cam_toggle(void *grp, void *opt, void *mc) {
+    if (opt) {
+        int oid = *(int *)((char *)opt + 0x20); // 条目+0x20 = id
+        MWBLogFile(@"[相机] createToggle 路过 id=%d", oid);
+        if (opt == MWBCamOpt()) {
+            MWBLogFile(@"[相机] thirdperson 改道步进滑条");
+            if (!real_cam_step) real_cam_step = (CreateStepFn)MSFindSymbol(NULL,
+                "__ZN12OptionsGroup16createStepSliderEPKN7Options6OptionEP15MinecraftClient");
+            if (real_cam_step) { real_cam_step(grp, opt, mc); return; }
+        }
+    }
+    orig_cam_toggle(grp, opt, mc);
+}
+
 // 0.10 才安装（Tweak.xm %ctor 调用，版本不对直接返回）
 void MWBInstallCamera010(void) {
     if (gGV != (int)MWBGameV0_10) return;
@@ -126,5 +146,7 @@ void MWBInstallCamera010(void) {
              hooked_cam_ctor, orig_cam_ctor);
     MWB_HOOK("__ZN6Slider9setOptionEP15MinecraftClient",
              hooked_cam_set, orig_cam_set);
+    MWB_HOOK("__ZN12OptionsGroup12createToggleEPKN7Options6OptionEP15MinecraftClient",
+             hooked_cam_toggle, orig_cam_toggle);
     MWBLogFile(@"[相机] 三视角滑条挂载就绪（开关 cam-N/caminfo 调试保留）");
 }
