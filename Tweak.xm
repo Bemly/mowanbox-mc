@@ -56,6 +56,7 @@ uint8_t gMiniMap010D[48 * 48];    // 0.10 水深
 
     // 0.10 永远安装 (符号 hook); 其余版本按识别结果安装
     MWBInstallHooks010();
+    MWBInstallCamera010(); // 相机三视角 (内部判版本, 仅 0.10 挂载)
     MWBSkin4DInstall(); // 4D皮肤 (内部判版本, 仅 0.10 挂载)
     if (gv == MWBGameV1_13_3) MWBInstallHooks1133();
     if (gv == MWBGameV1_1_7)  MWBInstallHooks117();

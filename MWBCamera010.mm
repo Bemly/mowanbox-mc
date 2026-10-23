@@ -1,0 +1,130 @@
+// MWBCamera010.mm — 0.10 相机三视角：设置里第三人称开关改 3 段滑条（第一/第三背面/第三正面）
+// 逆向实锤（kuna 反 0.10 二进制，imagebase=0x100000000）：
+// - 选项表静态 0x10034dd00，条目 {int 类型@+0, string 名@+8, int id@+0x20} 步长 0x28；
+//   thirdperson 条目在 0x10034ebc8（类型 0=开关，id 12），难度在 0x10034eb50（类型 3=步进滑条，id 8）。
+// - 类型 0=开关createsToggle，1=连续滑条，3=步进滑条（音乐0/声音1/灵敏3是连续，距离4/难度8/界面11是步进）。
+// - 相机 GameRenderer::setupCamera：Options+0x2cd==0 第一人称，否则第三人称再看 +0x2d6（0=背面，1=正面，
+//   取反镜像经典写法）；开关 toggle 只翻 0x2cd（0↔1），0x2d6 恒 0，故原版根本没有正面视角。
+// 做法：直接写 __DATA 里条目类型 0→3（免 vm_protect，本来就可写）；hook Slider::C1 给 {0,1,2} 步伐+初值反推；
+// hook Slider::setOption 写 {0x2cd,0x2d6}；cam-N flag 直写（测试保留）。
+#import "MWBCommon.h"
+#import "EMI.h" // MWBMainSlide
+#import <substrate.h>
+
+#define CAM_OPT_VA 0x10034ebc8UL   // thirdperson 选项条目（MSFindSymbol 直解亦可，此处按滑块基址直算）
+#define CAM_OPT_TYPE_OFF 0          // 条目+0：类型（0=开关，3=步进滑条）
+#define CAM_F_THIRD 0x2cdUL         // Options+0x2cd：0=第一，1=第三
+#define CAM_F_FRONT 0x2d6UL         // Options+0x2d6：0=背面，1=正面
+#define CAM_MC_OPT_OFF 0x1C8       // MC+0x1C8 = Options*（gamma 夜视同路已实锤）
+
+static void *MWBCamOpt(void) { return (void *)(MWBMainSlide() + CAM_OPT_VA); }
+static void *MWBCamOptions(void *mc) {
+    if (!mc) mc = MWB010Minecraft();
+    if (!mc) return NULL;
+    return *(void **)((char *)mc + CAM_MC_OPT_OFF);
+}
+
+// 当前值反推：0=第一，1=第三背面，2=第三正面
+int MWBCamValue(void) {
+    void *opt = MWBCamOptions(NULL);
+    if (!opt) return 0;
+    uint8_t t = *(uint8_t *)((char *)opt + CAM_F_THIRD);
+    if (!t) return 0;
+    return (*(uint8_t *)((char *)opt + CAM_F_FRONT)) ? 2 : 1;
+}
+
+// 值写入：0→第一，1→第三背面，2→第三正面（越界钳制）
+void MWBSetCamValue01(int v) {
+    if (v < 0) v = 0;
+    if (v > 2) v = 2;
+    void *opt = MWBCamOptions(NULL);
+    if (!opt) { MWBLogFile(@"[相机] Options 为空，跳过"); return; }
+    if (v == 0) {
+        *(uint8_t *)((char *)opt + CAM_F_THIRD) = 0;
+    } else if (v == 1) {
+        *(uint8_t *)((char *)opt + CAM_F_THIRD) = 1;
+        *(uint8_t *)((char *)opt + CAM_F_FRONT) = 0;
+    } else {
+        *(uint8_t *)((char *)opt + CAM_F_THIRD) = 1;
+        *(uint8_t *)((char *)opt + CAM_F_FRONT) = 1;
+    }
+    MWBLogFile(@"[相机] 视角切 %d (2cd=%d 2d6=%d)", v,
+               *(uint8_t *)((char *)opt + CAM_F_THIRD),
+               *(uint8_t *)((char *)opt + CAM_F_FRONT));
+}
+
+// 条目类型 0→3：__DATA 本来就可写，直接写一次（幂等，已是 3 不动）
+static void MWBCamPatchFlag(void) {
+    uint8_t *p = (uint8_t *)MWBCamOpt();
+    if (*p == 3) { MWBLogFile(@"[相机] 条目已是滑条"); return; }
+    if (*p != 0) { MWBLogFile(@"[相机] 条目类型异常=%d，不动", *p); return; }
+    *p = 3;
+    MWBLogFile(@"[相机] 条目 0x10034ebc8 类型 0→3（开关改步进滑条）");
+}
+
+// Slider::C1 hook：thirdperson 进来把步伐换成自家 {0,1,2}，初值从 Options 反推
+typedef void *(*SliderCtorFn)(void *thiz, void *mc, void *opt, void *vec);
+static SliderCtorFn orig_cam_ctor = NULL;
+static void *hooked_cam_ctor(void *thiz, void *mc, void *opt, void *vec) {
+    if (opt && opt == MWBCamOpt()) {
+        static int sSteps[3] = {0, 1, 2};
+        struct { void *b, *e, *c; } v = {sSteps, sSteps + 3, sSteps + 3};
+        thiz = orig_cam_ctor(thiz, mc, opt, &v);
+        // 初值反推（照抄原构造尾巴的查表逻辑：值→下标→位置）
+        void *o = MWBCamOptions(mc);
+        int val = 0;
+        if (o) {
+            uint8_t t = *(uint8_t *)((char *)o + CAM_F_THIRD);
+            val = t ? ((*(uint8_t *)((char *)o + CAM_F_FRONT)) ? 2 : 1) : 0;
+        }
+        int idx = (val >= 0 && val <= 2) ? val : 0;
+        *(int *)((char *)thiz + 0x128) = idx;          // [0x4a] 当前值
+        *(int *)((char *)thiz + 0x12c) = idx;          // [0x4b] 下标
+        *(float *)((char *)thiz + 0x124) = idx / 2.0f; // [0x49] knob 位置
+        MWBLogFile(@"[相机] 滑条创建 初值=%d", idx);
+        return thiz;
+    }
+    return orig_cam_ctor(thiz, mc, opt, vec);
+}
+
+// Slider::setOption hook：thirdperson 写 {0x2cd,0x2d6}，其余走原逻辑
+typedef void (*SliderSetFn)(void *thiz, void *mc);
+static SliderSetFn orig_cam_set = NULL;
+static void hooked_cam_set(void *thiz, void *mc) {
+    void *opt = *(void **)((char *)thiz + 0x140); // [0x28] 选项
+    if (opt && opt == MWBCamOpt()) {
+        int v = *(int *)((char *)thiz + 0x128);   // [0x4a] 当前值
+        if (v < 0) v = 0;
+        if (v > 2) v = 2;
+        void *o = MWBCamOptions(mc);
+        if (!o) return;
+        if (v == 0) *(uint8_t *)((char *)o + CAM_F_THIRD) = 0;
+        else if (v == 1) { *(uint8_t *)((char *)o + CAM_F_THIRD) = 1; *(uint8_t *)((char *)o + CAM_F_FRONT) = 0; }
+        else { *(uint8_t *)((char *)o + CAM_F_THIRD) = 1; *(uint8_t *)((char *)o + CAM_F_FRONT) = 1; }
+        MWBLogFile(@"[相机] 滑条写 %d (2cd=%d 2d6=%d)", v,
+                   *(uint8_t *)((char *)o + CAM_F_THIRD),
+                   *(uint8_t *)((char *)o + CAM_F_FRONT));
+        return;
+    }
+    orig_cam_set(thiz, mc);
+}
+
+// 诊断：条目类型 + 双字段（caminfo flag 打）
+void MWBCamDiag(void) {
+    void *o = MWBCamOptions(NULL);
+    MWBLogFile(@"[相机] 诊断 条目类型=%d 值=%d 2cd=%d 2d6=%d",
+               *(uint8_t *)MWBCamOpt(), MWBCamValue(),
+               o ? *(uint8_t *)((char *)o + CAM_F_THIRD) : -1,
+               o ? *(uint8_t *)((char *)o + CAM_F_FRONT) : -1);
+}
+
+// 0.10 才安装（Tweak.xm %ctor 调用，版本不对直接返回）
+void MWBInstallCamera010(void) {
+    if (gGV != (int)MWBGameV0_10) return;
+    MWBCamPatchFlag();
+    MWB_HOOK("__ZN6SliderC1EP15MinecraftClientPKN7Options6OptionERKNSt3__16vectorIiNS6_9allocatorIiEEEE",
+             hooked_cam_ctor, orig_cam_ctor);
+    MWB_HOOK("__ZN6Slider9setOptionEP15MinecraftClient",
+             hooked_cam_set, orig_cam_set);
+    MWBLogFile(@"[相机] 三视角滑条挂载就绪（开关 cam-N/caminfo 调试保留）");
+}

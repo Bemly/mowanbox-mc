@@ -118,6 +118,8 @@ void MWBPollCmdFile(void) {
         }
         else if ([act isEqualToString:@"glinfo2"]) MWBGLBLogDiag(); // GLB 矩阵/版本诊断
         else if ([act isEqualToString:@"glbanim"] && parts.count > 1) MWBGLBSetAnim(parts[1]);
+        else if ([act isEqualToString:@"cam"]) MWBSetCamValue01(arg); // 0=第一 1=第三背面 2=第三正面
+        else if ([act isEqualToString:@"caminfo"]) MWBCamDiag();
         else if ([act isEqualToString:@"debug"]) gMWBDebug = arg ? YES : NO;
         else if ([act isEqualToString:@"time"]) gTimeMode = arg;
         else if ([act isEqualToString:@"tod"]) { if (arg >= 0) gTimeCustom010 = arg; }

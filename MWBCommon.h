@@ -62,6 +62,12 @@ void MWBInstallHooks143(void);
 void MWBInstallHooks1215(void);
 void MWBInstallHooks120(void);
 
+// ---- 0.10 相机三视角 (定义在 MWBCamera010.mm) ----
+void MWBInstallCamera010(void);
+int MWBCamValue(void);        // 0=第一 1=第三背面 2=第三正面
+void MWBSetCamValue01(int v); // 同上语义写入 (flag cam-N 共用)
+void MWBCamDiag(void);        // 条目类型+双字段诊断 (flag caminfo 打)
+
 // ---- 文件日志 (定义在 MWBActions.mm) ----
 void MWBLogFile(NSString *format, ...) NS_FORMAT_FUNCTION(1, 2);
 
