@@ -51,6 +51,7 @@ void MWBSetCamValue01(int v) {
     MWBLogFile(@"[相机] 视角切 %d (2cd=%d 2d6=%d)", v,
                *(uint8_t *)((char *)opt + CAM_F_THIRD),
                *(uint8_t *)((char *)opt + CAM_F_FRONT));
+    MWBCamPersist(opt);
 }
 
 // 条目类型 0→3：__DATA 本来就可写，直接写一次（幂等，已是 3 不动）
@@ -104,9 +105,30 @@ static void hooked_cam_set(void *thiz, void *mc) {
         MWBLogFile(@"[相机] 滑条写 %d (2cd=%d 2d6=%d)", v,
                    *(uint8_t *)((char *)o + CAM_F_THIRD),
                    *(uint8_t *)((char *)o + CAM_F_FRONT));
+        MWBCamPersist(o);
         return;
     }
     orig_cam_set(thiz, mc);
+}
+
+// 正面位持久化（NSUserDefaults，跟 options.txt 互不干扰）：读档由 update hook 接回
+static void MWBCamPersist(void *opt) {
+    int f = opt ? (*(uint8_t *)((char *)opt + CAM_F_FRONT) ? 1 : 0) : 0;
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    [d setInteger:f forKey:@"MWBCamFront"];
+    [d synchronize];
+    MWBLogFile(@"[相机] 正面位已存 %d", f);
+}
+
+// Options::update hook：读档后把正面位接回（原版只读 2cd，2d6 会丢）
+typedef unsigned long (*OptionsUpdateFn)(void *thiz);
+static OptionsUpdateFn orig_cam_update = NULL;
+static unsigned long hooked_cam_update(void *thiz) {
+    unsigned long r = orig_cam_update(thiz);
+    int f = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"MWBCamFront"];
+    if (thiz) *(uint8_t *)((char *)thiz + CAM_F_FRONT) = f ? 1 : 0;
+    MWBLogFile(@"[相机] 读档接回正面位=%d", f);
+    return r;
 }
 
 // 诊断：条目类型 + 双字段（caminfo flag 打）
@@ -148,5 +170,7 @@ void MWBInstallCamera010(void) {
              hooked_cam_set, orig_cam_set);
     MWB_HOOK("__ZN12OptionsGroup12createToggleEPKN7Options6OptionEP15MinecraftClient",
              hooked_cam_toggle, orig_cam_toggle);
+    MWB_HOOK("__ZN7Options6updateEv",
+             hooked_cam_update, orig_cam_update);
     MWBLogFile(@"[相机] 三视角滑条挂载就绪（开关 cam-N/caminfo 调试保留）");
 }
