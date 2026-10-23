@@ -639,6 +639,19 @@ void MWBGLBDraw(void) {
     if (sHasSnapWorld) { GLBMatMul(sSnapWVP, sSnapWorld, WVPuse); memcpy(WVPalt, sSnapWVP, sizeof(WVPalt)); }
     else { memcpy(WVPuse, sSnapWVP, sizeof(WVPuse)); memcpy(WVPalt, sSnapWVP, sizeof(WVPalt)); }
     float WVP[16]; memcpy(WVP, WVPuse, sizeof(WVP));
+    // 实体落位：节点世界是模型本地（web SIM 相机直接看原点），游戏里必须先平移到玩家脚下。
+    // T 只含位移（玩家朝向不管，鱼恒朝世界方向；与 web 姿势数学一致，落位是 iPad 侧实体概念）。
+    // 玩家坐标 LocalPlayer+0x28（与矩阵探针/小地图同源）。
+    float WT[16]; // WT = WVP · T(玩家)，每帧一次，逐 mesh 只剩一次 4x4 乘
+    if (gLocalPlayer) {
+        float px = *(float *)((char *)gLocalPlayer + 0x28);
+        float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
+        float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
+        float T[16] = {1,0,0,0, 0,1,0,0, 0,0,1,0, px,py,pz,1};
+        GLBMatMul(WVP, T, WT);
+    } else {
+        memcpy(WT, WVP, sizeof(WT));
+    }
 
     // ES3 现场保存（只动用到的状态）
     GLint oldProg = 0, oldTex = 0, oldActive = 0, oldAB = 0, oldEB = 0;
@@ -684,7 +697,7 @@ void MWBGLBDraw(void) {
         if (mi < 0 || mi >= (int)sMeshes.size()) continue;
         GLBMesh &m = sMeshes[mi];
         if (!m.vbo[0]) continue;
-        float M[16]; GLBMatMul(WVP, &sWorld[ni*16], M);
+        float M[16]; GLBMatMul(WT, &sWorld[ni*16], M);
         glUniformMatrix4fv(sUMVP, 1, GL_FALSE, M);
         glBindBuffer(GL_ARRAY_BUFFER, m.vbo[0]);
         glEnableVertexAttribArray(0);
