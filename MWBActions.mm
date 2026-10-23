@@ -120,6 +120,14 @@ void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"glbanim"] && parts.count > 1) MWBGLBSetAnim(parts[1]);
         else if ([act isEqualToString:@"cam"]) MWBSetCamValue01(arg); // 0=第一 1=第三背面 2=第三正面 3=跟脸正面
         else if ([act isEqualToString:@"caminfo"]) MWBCamDiag();
+        else if ([act isEqualToString:@"yaw"] && gLocalPlayer) { // 绝对视角 yaw 直写（跟脸标定用，无拖拽伪影）
+            *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF) = (float)arg;
+            MWBLogFile(@"[相机] yaw直写 %d", arg);
+        }
+        else if ([act isEqualToString:@"pitch"] && gLocalPlayer) { // 绝对俯仰直写（转视角带下来的俯仰污染清零用）
+            *(float *)((char *)gLocalPlayer + ENTITY_PITCH_OFF) = (float)arg;
+            MWBLogFile(@"[相机] pitch直写 %d", arg);
+        }
         else if ([act isEqualToString:@"debug"]) gMWBDebug = arg ? YES : NO;
         else if ([act isEqualToString:@"time"]) gTimeMode = arg;
         else if ([act isEqualToString:@"tod"]) { if (arg >= 0) gTimeCustom010 = arg; }
