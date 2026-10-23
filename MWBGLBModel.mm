@@ -490,17 +490,25 @@ static BOOL GLBInitGL(void) {
 }
 
 // ---- WVP 快照（render hook 内 orig 之前调，只读 uniform 不碰状态机） ----
+// 背景：游戏实体 shader（prog 48 那套）把 WORLD 与 WORLDVIEWPROJ 分开传，
+// WVP 只是相机 P·V，实体偏移全在 WORLD 里；只乘 WVP 会把鱼画到世界原点，
+// 相机看玩家时原点正好在镜头后（w<0），就是"透明啥也没有"的根因。
+// 故快照把两个都读走，绘制用 MVP = WVP·WORLD·节点世界（WORLD 缺席则退回直用）。
 static float sSnapWVP[16]; static BOOL sHasSnapWVP = NO;
-static GLuint sSnapProg = 0; static GLint sSnapLoc = -2;
+static float sSnapWorld[16]; static BOOL sHasSnapWorld = NO;
+static GLuint sSnapProg = 0; static GLint sSnapWVPLoc = -2; static GLint sSnapWorldLoc = -2;
 void MWBGLBSnapshotWVP(void) {
     GLint gprog = 0; glGetIntegerv(GL_CURRENT_PROGRAM, &gprog);
     if ((GLuint)gprog != sSnapProg) {
         sSnapProg = (GLuint)gprog;
-        sSnapLoc = (sSnapProg == 0) ? -1 : glGetUniformLocation(sSnapProg, "WORLDVIEWPROJ");
-        MWBLogFile(@"[GLB] 快照 prog=%u loc=%d", sSnapProg, sSnapLoc);
+        sSnapWVPLoc = (sSnapProg == 0) ? -1 : glGetUniformLocation(sSnapProg, "WORLDVIEWPROJ");
+        sSnapWorldLoc = (sSnapProg == 0) ? -1 : glGetUniformLocation(sSnapProg, "WORLD");
+        MWBLogFile(@"[GLB] 快照 prog=%u wvp=%d world=%d", sSnapProg, sSnapWVPLoc, sSnapWorldLoc);
     }
-    if (sSnapLoc < 0) { sHasSnapWVP = NO; return; }
-    glGetUniformfv(sSnapProg, sSnapLoc, sSnapWVP);
+    if (sSnapWVPLoc < 0) { sHasSnapWVP = NO; return; }
+    glGetUniformfv(sSnapProg, sSnapWVPLoc, sSnapWVP);
+    if (sSnapWorldLoc >= 0) { glGetUniformfv(sSnapProg, sSnapWorldLoc, sSnapWorld); sHasSnapWorld = YES; }
+    else sHasSnapWorld = NO;
     sHasSnapWVP = YES;
 }
 
@@ -623,10 +631,14 @@ void MWBGLBDraw(void) {
     // WVP 快照（hook 内 orig 之前抓的本实体 program 矩阵；post-orig 读会拿到别的 pass，w<0 就是这么来的）
     if (!sHasSnapWVP) {
         static int sNoSnap = 0;
-        if (!sNoSnap) { sNoSnap = 1; MWBLogFile(@"[GLB] 无快照WVP（prog=%u loc=%d）", sSnapProg, sSnapLoc); }
+        if (!sNoSnap) { sNoSnap = 1; MWBLogFile(@"[GLB] 无快照WVP（prog=%u wvp=%d）", sSnapProg, sSnapWVPLoc); }
         return;
     }
-    float WVP[16]; memcpy(WVP, sSnapWVP, sizeof(WVP)); // 每帧拷贝，防 hook 线程改写竞态
+    // MVP 组装：WORLD 在则左乘（实体偏移），缺席则直用 WVP；两种 ndc 首顶点行都打出，肉眼对数
+    float WVPuse[16], WVPalt[16];
+    if (sHasSnapWorld) { GLBMatMul(sSnapWVP, sSnapWorld, WVPuse); memcpy(WVPalt, sSnapWVP, sizeof(WVPalt)); }
+    else { memcpy(WVPuse, sSnapWVP, sizeof(WVPuse)); memcpy(WVPalt, sSnapWVP, sizeof(WVPalt)); }
+    float WVP[16]; memcpy(WVP, WVPuse, sizeof(WVP));
 
     // ES3 现场保存（只动用到的状态）
     GLint oldProg = 0, oldTex = 0, oldActive = 0, oldAB = 0, oldEB = 0;
@@ -685,14 +697,21 @@ void MWBGLBDraw(void) {
         drawn++; tris += m.nidx / 3;
         if (drawn == 1 && m.nvert > 0) {
             // 首顶点裁剪坐标（免截图定位：NDC 在 [-1,1] 内才可见；w<=0 在镜头后；NaN 即矩阵坏）
+            // 用/备两种 MVP 都算：ndc=用WVPuse，alt=省WORLD直用（WORLD 缺席时两者同值）
             float x = m.pos[0], y = m.pos[1], z = m.pos[2];
             float cx = M[0]*x + M[4]*y + M[8]*z + M[12];
             float cy = M[1]*x + M[5]*y + M[9]*z + M[13];
             float cz = M[2]*x + M[6]*y + M[10]*z + M[14];
             float cw = M[3]*x + M[7]*y + M[11]*z + M[15];
-            MWBLogFile(@"[GLB] 首顶点 prog=%u 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f)",
-                       sSnapProg, x, y, z, cx, cy, cz, cw,
-                       cw != 0 ? cx/cw : 999, cw != 0 ? cy/cw : 999, cw != 0 ? cz/cw : 999);
+            float Malt[16]; GLBMatMul(WVPalt, &sWorld[ni*16], Malt);
+            float ax = Malt[0]*x + Malt[4]*y + Malt[8]*z + Malt[12];
+            float ay = Malt[1]*x + Malt[5]*y + Malt[9]*z + Malt[13];
+            float az = Malt[2]*x + Malt[6]*y + Malt[10]*z + Malt[14];
+            float aw = Malt[3]*x + Malt[7]*y + Malt[11]*z + Malt[15];
+            MWBLogFile(@"[GLB] 首顶点 prog=%u world=%d 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f) alt=(%.2f,%.2f,%.2f)",
+                       sSnapProg, sHasSnapWorld ? 1 : 0, x, y, z, cx, cy, cz, cw,
+                       cw != 0 ? cx/cw : 999, cw != 0 ? cy/cw : 999, cw != 0 ? cz/cw : 999,
+                       aw != 0 ? ax/aw : 999, aw != 0 ? ay/aw : 999, aw != 0 ? az/aw : 999);
         }
     }
 
