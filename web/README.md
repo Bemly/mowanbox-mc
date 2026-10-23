@@ -34,3 +34,22 @@ cd web && python3 -m http.server 8129
 
 testdata（`fatfish.glb`＋`fatfish_vis.json`）在 `.gitignore` 中，不提交。
 首次运行把 `~/Downloads/大肥鱼_3js_viewer/` 下同名两文件拷进 `web/testdata/` 即可。
+
+## 已实锤的结论（2026-10-23，web 页验证）
+
+- **UV 不要翻转**：GLTFLoader 对 glTF 贴图设 `flipY=false`（glTF 规定 UV 原点在左上，
+  与 PNG 行序一致），移植侧数据必须原样传、上传也不翻。之前误跟 three 通用贴图的
+  flipY（`1-v`）会把面片采到透明区，被自家 shader 的 `alpha<0.5 discard` 吃掉——
+  左边正常、右边只剩裙子锥体残件，且 `?only=Head` 时头部 0 像素。去掉翻转后全身出现，
+  像素重心与参考完全一致（左右都是 (0.42,0.53)）。
+- **插件侧待办**：`MWBGLBModel.mm:350` 的 `1.0f-fu` 与本结论冲突，但 iPad 上传链是
+  CGBitmapContext（行序语义与浏览器 ImageBitmap 未必一致），不要直接照抄 web，
+  需在真机上重验方向后再改（探针：切 `gui` 动作看脸部贴图是否倒置）。
+- 调试开关：`?only=骨名` 只画该骨子树，`?m=1` 米制单位（与三边矩阵逐元比对）。
+
+## 当前验证状态（供检查）
+
+- 解析：节点 452 / 网格 256 / 三角 23688 / 动画 48 / Root 子树 431（与 viewer README 一致）。
+- 可见对照：idle/walk/gui/idle_1/run/swim 等 8 组动作×时刻，移植与参考逐项一致 ✅。
+- 矩阵对照：Root/Head 与三边 `matrixWorld` 逐元一致（米制下完全相等）。
+- 像素对照：idle 下左右前景重心同为 (0.42,0.53)，占比 2.4%/2.6%（右无网格线＋无光照，差值符合预期）。

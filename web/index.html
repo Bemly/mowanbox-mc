@@ -75,6 +75,11 @@ import { viewerVisibility } from './js/viewer-ref.js';
 
 const $ = (id) => document.getElementById(id);
 const errBox = $('err'), logBox = $('log'), diffBox = $('diff');
+// 调试开关（?only=骨名 只画该骨子树，?m=1 用米制单位即与三边矩阵逐元比对）
+const Q = new URLSearchParams(location.search);
+const ONLY = Q.get('only') || '';
+const METERS = Q.get('m') === '1';
+if (ONLY || METERS) log(`[调试] only=${ONLY || '(无)'} meters=${METERS ? '开' : '关'}`);
 function log(s) { logBox.textContent += s + '\n'; logBox.scrollTop = logBox.scrollHeight; console.log(s); }
 window.addEventListener('error', (e) => { errBox.textContent += '[ERR] ' + e.message + '\n'; });
 window.addEventListener('unhandledrejection', (e) => { errBox.textContent += '[REJ] ' + String(e.reason) + '\n'; });
@@ -262,6 +267,22 @@ async function boot() {
   if (!parsed) { $('loading').textContent = '手解 GLB 失败，看日志'; return; }
   log(fmtParseLog(parsed, Object.keys(vis.scale || {}).length));
   log(fmtStats(parsed, 'idle', Object.keys(vis.scale || {}).length));
+  // ?m=1 米制调试：位移/顶点/动画位移除 16（与三边同单位）
+  if (METERS) {
+    for (const nd of parsed.nodes) { nd.t[0] /= 16; nd.t[1] /= 16; nd.t[2] /= 16; }
+    for (const m of parsed.meshes) for (let i = 0; i < m.pos.length; i++) m.pos[i] /= 16;
+    for (const an of parsed.anims.values()) for (const k of an.pos.values()) for (let i = 0; i < k.vals.length; i++) k.vals[i] /= 16;
+    log('[调试] 已转米制单位');
+  }
+  // ?only=骨名：只画该骨子树
+  let onlySet = null;
+  if (ONLY && parsed.name2idx.has(ONLY)) {
+    onlySet = new Set();
+    const st = [parsed.name2idx.get(ONLY)];
+    while (st.length) { const c = st.pop(); onlySet.add(c); parsed.nodes[c].children.forEach((k) => st.push(k)); }
+    log(`[调试] 只画 ${ONLY} 子树共 ${onlySet.size} 骨`);
+    window.__onlySet = onlySet;
+  }
   // Root 子树父链（对照用）
   for (const ni of parsed.rootSet) {
     const pi = parsed.nodes[ni].parent;
@@ -359,6 +380,23 @@ $('spin').onchange = (e) => { controls.autoRotate = e.target.checked; };
 // ---------- 主循环（双时钟 viewer 同款：tMain 动作 / tVis 常驻层，dt 钳 0.1） ----------
 const projM = new THREE.Matrix4(), viewM = new THREE.Matrix4(), wvpM = new THREE.Matrix4();
 const wvpArr = new Float32Array(16);
+// 像素对照（同帧捕获，preserveDrawingBuffer 不需要；背景 #0d1117=(13,17,23)）
+const pxCapL = document.createElement('canvas'); pxCapL.width = 96; pxCapL.height = 96;
+const pxCapR = document.createElement('canvas'); pxCapR.width = 96; pxCapR.height = 96;
+const pxCtxL = pxCapL.getContext('2d', { willReadFrequently: true });
+const pxCtxR = pxCapR.getContext('2d', { willReadFrequently: true });
+function pixelStats(ctx, cap, src) {
+  ctx.drawImage(src, 0, 0, 96, 96);
+  const d = ctx.getImageData(0, 0, 96, 96).data;
+  let n = 0, sx = 0, sy = 0;
+  for (let y = 0; y < 96; y++) for (let x = 0; x < 96; x++) {
+    const i = (y * 96 + x) * 4;
+    const dr = d[i] - 13, dg = d[i + 1] - 17, db = d[i + 2] - 23;
+    if (dr * dr + dg * dg + db * db > 900) { n++; sx += x; sy += y; }
+  }
+  void cap;
+  return { frac: n / (96 * 96), cx: n ? sx / n / 96 : -1, cy: n ? sy / n / 96 : -1 };
+}
 function animate() {
   requestAnimationFrame(animate);
   const dt = Math.min(clock.getDelta(), 0.1);
@@ -386,9 +424,11 @@ function animate() {
   // 右：移植绘制（MVP = WVP_SIM · 世界，WVP_SIM 由右相机 P·V 给出；插件是游戏 WORLDVIEWPROJ 直读）
   if (parsed && progR && texR) {
     // 右相机 = 左相机 ×16（移植世界是 ×16 游戏单位，图像可比，矩阵保持插件数值）
-    const rc = new THREE.PerspectiveCamera(cameraL.fov, cameraL.aspect, cameraL.near * 16, cameraL.far * 16);
-    rc.position.copy(cameraL.position).multiplyScalar(16);
-    const tgt = controls.target.clone().multiplyScalar(16);
+    // ?m=1 米制调试：相机不放大（与三边同单位，矩阵可逐元比对）
+    const US = METERS ? 1 : 16;
+    const rc = new THREE.PerspectiveCamera(cameraL.fov, cameraL.aspect, cameraL.near * US, cameraL.far * US);
+    rc.position.copy(cameraL.position).multiplyScalar(US);
+    const tgt = controls.target.clone().multiplyScalar(US);
     rc.lookAt(tgt);
     rc.updateMatrixWorld();
     projM.copy(rc.projectionMatrix);
@@ -401,12 +441,41 @@ function animate() {
       // 对照：可见计数（移植 vs 参考，只比 Root 子树＋子树继承，见 viewer-ref.js）
       const ref = viewerVisibility(pose.dfs.map((ni) => parsed.nodes[ni].name), rootParentOf, vis, curName, cur ? cur.time : tVis, tVis, roaming);
       const fv = firstVertexClip(parsed, pose, wvpArr);
+      // 骨骼框（世界位移 min/max，判模型飞了还是相机偏了）＋绘制计数
+      let mnx = 1e9, mxx = -1e9, mny = 1e9, mxy = -1e9, mnz = 1e9, mxz = -1e9, drawn = 0;
+      for (const ni of pose.dfs) {
+        const wx = pose.world[ni * 16 + 12], wy = pose.world[ni * 16 + 13], wz = pose.world[ni * 16 + 14];
+        if (wx < mnx) mnx = wx; if (wx > mxx) mxx = wx;
+        if (wy < mny) mny = wy; if (wy > mxy) mxy = wy;
+        if (wz < mnz) mnz = wz; if (wz > mxz) mxz = wz;
+        if (pose.visOK[ni] && parsed.nodes[ni].mesh >= 0) drawn++;
+      }
       const same = pose.shown === ref.shown && pose.total === ref.total;
       diffBox.innerHTML =
         `动作=${curName} tMain=${tMain.toFixed(2)} tVis=${tVis.toFixed(2)}\n` +
         `可见 移植=${pose.shown}/${pose.total} 参考=${ref.shown}/${ref.total} ` +
         (same ? '<span class="ok">一致 ✅</span>' : '<span class="bad">不一致 ❌</span>') + '\n' +
-        fmtFirstVertex(fv) + '（WVP=SIM，iPad 上为游戏直读）';
+        fmtFirstVertex(fv) + '（WVP=SIM，iPad 上为游戏直读）\n' +
+        `骨骼框 x[${mnx.toFixed(1)},${mxx.toFixed(1)}] y[${mny.toFixed(1)},${mxy.toFixed(1)}] z[${mnz.toFixed(1)},${mxz.toFixed(1)}] 绘制=${drawn} 相机=${rc.position.toArray().map((v) => v.toFixed(1)).join(',')}`;
+      if (frames % 60 === 0) {
+        // 管线对照：画布尺寸/相机参数/upload 回读（抓"看起来不对"的硬证据）
+        gl.useProgram(progR);
+        const rb = gl.getUniform(progR, uMvp);
+        diffBox.innerHTML += `\n画布 L=${cvL.width}x${cvL.height} R=${cvR.width}x${cvR.height} 相机fov=${rc.fov.toFixed(1)} aspect=${rc.aspect.toFixed(3)} near=${rc.near.toFixed(3)} far=${rc.far.toFixed(0)} u回读=${rb ? '有' : '无'}`;
+        // 像素对照：左右前景占比＋重心（同帧捕获）
+        const pl = pixelStats(pxCtxL, pxCapL, cvL), pr = pixelStats(pxCtxR, pxCapR, cvR);
+        diffBox.innerHTML += `\n像素 左=${(pl.frac * 100).toFixed(1)}% 重心=(${pl.cx.toFixed(2)},${pl.cy.toFixed(2)}) 右=${(pr.frac * 100).toFixed(1)}% 重心=(${pr.cx.toFixed(2)},${pr.cy.toFixed(2)})`;
+        // 矩阵对照：同一骨（Head/Root）三边 matrixWorld vs 移植 world（列主序各 16）
+        for (const bn of ['Root', 'Head']) {
+          const tn = nodeByName.get(bn);
+          const ni = parsed.name2idx.get(bn);
+          if (tn && ni != null) {
+            const te = tn.matrixWorld.elements.map((v) => v.toFixed(2)).join(',');
+            const me = Array.from(pose.world.subarray(ni * 16, ni * 16 + 16)).map((v) => v.toFixed(2)).join(',');
+            diffBox.innerHTML += `\n矩阵 ${bn} 三=[${te}]\n矩阵 ${bn} 移=[${me}]`;
+          }
+        }
+      }
       if (frames === 30 || frames % 600 === 0) {
         log(`[GLB] 存活帧=${frames} 本帧网格≈${pose.dfs.filter((ni) => pose.visOK[ni] && parsed.nodes[ni].mesh >= 0).length} 可见=${pose.shown}/${pose.total}`);
         if (fv) log(fmtFirstVertex(fv));
@@ -466,6 +535,7 @@ function drawPlugin(wvp, pose) {
   const M = new Float32Array(16);
   for (const ni of pose.dfs) {
     if (!pose.visOK[ni]) continue;
+    if (window.__onlySet && !window.__onlySet.has(ni)) continue;
     const mi = parsed.nodes[ni].mesh;
     if (mi < 0 || mi >= parsed.meshes.length) continue;
     // M = WVP · world（列主序，与 mm GLBMatMul 一致）

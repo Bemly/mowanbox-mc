@@ -187,7 +187,10 @@ function parseGLB(buf, log) {
       pos[v * 3 + 1] = f32(pr.ptr + v * 12 + 4) * 16;
       pos[v * 3 + 2] = f32(pr.ptr + v * 12 + 8) * 16;
       uv[v * 2] = f32(ur.ptr + v * 8);
-      uv[v * 2 + 1] = 1 - f32(ur.ptr + v * 8 + 4); // flipY（three 同款，mm 350 行）
+      // 不翻转：GLTFLoader 对 glTF 贴图设 flipY=false（glTF 规定 UV 原点在左上，
+      // 与 PNG 行序一致），采样即原样；之前误跟 three 通用贴图的 flipY 在此是反的，
+      // 会把面片采到透明区被 alphaTest 吃掉（只剩裙子/锥体残件）。
+      uv[v * 2 + 1] = f32(ur.ptr + v * 8 + 4);
     }
     const idx = new Uint16Array(ni);
     for (let k = 0; k < ni; k++) idx[k] = u16(ir.ptr + k * 2);
