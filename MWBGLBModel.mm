@@ -456,11 +456,13 @@ static const float *GLBStackTop(uintptr_t va) {
     return blk ? (const float *)(blk + ((i & 63) << 6)) : NULL;
 }
 static float sGamePVW[16]; static float sGameRel[3]; static BOOL sHasGameCam = NO;
+static float sGameW0[16]; // 世界栈底（本实体 push 前），手持物品矩阵要落回世界栈坐标系
 // MobRenderer::render 入口（orig 前）调：pos=实体相对相机坐标（渲染用插值值），P·V·W 此刻即本实体的基准相机
 void MWBGLBCaptureEntity(const float *pos) {
     const float *P = GLBStackTop(MS_PROJ_VA), *V = GLBStackTop(MS_VIEW_VA), *W = GLBStackTop(MS_WORLD_VA);
     if (!P || !V || !W || !pos) { sHasGameCam = NO; return; }
     float PV[16]; GLBMatMul(P, V, PV); GLBMatMul(PV, W, sGamePVW);
+    memcpy(sGameW0, W, sizeof(sGameW0));
     memcpy(sGameRel, pos, sizeof(sGameRel));
     sHasGameCam = YES;
     static int sCamLog = 0;
@@ -499,6 +501,32 @@ void MWBGLBLogDiag(void) {
 BOOL MWBGLBCanDraw(void) {
     return gGLBModel && sParsed && !sRootSet.empty();
 }
+// ---- 手持物品落到鱼手上 ----
+// 原版 HumanoidMobRenderer::additionalRendering（IDA 实锤）：push 世界栈 → ModelPart::translateTo(右臂 model+0x288, 栈顶, 1/16)
+// → 平移 (-1/16, 7/16, 1/16) 到手心 → 按物品类型旋转缩放 → ItemInHandRenderer::renderItem → pop。
+// 我们在 translateTo 命中右臂时把栈顶整个换成：W0 · T(落位) · 鱼 RightHandLocator 世界 · K，
+// K = S(-1,-1,1) · T(1/16,-7/16,-1/16)：原版臂坐标系是模型空间（MobRenderer 已 scale(-1,-1,1)，Y 朝下沿手臂），
+// 鱼 locator 是实体空间（Y 朝上）→ 翻 x/y；再预先抵消原版随后那一步平移，物品原点正好落在 locator 轴心。
+static float sHandW[16]; static BOOL sHasHand = NO; static int sHandNi = -2;
+static std::vector<float> *sWorldRef = NULL; // 指向绘制内 sWorld（本帧节点世界）
+static void GLBUpdateHand(const float *T) {
+    if (sHandNi == -2) { auto it = sName2Idx.find("RightHandLocator"); sHandNi = it != sName2Idx.end() ? it->second : -1; }
+    if (sHandNi < 0 || !sWorldRef || (int)sWorldRef->size() < (sHandNi + 1) * 16) { sHasHand = NO; return; }
+    float A[16], H[16];
+    GLBMatMul(sGameW0, T, A);
+    GLBMatMul(A, &(*sWorldRef)[sHandNi * 16], H);
+    for (int r = 0; r < 4; r++) { H[r] = -H[r]; H[4 + r] = -H[4 + r]; }   // ·S(-1,-1,1)
+    const float tx = 1.0f / 16, ty = -7.0f / 16, tz = -1.0f / 16;        // ·T(抵消原版手心平移)
+    for (int r = 0; r < 4; r++) H[12 + r] += H[r] * tx + H[4 + r] * ty + H[8 + r] * tz;
+    memcpy(sHandW, H, sizeof(sHandW));
+    sHasHand = YES;
+}
+BOOL MWBGLBHandMatrix(float *out) {
+    if (!sHasHand || !out) return NO;
+    memcpy(out, sHandW, sizeof(sHandW));
+    return YES;
+}
+
 void MWBGLBDraw(void) {
     if (!gGLBModel || !sParsed || sRootSet.empty()) return;
     if (!sGLVer[0]) {
@@ -540,6 +568,8 @@ void MWBGLBDraw(void) {
     // 局部矩阵：YSM 运行时（全量关键帧＋molang＋分层＋头随视角）；未载入则绑定姿势
     static std::vector<float> sWorld; // 每节点 16
     sWorld.assign(sNodes.size() * 16, 0);
+    sWorldRef = &sWorld;
+    sHasHand = NO; // 本帧重算（相机/落位齐了才置位）
     std::vector<char> sHidden(sNodes.size(), 0);
     if (sAnimOK) {
         MWBAnimTick(dt);
@@ -635,6 +665,7 @@ void MWBGLBDraw(void) {
         }
         float T[16] = {ct*sc,0,-st*sc,0, 0,sc,0,0, st*sc,0,ct*sc,0, px,ty,pz,1};
         GLBMatMul(WVP, T, WT);
+        if (sHasGameCam) GLBUpdateHand(T);
     } else {
         memcpy(WT, WVP, sizeof(WT));
     }

@@ -52,6 +52,25 @@ static void hooked_mini_render(void *self, void *entity,
     }
 }
 
+// 手持物品落到鱼手上：additionalRendering 只对画鱼的本地玩家置位，translateTo 命中原版右臂（model+0x288）
+// 时把栈顶换成鱼 RightHandLocator 矩阵（MWBGLBHandMatrix）；其他部件/实体/未画鱼时原样走原函数。
+static void *sHandArmPart = NULL; // 本次 additionalRendering 的原版右臂 ModelPart*（NULL=不接管）
+typedef void (*TranslateToFn)(void *part, float *m, float scale);
+static TranslateToFn orig_translate_to = NULL;
+static void hooked_translate_to(void *part, float *m, float scale) {
+    if (sHandArmPart && part == sHandArmPart && m && MWBGLBHandMatrix(m)) return;
+    orig_translate_to(part, m, scale);
+}
+typedef void (*AddRenderFn)(void *self, void *mob, float a);
+static AddRenderFn orig_add_render = NULL;
+static void hooked_add_render(void *self, void *mob, float a) {
+    BOOL fish = (mob && mob == gLocalPlayer && (gSkin4D || gGLBModel) && MWBCamValue() != 0 && MWBGLBCanDraw());
+    void *model = fish ? *(void **)((char *)self + 0xC8) : NULL; // HumanoidMobRenderer+0xC8 = HumanoidModel*（反编译 this+25*8）
+    sHandArmPart = model ? (char *)model + 0x288 : NULL;         // 右臂（反编译 +648）
+    orig_add_render(self, mob, a);
+    sHandArmPart = NULL;
+}
+
 // 上层透传（占位不断链）
 typedef void (*MobRenderFn)(void *self, void *entity, const void *pos, float f1, float f2);
 static MobRenderFn orig_mob_render = NULL;
@@ -88,5 +107,9 @@ void MWBSkin4DInstall(void) {
              hooked_mob_render, orig_mob_render);
     MWB_HOOK("__ZN19HumanoidMobRenderer6renderER6EntityRK4Vec3ff",
              hooked_hmob_render, orig_hmob_render);
+    MWB_HOOK("__ZN19HumanoidMobRenderer19additionalRenderingER3Mobf",
+             hooked_add_render, orig_add_render);
+    MWB_HOOK("__ZN9ModelPart11translateToER6Matrixf",
+             hooked_translate_to, orig_translate_to);
     MWBLogFile(@"[4D皮肤] GLB 挂载就绪（菜单 skin4d / flag glb，模型唯一）");
 }
