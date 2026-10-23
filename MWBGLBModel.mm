@@ -347,7 +347,7 @@ BOOL MWBGLBEnsureParsed(void) {
         const float *fp = (const float *)pp; const float *fu = (const float *)pu;
         for (int v = 0; v < nv; v++) {
             m.pos[v*3]=fp[v*3]*16.0f; m.pos[v*3+1]=fp[v*3+1]*16.0f; m.pos[v*3+2]=fp[v*3+2]*16.0f;
-            m.uv[v*2]=fu[v*2]; m.uv[v*2+1]=1.0f-fu[v*2+1]; // flipY（three 同款）
+            m.uv[v*2]=fu[v*2]; m.uv[v*2+1]=fu[v*2+1]; // 不翻转（web 移植页实锤：GLTFLoader 对 glTF 贴图 flipY=false，翻了会被 alphaTest 吃成锥体残件）
         }
         memcpy(m.idx, pi_, sizeof(uint16_t) * (size_t)ni);
         totalTris += ni / 3;
@@ -416,8 +416,8 @@ BOOL MWBGLBEnsureParsed(void) {
     } else MWBLogFile(@"[GLB] 无 sidecar（只画绑定姿势）：%@", visPath);
     if (!sCurAnim) sCurAnim = @"idle";
     sParsed = YES;
-    MWBLogFile(@"[GLB] 解析成功 节点=%lu 网格=%lu 三角=%ld Root子树=%lu 动画=%lu 贴图=%lu字节 sidecar=%@",
-               (unsigned long)sNodes.size(), (unsigned long)sMeshes.size(), totalTris,
+    MWBLogFile(@"[GLB] 解析成功 构建=%@ 节点=%lu 网格=%lu 三角=%ld Root子树=%lu 动画=%lu 贴图=%lu字节 sidecar=%@",
+               @MWB_BUILD_TAG,(unsigned long)sNodes.size(), (unsigned long)sMeshes.size(), totalTris,
                (unsigned long)sRootSet.size(), (unsigned long)sAnims.size(),
                (unsigned long)(sTexPNG ? sTexPNG.length : 0), sVisScale ? @"有" : @"无");
     MWBGLBLogStats();

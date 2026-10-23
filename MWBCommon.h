@@ -6,6 +6,11 @@
 #import "MWBVersion.h"
 #import "EMI.h"
 
+// 构建号（Makefile 用 -D 注入 git 计数+短哈希，启动/解析写日志，验证先对它；未注入回 unknown）
+#ifndef MWB_BUILD_TAG
+#define MWB_BUILD_TAG "unknown"
+#endif
+
 // ---- 0.10 偏移/常量 ----
 #define PLAYER_ABILITIES_OFFSET   5824
 #define ABIL_INVULNERABLE 0

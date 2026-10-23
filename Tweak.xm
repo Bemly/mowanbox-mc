@@ -46,7 +46,8 @@ uint8_t gMiniMap010D[48 * 48];    // 0.10 水深
 
 %ctor {
     MWBRegisterFont();
-    NSLog(@"[魔玩盒子] 插件已加载");
+    NSLog(@"[魔玩盒子] 插件已加载 构建=%@", @MWB_BUILD_TAG);
+    MWBLogFile(@"[魔玩盒子] 插件已加载 构建=%@", @MWB_BUILD_TAG);
     // 版本自适应: 不依赖包名,运行时识别游戏版本再选注入方式,同一UI操作
     MWBGameVersion gv = [MWBVersion currentVersion];
     gGV = (int)gv;
