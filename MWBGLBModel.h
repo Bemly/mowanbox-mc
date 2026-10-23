@@ -21,6 +21,10 @@ void MWBGLBLogStats(void);
 // 绘制（必须 GL 线程调，即 render hook 内；首调编译 shader+上传贴图）
 // entityMV 为 NULL 则用捕获到的模型视图矩阵。
 void MWBGLBDraw(void);
+// 诊断（glinfo2 打开关/解析/矩阵/uniform 调用/版本串）
+void MWBGLBLogDiag(void);
+// 是否真能画（开关+解析+矩阵齐才藏原版，否则不藏，免得鱼没画出来人也没了）
+BOOL MWBGLBCanDraw(void);
 
 // 当前动作名（默认 idle；GLB 里 clip 名带 main: 前缀，sidecar 用裸名，两种都试，viewer 同款）
 void MWBGLBSetAnim(NSString *name);

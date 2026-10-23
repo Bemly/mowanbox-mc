@@ -424,8 +424,35 @@ static BOOL GLBInitGL(void) {
 }
 
 // ---- 绘制 ----
+static char sGLVer[128] = {0}, sGLRen[128] = {0}; // GL 线程缓存版本串（诊断用）
+void MWBGLBLogDiag(void) {
+    extern int MWB010GLCalls(void);
+    MWBLogFile(@"[GLB] 诊断 开关=%d 解析=%d 网格=%lu 投影=%d 模型视图=%d uniform调用=%d 版本=%s 渲染器=%s",
+               gGLBModel, sParsed, (unsigned long)sMeshes.size(),
+               sHasProj, sHasMV, MWB010GLCalls(), sGLVer, sGLRen);
+}
+// 开关+解析+矩阵齐才藏原版（缺任一样都不藏，免得鱼没画出来人也没了）
+BOOL MWBGLBCanDraw(void) {
+    return gGLBModel && sParsed && !sRootSet.empty() && sHasProj && sHasMV;
+}
 void MWBGLBDraw(void) {
-    if (!gGLBModel || !sParsed || sRootSet.empty() || !sHasProj || !sHasMV) return;
+    if (!gGLBModel || !sParsed || sRootSet.empty()) return;
+    // 卡点一次通报（之前静默 return， elsewhere 猜；只打一次不刷屏）
+    static int sBlockLogged = 0;
+    if ((!sHasProj || !sHasMV) && !sBlockLogged) {
+        sBlockLogged = 1;
+        extern int MWB010GLCalls(void);
+        MWBLogFile(@"[GLB] 等矩阵 投影=%d 模型视图=%d uniform调用=%d（为0说明主二进制几乎不调该函数）",
+                   sHasProj, sHasMV, MWB010GLCalls());
+    }
+    if (!sHasProj || !sHasMV) return;
+    if (!sGLVer[0]) {
+        const char *v = (const char *)glGetString(GL_VERSION);
+        const char *r = (const char *)glGetString(GL_RENDERER);
+        if (v) strncpy(sGLVer, v, sizeof(sGLVer)-1);
+        if (r) strncpy(sGLRen, r, sizeof(sGLRen)-1);
+        MWBLogFile(@"[GLB] GL版本=%s 渲染器=%s", sGLVer, sGLRen);
+    }
     if (!GLBInitGL() || !sTex) return;
     // 双时钟推进（viewer 同款，dt 钳 0.1）
     static double sLast = 0;

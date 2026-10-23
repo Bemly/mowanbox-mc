@@ -192,7 +192,7 @@ static void hooked_mini_render(void *self, void *entity,
         if (sCubeRoot && sPartsKept && sSetModel)
             for (int i = 0; i < sPartsCount; i++)
                 if (sPartsKept[i]) sSetModel(sPartsKept[i], self);
-        MWBSkinSetVanilla(self, (gSkin4D && sCubeRoot) || gGLBModel);
+        MWBSkinSetVanilla(self, (gSkin4D && sCubeRoot) || MWBGLBCanDraw());
     }
     orig_mini_render(self, entity, s1, s2, s3, s4, s5, s6);
     // 自家树画在 orig 之后、同一 hook 内：栈顶还压着实体变换，用游戏真矩阵 v5 落在玩家身上。
