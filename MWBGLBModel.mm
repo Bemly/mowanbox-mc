@@ -66,6 +66,27 @@ static void GLBScanProgram(GLuint prog) {
     sProjScanned = YES; sProjLoc = -1; sHasP = NO; sProgFor = prog;
     GLint n = 0; glGetProgramiv(prog, GL_ACTIVE_UNIFORMS, &n);
     char name[128];
+    // 先全量 dump（找矩阵到底以什么形式存在：mat4/vec4 数组/UBO 引用，一次看清）
+    for (GLint i = 0; i < n && i < 64; i++) {
+        GLsizei len = 0; GLint size = 0; GLenum type = 0;
+        glGetActiveUniform(prog, (GLuint)i, sizeof(name), &len, &size, &type, name);
+        if (type == GL_FLOAT_MAT4) {
+            GLint loc = glGetUniformLocation(prog, name);
+            if (loc < 0) continue;
+            float m[16]; glGetUniformfv(prog, loc, m);
+            MWBLogFile(@"[GLB] U mat4 prog=%u i=%d名=%s loc=%d m=[%.3f,%.3f,%.3f,%.3f, %.3f,%.3f,%.3f,%.3f, %.3f,%.3f,%.3f,%.3f, %.3f,%.3f,%.3f,%.3f]",
+                       prog, (int)i, name, loc,
+                       m[0],m[1],m[2],m[3],m[4],m[5],m[6],m[7],m[8],m[9],m[10],m[11],m[12],m[13],m[14],m[15]);
+        } else if (type == GL_FLOAT_VEC4) {
+            GLint loc = glGetUniformLocation(prog, name);
+            float v[4] = {0};
+            if (loc >= 0 && size >= 1) glGetUniformfv(prog, loc, v);
+            MWBLogFile(@"[GLB] U vec4 prog=%u i=%d名=%s loc=%d size=%d v=[%.3f,%.3f,%.3f,%.3f]",
+                       prog, (int)i, name, loc, (int)size, v[0], v[1], v[2], v[3]);
+        } else {
+            MWBLogFile(@"[GLB] U prog=%u i=%d名=%s type=0x%x size=%d", prog, (int)i, name, type, (int)size);
+        }
+    }
     for (GLint i = 0; i < n && i < 256; i++) {
         GLsizei len = 0; GLint size = 0; GLenum type = 0;
         glGetActiveUniform(prog, (GLuint)i, sizeof(name), &len, &size, &type, name);
