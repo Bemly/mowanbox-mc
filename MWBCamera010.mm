@@ -59,14 +59,8 @@ void MWBSetCamValue01(int v) {
     MWBCamPersist(opt);
 }
 
-// 条目类型 0→3：__DATA 本来就可写，直接写一次（幂等，已是 3 不动）
-static void MWBCamPatchFlag(void) {
-    uint8_t *p = (uint8_t *)MWBCamOpt();
-    if (*p == 3) { MWBLogFile(@"[相机] 条目已是滑条"); return; }
-    if (*p != 0) { MWBLogFile(@"[相机] 条目类型异常=%d，不动", *p); return; }
-    *p = 3;
-    MWBLogFile(@"[相机] 条目 0x10034ebc8 类型 0→3（开关改步进滑条）");
-}
+// （注：曾试过直接写条目类型 0→3，但游戏自家静态初始化跑在我们 %ctor 之后，每次都盖回 0，
+// 故此路不通；真正起作用的是下面的 createToggle 改道。rescue 位保留只读诊断。）
 
 // Slider::C1 hook：thirdperson 进来把步伐换成自家 {0,1,2,3}，初值从 Options 反推
 typedef void *(*SliderCtorFn)(void *thiz, void *mc, void *opt, void *vec);
@@ -193,7 +187,6 @@ static void hooked_cam_toggle(void *grp, void *opt, void *mc) {
 // 0.10 才安装（Tweak.xm %ctor 调用，版本不对直接返回）
 void MWBInstallCamera010(void) {
     if (gGV != (int)MWBGameV0_10) return;
-    MWBCamPatchFlag();
     MWB_HOOK("__ZN6SliderC1EP15MinecraftClientPKN7Options6OptionERKNSt3__16vectorIiNS6_9allocatorIiEEEE",
              hooked_cam_ctor, orig_cam_ctor);
     MWB_HOOK("__ZN6Slider9setOptionEP15MinecraftClient",
