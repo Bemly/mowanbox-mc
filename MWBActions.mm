@@ -128,6 +128,10 @@ void MWBPollCmdFile(void) {
             *(float *)((char *)gLocalPlayer + ENTITY_PITCH_OFF) = (float)arg;
             MWBLogFile(@"[相机] pitch直写 %d", arg);
         }
+        else if ([act isEqualToString:@"camyaw"] && gLocalPlayer) { // 身体朝向直写（验模型脸跟不跟+0x3c）
+            *(float *)((char *)gLocalPlayer + 0x3c) = (float)arg;
+            MWBLogFile(@"[相机] camyaw直写 %d（+0x3c）", arg);
+        }
         else if ([act isEqualToString:@"debug"]) gMWBDebug = arg ? YES : NO;
         else if ([act isEqualToString:@"time"]) gTimeMode = arg;
         else if ([act isEqualToString:@"tod"]) { if (arg >= 0) gTimeCustom010 = arg; }
