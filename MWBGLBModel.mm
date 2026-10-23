@@ -746,30 +746,15 @@ void MWBGLBDraw(void) {
     // MVP 组装（与 web 对齐的最终形态：自家已知相机，不再读游戏 program 矩阵）。
     // 背景：prog 42 的 WORLDVIEWPROJ 经多轮日志实锤不是 gameplay 相机（原点恒居中/z 恒越界，
     // 疑似天空或固定 pass；pre/post 同值，换时机没用）。web SIM 相机同理可验证，故 iPad 也用自家相机：
-    //  P(60°/视口比/0.1/1000) · V(孪生游戏视角：只读玩家视角 yaw/pitch，不写游戏) · T(玩家) · 节点世界。
+    //  P(60°/视口比/0.1/1000) · V(eye=玩家+(6,8,6) 世界固定偏置俯视，免 yaw 约定风险) · T(玩家) · 节点世界。
     // 节点世界数学与 web/js/plugin-glb.js 逐元一致；相机/T 落位是 iPad 侧实体概念，日志可验。
     float WVP[16];
     float ppx0 = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28) : 0;
     float ppy0 = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 4) : 0;
     float ppz0 = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 8) : 0;
     {
-        // 孪生游戏视角（只读游戏，不写游戏任何结构）：以前是世界固定偏置，自家画面与游戏画面各转各的，
-        // 望天时鱼钉在屏中央、背景走——看上去就是飞上天。游戏相机本身是对的（史蒂夫落地），
-        // 直接孪生它的方向：眼 = 脚 - 朝向*D + 上偏，看点 = 脚 + 1.0。D 只影响大小，接触只认方向。
-        // 朝向 F(ψ)=(-sinψ,cosψ) 与 T 的 θ=π-ψ 同约定（ψ=0 南时 F=+z）；pitch +抬头（猜的，
-        // 若上下反了取反一行；yaw 若左右反了 F 取反一行，见下注释）。
-        float fy = sHasGround ? sGroundY : (ppy0 - 1.62f); // 脚（+0x28 是眼，gap=+1.62 实锤）
-        float vyw = 0, vpt = 0;
-        if (gLocalPlayer) {
-            vyw = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);
-            vpt = *(float *)((char *)gLocalPlayer + ENTITY_PITCH_OFF);
-        }
-        float yr = vyw * (float)M_PI / 180.0f, pr = vpt * (float)M_PI / 180.0f;
-        float cp = cosf(pr);
-        float dx = -sinf(yr) * cp, dy = sinf(pr), dz = cosf(yr) * cp;
-        float D = 9.0f;
-        float ex = ppx0 - dx * D, ey = (fy + 3.0f) - dy * D, ez = ppz0 - dz * D; // 眼睛（跟游戏视角环绕）
-        float cx = ppx0, cy = fy + 1.0f, cz = ppz0;                             // 看点（脚上 1 米）
+        float ex = ppx0 + 6.0f, ey = ppy0 + 8.0f, ez = ppz0 + 6.0f; // 眼睛（世界固定偏置）
+        float cx = ppx0, cy = ppy0 + 1.0f, cz = ppz0;              // 看点（玩家胸口）
         // 列主序 lookAt（three.js 同款：z=normalize(eye-center)，x=normalize(up×z)，y=z×x）
         float zx = ex - cx, zy = ey - cy, zz = ez - cz;
         float zl = sqrtf(zx*zx + zy*zy + zz*zz); if (zl < 1e-6f) zl = 1; zx/=zl; zy/=zl; zz/=zl;
@@ -817,8 +802,8 @@ void MWBGLBDraw(void) {
         float yawDeg = *(float *)((char *)gLocalPlayer + 0x3c);
         float th = (180.0f - yawDeg) * (float)M_PI / 180.0f;
         sYawDbg = yawDeg; sThDbg = th;
-        // 落位 Y：站立跟实地扫描（sHasGround），飞/游/空跟脚（眼-1.62，gap 实锤）；再叠 lift；本体统一缩放 sGLBScale。
-        float ty = (sHasGround ? sGroundY : py - 1.62f) + sGLBLift;
+        // 落位 Y：站立跟实地扫描（sHasGround），飞/游/空跟 py；再叠 lift；本体统一缩放 sGLBScale。
+        float ty = (sHasGround ? sGroundY : py) + sGLBLift;
         float sc = sGLBScale, ct = cosf(th), st = sinf(th);
         float T[16] = {ct*sc,0,-st*sc,0, 0,sc,0,0, st*sc,0,ct*sc,0, px,ty,pz,1};
         GLBMatMul(WVP, T, WT);
