@@ -464,11 +464,10 @@ static BOOL GLBInitGL(void) {
             CGContextRef ctx = CGBitmapContextCreate(px, w, h, 8, w*4,
                 CGColorSpaceCreateDeviceRGB(), kCGImageAlphaPremultipliedLast);
             if (ctx) {
-                // 行序对齐 web（ImageBitmap 内存行序 = PNG 行序，不翻转）：
-                // CGBitmapContext 默认 user space 原点在左下，直接 DrawImage 会把 PNG 存成上下颠倒
-                // （内存 row0 = PNG 底行），配合数据侧不翻转就会整图 V 反转。
-                // 先 CTM 翻转让内存 row0 = PNG 顶行，与 web 上传语义逐字节一致；真机第三人称确认。
-                CGContextTranslateCTM(ctx, 0, h); CGContextScaleCTM(ctx, 1.0, -1.0);
+                // 上传行序与 web 对齐（ImageBitmap 内存行序 = PNG 行序，不翻转）：
+                // 实锤：加 CTM 翻转后 iPad 只剩锥体残件，与 web"UV 翻转版"一模一样（alphaTest 吃掉镜像区）；
+                // 而旧 YSM 路径（MWBYSMModel.mm:302，无 CTM 翻转）在真机显示正常。
+                // 故此处不翻（与 YSM 路径逐字节同款上传）；数据侧 UV 同样不翻转，两边都与 web 一致。
                 CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), img);
                 glGenTextures(1, &sTex);
                 glBindTexture(GL_TEXTURE_2D, sTex);
