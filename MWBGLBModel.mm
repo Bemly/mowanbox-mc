@@ -1,14 +1,15 @@
 // MWBGLBModel.mm — GLB 直解 + 鱼链绘制（变换/叠加语义逐字照抄 viewer + ysm_to_glb.py）
 // viewer 里 three.js 做的事，这里拆成三件：
 //  1) GLB 解析：头/JSON/BIN 三段，NSJSONSerialization，只读 float32 + uint16（转换器只写这两种）；
-//  2) 姿势：旋转 slerp/位移 lerp（GLB 纯数字通道），scale 走 vis 叠加（molang 求值）；
+//  2) 姿势：MWBYSMAnim 运行时直接吃 YSM 原始关键帧（fatfish_anim.json：全量旋转/位移/缩放＋molang＋分层，
+//     取代旧的 GLB 四元数 clip＋scale sidecar，那条链丢了全部 molang 通道且插值/叠层都不对）；
 //  3) 绘制：走已验证的鱼链（单次 sPartRender(root, s6)＋游戏递归＋自家贴图绑定），
 //     盒子/UV/贴图走 ysm codec（RestoreCube 现成），骨架/动画/显隐走 GLB。
 // 单位：游戏渲染就是 Bedrock/米制单位，GLB 解析零换算（web 移植页实锤：之前误乘 16
 // 会把鱼放大 16 倍、相机包 inside，只能看到巨型多边形；iPad 症状一致）。
 // UV：不翻转（GLTFLoader 对 glTF 贴图 flipY=false；上传链内存行序见 GLBInitGL 注释，必须同 web 一致）。
 #import "MWBGLBModel.h"
-#import "MWBGLBMolang.h"
+#import "MWBYSMAnim.h" // YSM 动画运行时（姿势唯一来源）
 #import "MWBCommon.h"
 #import "MWBYSMCodec.h" // ysm 解密+盒子还原（只用解析器，不走 YSM 渲染）
 #import <substrate.h> // MSFindSymbol 按名解析游戏构造/render
@@ -115,23 +116,15 @@ struct GLBNode {
     std::string name; float t[3]; float q[4]; float s[3];
     int mesh; std::vector<int> children; int parent;
 };
-struct GLBKeys { // 单节点单通道关键帧
-    std::vector<float> times; std::vector<float> vals; // vals 按分量展开（quat 4/pos 3）
-    int comp; BOOL step; // 全段 STEP（任一 mode==1 即按 viewer 持留）
-};
-struct GLBAnim { int loop; float length; std::map<int, GLBKeys> rot; std::map<int, GLBKeys> pos; };
 
 static std::vector<GLBNode> sNodes;
 static std::map<std::string, int> sName2Idx;
 static std::vector<GLBMesh> sMeshes;
 static std::vector<int> sRootSet; // Root 子树（含 Root），只画这些
-static std::map<std::string, GLBAnim> sAnims;
-static NSDictionary *sVisScale = nil; // anim -> {loop,length,tracks}
-static NSArray *sVisOrder = nil;
 static NSData *sTexPNG = nil;
-static NSString *sCurAnim = nil;
 static BOOL sParsed = NO;
-static float sTMain = 0, sTVis = 0; // 主动作时间 / 常驻层时间（viewer 双时钟同款）
+static std::vector<float> sNodeT; // 3*节点：相对父轴心位移（运行时局部矩阵用）
+static BOOL sAnimOK = NO;          // fatfish_anim.json 载入成功（否则画绑定姿势）
 // 落位三件套：本体缩放 sGLBScale（默认 1x，2x 实机太大已回退）＋Y 偏置 sGLBLift（接地算法上再叠）＋
 // 模型最低点 sMinY（解析期扫全顶点，判原点是否在脚）＋实地顶面 sGroundY（AutoTick 方块扫描）。
 static float sGLBScale = 1.0f, sGLBLift = 0.0f, sMinY = 1e30f;
@@ -162,100 +155,6 @@ static void GLBLocalMat(const float *t, const float *q, const float *s, float *m
     o[3] = 0; o[7] = 0; o[11] = 0; o[15] = 1;
     o[12] = t[0]; o[13] = t[1]; o[14] = t[2];
     memcpy(m, o, sizeof(o));
-}
-static void GLBSlerp(const float *a, const float *b, float f, float *o) {
-    float dot = a[0]*b[0]+a[1]*b[1]+a[2]*b[2]+a[3]*b[3];
-    float b2[4]; memcpy(b2, b, sizeof(b2));
-    if (dot < 0) { dot = -dot; b2[0]=-b2[0]; b2[1]=-b2[1]; b2[2]=-b2[2]; b2[3]=-b2[3]; }
-    float s0, s1;
-    if (dot > 0.9995f) { s0 = 1-f; s1 = f; }
-    else {
-        float th = acosf(fminf(1.0f, dot));
-        float st = sinf(th);
-        s0 = sinf((1-f)*th)/st; s1 = sinf(f*th)/st;
-    }
-    for (int i = 0; i < 4; i++) o[i] = s0*a[i]+s1*b2[i];
-    float l = sqrtf(o[0]*o[0]+o[1]*o[1]+o[2]*o[2]+o[3]*o[3]);
-    if (l > 1e-6f) for (int i = 0; i < 4; i++) o[i] /= l;
-}
-
-// ---- 关键帧采样（viewer trackVal 同语义；rot 专用四元数版） ----
-static float GLBLen(id v) { return [v isKindOfClass:[NSNumber class]] ? [v floatValue] : INFINITY; }
-static float GLBWrapT(float t, int loop, float length) {
-    if (loop == 1) {
-        // viewer：length 无穷（sidecar 里 null）即自由跑，不取模不钳制
-        if (isfinite(length) && length > 0) {
-            float r = fmodf(t, length); if (r < 0) r += length; return r;
-        }
-        return t;
-    }
-    if (isfinite(length)) return fminf(t, length);
-    return t;
-}
-static void GLBScaleAt(NSArray *kfs, float t, const MWBMolangEnv *env, int loop, float length, float out[3]) {
-    if (!kfs || !kfs.count) { out[0]=out[1]=out[2]=1; return; }
-    float tt = GLBWrapT(t, loop, length);
-    NSArray *first = kfs[0];
-    if (tt <= [first[0] floatValue]) {
-        NSArray *v = first[2];
-        for (int k = 0; k < 3; k++) out[k] = MWBMolangValue(v[k], env);
-        return;
-    }
-    for (NSUInteger i = 0; i + 1 < kfs.count; i++) {
-        NSArray *a = kfs[i], *b = kfs[i+1];
-        float ta = [a[0] floatValue], tb = [b[0] floatValue];
-        if (tt >= ta && tt <= tb) {
-            if ([a[1] intValue] == 1 || tb == ta) {
-                NSArray *v = a[2];
-                for (int k = 0; k < 3; k++) out[k] = MWBMolangValue(v[k], env);
-                return;
-            }
-            float f = (tt - ta) / (tb - ta);
-            NSArray *va = a[2], *vb = b[2];
-            for (int k = 0; k < 3; k++) {
-                float xa = MWBMolangValue(va[k], env), xb = MWBMolangValue(vb[k], env);
-                out[k] = xa + (xb - xa) * f;
-            }
-            return;
-        }
-    }
-    NSArray *v = [kfs lastObject][2];
-    for (int k = 0; k < 3; k++) out[k] = MWBMolangValue(v[k], env);
-}
-static void GLBRotAt(const GLBKeys *k, float t, int loop, float length, float out[4]) {
-    if (!k || k->times.empty()) { out[0]=out[1]=out[2]=0; out[3]=1; return; }
-    float tt = GLBWrapT(t, loop, length);
-    size_t n = k->times.size();
-    if (tt <= k->times[0]) { memcpy(out, &k->vals[0], 4*sizeof(float)); return; }
-    for (size_t i = 0; i + 1 < n; i++) {
-        if (tt >= k->times[i] && tt <= k->times[i+1]) {
-            if (k->step || k->times[i+1] == k->times[i]) {
-                memcpy(out, &k->vals[i*4], 4*sizeof(float)); return;
-            }
-            float f = (tt - k->times[i]) / (k->times[i+1] - k->times[i]);
-            GLBSlerp(&k->vals[i*4], &k->vals[(i+1)*4], f, out);
-            return;
-        }
-    }
-    memcpy(out, &k->vals[(n-1)*4], 4*sizeof(float));
-}
-static void GLBPosAt(const GLBKeys *k, float t, int loop, float length, float out[3]) {
-    if (!k || k->times.empty()) return; // 调用方保留 base
-    float tt = GLBWrapT(t, loop, length);
-    size_t n = k->times.size();
-    if (tt <= k->times[0]) { memcpy(out, &k->vals[0], 3*sizeof(float)); return; }
-    for (size_t i = 0; i + 1 < n; i++) {
-        if (tt >= k->times[i] && tt <= k->times[i+1]) {
-            if (k->step || k->times[i+1] == k->times[i]) {
-                memcpy(out, &k->vals[i*3], 3*sizeof(float)); return;
-            }
-            float f = (tt - k->times[i]) / (k->times[i+1] - k->times[i]);
-            for (int c = 0; c < 3; c++)
-                out[c] = k->vals[i*3+c] + (k->vals[(i+1)*3+c] - k->vals[i*3+c]) * f;
-            return;
-        }
-    }
-    memcpy(out, &k->vals[(n-1)*3], 3*sizeof(float));
 }
 
 // ---- GLB 解析 ----
@@ -293,10 +192,10 @@ BOOL MWBGLBEnsureParsed(void) {
     binLen = data.length - binOff;
     const uint8_t *bin = b + binOff;
     NSArray *jNodes = j[@"nodes"], *jMeshes = j[@"meshes"];
-    NSArray *jAccs = j[@"accessors"], *jViews = j[@"bufferViews"], *jAnims = j[@"animations"];
+    NSArray *jAccs = j[@"accessors"], *jViews = j[@"bufferViews"];
     if (!jNodes || !jMeshes || !jAccs || !jViews) { MWBLogFile(@"[GLB] 缺段"); return NO; }
 
-    sNodes.clear(); sName2Idx.clear(); sMeshes.clear(); sRootSet.clear(); sAnims.clear();
+    sNodes.clear(); sName2Idx.clear(); sMeshes.clear(); sRootSet.clear();
     sMinY = 1e30f; // 本轮重扫最低点
     // 节点
     for (NSUInteger i = 0; i < jNodes.count; i++) {
@@ -370,39 +269,6 @@ BOOL MWBGLBEnsureParsed(void) {
         sMeshes.clear(); sNodes.clear(); sRootSet.clear();
         return NO;
     }
-    // 动画（只取纯数字 rot/pos，molang 通道跳过，viewer/转换器同款）
-    for (NSDictionary *clip in (NSArray *)(jAnims ?: @[])) {
-        NSString *full = clip[@"name"];
-        NSString *bare = [full hasPrefix:@"main:"] ? [full substringFromIndex:5] : full;
-        GLBAnim an; an.loop = [[clip[@"extras"][@"loop"] description] isEqualToString:@"1"] ? 1 : 2;
-        // extras.loop 在 JSON 里是 bool；description 保险起见双判
-        id lp = clip[@"extras"][@"loop"];
-        an.loop = ([lp boolValue]) ? 1 : 2;
-        an.length = [clip[@"extras"][@"length"] floatValue];
-        NSArray *chans = clip[@"channels"], *smps = clip[@"samplers"];
-        for (NSDictionary *ch in chans) {
-            int ni = [ch[@"target"][@"node"] intValue];
-            NSString *path = ch[@"target"][@"path"];
-            NSDictionary *sm = smps[[ch[@"sampler"] intValue]];
-            int iAcc = [sm[@"input"] intValue], oAcc = [sm[@"output"] intValue];
-            NSString *interp = sm[@"interpolation"];
-            if (iAcc < 0 || oAcc < 0 || iAcc >= (int)jAccs.count || oAcc >= (int)jAccs.count) continue;
-            int nt = [jAccs[iAcc][@"count"] intValue];
-            const void *tp = NULL, *vp = NULL;
-            if (!GLBReadAcc(jAccs[iAcc], jViews, bin, binLen, 5126, @"SCALAR", -1, &tp)) continue;
-            BOOL isRot = [path isEqualToString:@"rotation"], isPos = [path isEqualToString:@"translation"];
-            if (!isRot && !isPos) continue; // scale 走 vis，不从 GLB 取
-            int comp = isRot ? 4 : 3;
-            NSString *vt = isRot ? @"VEC4" : @"VEC3";
-            if (!GLBReadAcc(jAccs[oAcc], jViews, bin, binLen, 5126, vt, nt, &vp)) continue;
-            GLBKeys k; k.comp = comp; k.step = [interp isEqualToString:@"STEP"];
-            const float *ft = (const float *)tp, *fv = (const float *)vp;
-            for (int f = 0; f < nt; f++) { k.times.push_back(ft[f]); for (int c = 0; c < comp; c++) k.vals.push_back(fv[f*comp+c]); }
-            if (isRot) an.rot[ni] = k; else an.pos[ni] = k; // 位移与节点同单位，零换算（与 web 一致）
-        }
-        // translation 输出是绝对位移（含 pivot），与节点同单位零换算（与 web 一致；勿乘 16）
-        sAnims[[bare UTF8String]] = an;
-    }
     // 贴图（images[0] 内嵌 PNG，解码留给 GL 线程上传，这里只存字节）
     NSArray *jImgs = j[@"images"];
     if (jImgs.count) {
@@ -413,57 +279,56 @@ BOOL MWBGLBEnsureParsed(void) {
             if (off + len <= binLen) sTexPNG = [NSData dataWithBytes:bin+off length:len];
         }
     }
-    // vis sidecar（scale 轨道 + 顺序 + 设置）
-    NSString *visPath = [dir stringByAppendingPathComponent:@"fatfish_vis.json"];
-    NSData *visData = [NSData dataWithContentsOfFile:visPath];
-    if (visData) {
-        NSDictionary *vis = [NSJSONSerialization JSONObjectWithData:visData options:0 error:&e];
-        if (vis) { sVisScale = vis[@"scale"]; sVisOrder = vis[@"order"]; }
-        else MWBLogFile(@"[GLB] sidecar 解析失败：%@", e);
-    } else MWBLogFile(@"[GLB] 无 sidecar（只画绑定姿势）：%@", visPath);
-    if (!sCurAnim) sCurAnim = @"idle";
+    // YSM 动画运行时（姿势唯一来源；缺文件则画绑定姿势）
+    {
+        std::vector<const char *> names; names.reserve(sNodes.size());
+        sNodeT.assign(sNodes.size() * 3, 0);
+        for (size_t i = 0; i < sNodes.size(); i++) {
+            names.push_back(sNodes[i].name.c_str());
+            memcpy(&sNodeT[i * 3], sNodes[i].t, sizeof(float) * 3);
+        }
+        sAnimOK = MWBAnimLoad([dir stringByAppendingPathComponent:@"fatfish_anim.json"], names.data(), (int)names.size());
+    }
     sParsed = YES;
-    MWBLogFile(@"[GLB] 解析成功 构建=%@ 节点=%lu 网格=%lu 三角=%ld Root子树=%lu 动画=%lu 贴图=%lu字节 sidecar=%@ minY=%.2f",
+    MWBLogFile(@"[GLB] 解析成功 构建=%@ 节点=%lu 网格=%lu 三角=%ld Root子树=%lu 贴图=%lu字节 YSM动画=%@ minY=%.2f",
                @MWB_BUILD_TAG,(unsigned long)sNodes.size(), (unsigned long)sMeshes.size(), totalTris,
-               (unsigned long)sRootSet.size(), (unsigned long)sAnims.size(),
-               (unsigned long)(sTexPNG ? sTexPNG.length : 0), sVisScale ? @"有" : @"无", sMinY);
+               (unsigned long)sRootSet.size(), (unsigned long)(sTexPNG ? sTexPNG.length : 0), sAnimOK ? @"有" : @"无", sMinY);
     MWBGLBLogStats();
     return YES;
 }
 
 void MWBGLBLogStats(void) {
-    MWBLogFile(@"[GLB] 自检 节点=%lu 网格=%lu Root子树=%lu 动画=%lu 当前=%@ sidecar动画=%lu",
-               (unsigned long)sNodes.size(), (unsigned long)sMeshes.size(),
-               (unsigned long)sRootSet.size(), (unsigned long)sAnims.size(), sCurAnim,
-               (unsigned long)(sVisScale ? [sVisScale count] : 0));
+    MWBLogFile(@"[GLB] 自检 节点=%lu 网格=%lu Root子树=%lu YSM动画=%@ 主=%s 控制器=%s 寿命=%.1f 二阶=%d",
+               (unsigned long)sNodes.size(), (unsigned long)sMeshes.size(), (unsigned long)sRootSet.size(),
+               sAnimOK ? @"有" : @"无", MWBAnimMainName(), MWBAnimCtrlState(), MWBAnimLife(), MWBAnimSecondOrderCount());
 }
 
 // 免重启重载（调参不用反复杀进程；GL 对象下次首画重建）
 void MWBGLBReload(void) {
     for (auto &m : sMeshes) { free(m.pos); free(m.uv); free(m.idx); }
-    sMeshes.clear(); sNodes.clear(); sName2Idx.clear(); sRootSet.clear(); sAnims.clear();
-    sVisScale = nil; sVisOrder = nil; sTexPNG = nil;
+    sMeshes.clear(); sNodes.clear(); sName2Idx.clear(); sRootSet.clear();
+    sTexPNG = nil; MWBAnimUnload(); sAnimOK = NO;
     if (sTex) { /* GL 线程外不删，下次首画复用或重建 */ }
-    sTex = 0; sTMain = 0; sTVis = 0; sVBOInit = NO;
+    sTex = 0; sVBOInit = NO;
     sParsed = NO;
     MWBLogFile(@"[GLB] 重载");
     MWBGLBEnsureParsed();
 }
 
 void MWBGLBSetAnim(NSString *name) {
-    sCurAnim = [name copy] ?: @"idle";
-    sTMain = 0; // 切 clip 从头播（中途切不断帧，跳动作不抽搐）
-    MWBLogFile(@"[GLB] 切动作 %@", sCurAnim);
+    MWBAnimForceMain(name.length ? name.UTF8String : NULL); // 手动主动画（sticky，glbanim-auto 回自动）
+    MWBLogFile(@"[GLB] 手动主动画 %@", name ?: @"(自动)");
 }
 
-// ---- 自动动作（香草接轨）：优先级 death > 睡 > 水 > 飞 > 空中 > 潜行 > 跑/走/闲 ----
+// ---- 动画输入采集（香草状态 → MWBAnimInput；主动画选择在运行时内，与 web pickMain 同） ----
 // 状态信号（kuna 反 0.10 实锤，全直接读偏移，零游戏调用，normalTick 内调安全）：
 // - 睡 Player::isSleeping=+0x1804；水 Entity::isInWater=+0x12d；落地 Entity::move 写 +0x125；
-// - 潜行 LocalPlayer::isSneaking=*(*(p+0x1810)+0x12)；飞 abil[1]；血 int +0x168；vy +0x70；
-// - 速度照抄 Mob::updateWalkAnim：水平位移 hypot(dx,dz)/dt，米/秒＋EMA＋迟滞（跑 5.4/4.6，走 0.6/0.35）。
+// - 潜行 LocalPlayer::isSneaking=*(*(p+0x1810)+0x12)；飞 abil[1]；血 int +0x168；
+// - 速度：位置差分/实际时间（米/秒，EMA）；视角 yaw +0x78、身体 yaw +0x150、俯仰 +0x7c（度）。
 static BOOL sGLBAuto = YES;
 void MWBGLBSetAuto(BOOL on) {
     sGLBAuto = on;
+    if (on) MWBAnimForceMain(NULL);
     MWBLogFile(@"[GLB] 自动动作%@", on ? @"开" : @"关");
 }
 void MWBGLBSetScale(float s) {
@@ -474,69 +339,60 @@ void MWBGLBSetLift(float m) {
     if (m > -10.0f && m < 10.0f) sGLBLift = m;
     MWBLogFile(@"[GLB] 落位偏置 %+.2f米", sGLBLift);
 }
+static float GLBWrap180(float a) { a = fmodf(a + 180.0f, 360.0f); if (a < 0) a += 360.0f; return a - 180.0f; }
 void MWBGLBAutoTick(void *player) {
-    if (!sGLBAuto || !player) return;
-    static int sCd = 0;
-    if ((sCd++ % 10) != 0) return; // 秒级状态，10 tick 判一次不抖不费
+    if (!player) return;
     char *p = (char *)player;
-    float now = (float)[[NSDate date] timeIntervalSince1970];
-    static float sPx = 0, sPz = 0, sT = 0, sSpd = 0;
-    static BOOL sInit = NO;
-    static int sLoc = 0; // 0 闲 1 走 2 跑（迟滞位）
-    float px = *(float *)(p + 0x28), pz = *(float *)(p + 0x28 + 8);
-    float vy = *(float *)(p + 0x70);
-    if (!sInit) { sInit = YES; sPx = px; sPz = pz; sT = now; }
-    else if (now > sT) {
-        float dt = now - sT;
+    double now = CFAbsoluteTimeGetCurrent();
+    static double sT = 0; static float sPx = 0, sPy = 0, sPz = 0, sBody = 0, sGs = 0, sVs = 0, sYs = 0;
+    float px = *(float *)(p + 0x28), py = *(float *)(p + 0x28 + 4), pz = *(float *)(p + 0x28 + 8);
+    float body = *(float *)(p + ENTITY_BODY_YAW_OFF), view = *(float *)(p + ENTITY_YAW_OFF);
+    if (sT > 0) {
+        float dt = (float)(now - sT);
         if (dt > 0.005f && dt < 2.0f) {
-            float inst = sqrtf((px - sPx) * (px - sPx) + (pz - sPz) * (pz - sPz)) / dt;
-            if (inst < 30.0f) sSpd += 0.3f * (inst - sSpd); // EMA，钳传送毛刺
+            float gs = sqrtf((px - sPx) * (px - sPx) + (pz - sPz) * (pz - sPz)) / dt;
+            float vs = (py - sPy) / dt, ys = GLBWrap180(body - sBody) / dt;
+            if (gs < 30.0f) sGs += 0.4f * (gs - sGs);   // EMA，钳传送毛刺
+            if (fabsf(vs) < 60.0f) sVs += 0.5f * (vs - sVs);
+            sYs += 0.4f * (ys - sYs);
         }
-        sPx = px; sPz = pz; sT = now;
     }
-    int hp = *(int *)(p + 0x168);
-    uint8_t water = *(uint8_t *)(p + 0x12d);
-    uint8_t sleep = *(uint8_t *)(p + 0x1804);
-    uint8_t ground = *(uint8_t *)(p + 0x125);
-    // 接地扫描：站立跟实地顶面（+0x28 是眼还是脚不再靠猜，直接扫方块）；
-    // 飞/游/空跟玩家（sHasGround=NO 时画侧回落到 py）。
-    // 只在落地非水时扫（ts=*(p+0x48)，getTile  tick 线程只读可调，小地图同款）。
-    if (ground && !water) {
-        void *ts = *(void **)(p + 0x48);
-        sHasGround = NO;
-        if (ts) {
-            int cx = (int)floorf(px), cz = (int)floorf(pz);
-            for (int y = (int)floorf(*(float *)(p + 0x28 + 4)); y > (int)floorf(*(float *)(p + 0x28 + 4)) - 14 && y >= 0; y--) {
-                MWBBlockPos bp = {cx, y, cz};
-                uint8_t id = MWB010GetTile(ts, &bp);
-                if (id != 0 && id != 8 && id != 9) { sGroundY = (float)(y + 1); sHasGround = YES; break; }
+    sT = now; sPx = px; sPy = py; sPz = pz; sBody = body;
+    uint8_t water = *(uint8_t *)(p + 0x12d), ground = *(uint8_t *)(p + 0x125);
+    // 接地扫描：站立跟实地顶面（+0x28 是眼，直接扫方块），飞/游/空跟玩家（sHasGround=NO 时画侧回落到眼-1.62）。
+    // 只在落地非水时扫（ts=*(p+0x48)，getTile tick 线程只读可调，小地图同款），10 tick 一次。
+    static int sCd = 0;
+    if ((sCd++ % 10) == 0) {
+        if (ground && !water) {
+            void *ts = *(void **)(p + 0x48);
+            sHasGround = NO;
+            if (ts) {
+                int cx = (int)floorf(px), cz = (int)floorf(pz);
+                for (int y = (int)floorf(py); y > (int)floorf(py) - 14 && y >= 0; y--) {
+                    MWBBlockPos bp = {cx, y, cz};
+                    uint8_t id = MWB010GetTile(ts, &bp);
+                    if (id != 0 && id != 8 && id != 9) { sGroundY = (float)(y + 1); sHasGround = YES; break; }
+                }
             }
-        }
-    } else sHasGround = NO;
-    BOOL flying = (p + PLAYER_ABILITIES_OFFSET)[1];
+        } else sHasGround = NO;
+    }
     void *t = *(void **)(p + 0x1810);
-    BOOL sneak = t ? *(uint8_t *)((char *)t + 0x12) : NO;
-    const char *want = "idle";
-    if (hp <= 0) want = "death";
-    else if (sleep) want = "sleep";
-    else if (water) want = (sSpd > 0.5f) ? "swim" : "swim_stand";
-    else if (flying) want = "fly";
-    else if (!ground) want = (vy > 0.25f) ? "jump" : ((vy < -0.25f) ? "drop_loop" : "hover");
-    else if (sneak) { want = "sneak"; sLoc = 0; }
-    else {
-        float s = sSpd;
-        if (s > 5.4f) sLoc = 2;
-        else if (s < 4.6f && sLoc == 2) sLoc = 1;
-        else if (s > 0.6f && sLoc == 0) sLoc = 1;
-        else if (s < 0.35f) sLoc = 0;
-        want = (sLoc == 2) ? "run" : ((sLoc == 1) ? "walk" : "idle");
-    }
-    if (sLoc != 0 && (want[0] != 'r' && want[0] != 'w')) sLoc = 0; // 离开 locomotion 复位迟滞
-    static char sLast[32] = "idle";
-    if (strcmp(sLast, want) != 0) {
-        snprintf(sLast, sizeof(sLast), "%s", want);
-        MWBGLBSetAnim([NSString stringWithUTF8String:want]);
-    }
+    MWBAnimInput in;
+    in.groundSpeed = sGs; in.vertSpeed = sVs; in.yawSpeed = sYs;
+    in.headYaw = GLBWrap180(view - body);
+    in.headPitch = *(float *)(p + ENTITY_PITCH_OFF);
+    in.onGround = ground != 0; in.inWater = water != 0;
+    in.flying = (p + PLAYER_ABILITIES_OFFSET)[1] != 0;
+    in.sneaking = t ? *(uint8_t *)((char *)t + 0x12) != 0 : NO;
+    in.sleeping = *(uint8_t *)(p + 0x1804) != 0;
+    in.dead = *(int *)(p + 0x168) <= 0;
+    in.swinging = NO;
+    MWBAnimSetInput(&in);
+    static int sLogCd = 0;
+    if ((sLogCd++ % 200) == 0)
+        MWBLogFile(@"[YSM动画] 输入 地速=%.2f 竖速=%.2f 角速=%.1f 头yaw=%.1f 头pitch=%.1f 地=%d 水=%d 飞=%d 潜=%d 主=%s 控制器=%s",
+                   in.groundSpeed, in.vertSpeed, in.yawSpeed, in.headYaw, in.headPitch, in.onGround, in.inWater, in.flying,
+                   in.sneaking, MWBAnimMainName(), MWBAnimCtrlState());
 }
 
 // ---- 自家贴图（ES1 固定管线：游戏纹理不动，只绑自己的画完恢复；Nearest 像素风）
@@ -674,88 +530,22 @@ void MWBGLBDraw(void) {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, oldEB);
         MWBLogFile(@"[GLB] VBO 上传完成 网格=%lu", (unsigned long)sMeshes.size());
     }
-    // 双时钟推进（viewer 同款，dt 钳 0.1）
+    // 运行时推进（dt 钳 0.1，帧率无关）
     static double sLast = 0;
     double now = CFAbsoluteTimeGetCurrent();
     float dt = sLast > 0 ? (float)(now - sLast) : 0.016f;
     if (dt > 0.1f) dt = 0.1f; if (dt < 0) dt = 0;
     sLast = now;
-    sTMain += dt; sTVis += dt;
 
-    // 当前动作（GLB 里 main: 前缀，sidecar 裸名，两种都试，viewer 同款）
-    const GLBAnim *an = NULL;
-    char abuf[128]; snprintf(abuf, sizeof(abuf), "%s", [sCurAnim UTF8String]);
-    auto it = sAnims.find(abuf);
-    if (it == sAnims.end()) { snprintf(abuf, sizeof(abuf), "main:%s", [sCurAnim UTF8String]); it = sAnims.find(abuf); }
-    int loop = 2; float len = 0;
-    if (it != sAnims.end()) { an = &it->second; loop = an->loop; len = an->length; }
-
-    // vis 叠加：常驻层 + 当前动作，后者覆盖（viewer updateVisibility 同款）
-    MWBMolangEnv env; env.roaming = @{}; env.t = sTMain; // 默认设置全 0（P4 接 UI）
-    std::map<std::string, NSDictionary *> computed; // bone -> @{kfs,loop,len,main}
-    if (sVisScale) {
-        for (id a in (NSArray *)(sVisOrder ?: @[])) {
-            NSDictionary *A = sVisScale[a];
-            if (!A) continue;
-            for (id bn in (NSDictionary *)A[@"tracks"])
-                computed[[bn UTF8String]] = @{@"kfs": A[@"tracks"][bn], @"loop": A[@"loop"] ?: @2,
-                                              @"len": A[@"length"] ?: [NSNull null], @"main": @NO};
-        }
-        NSDictionary *A = sVisScale[sCurAnim];
-        if (A) for (id bn in (NSDictionary *)A[@"tracks"])
-            computed[[bn UTF8String]] = @{@"kfs": A[@"tracks"][bn], @"loop": A[@"loop"] ?: @2,
-                                          @"len": A[@"length"] ?: [NSNull null], @"main": @YES};
-    }
-
-    // 世界矩阵（只算 Root 子树；local = T·R·S；位移/旋转走 track，无则 base）
+    // 局部矩阵：YSM 运行时（全量关键帧＋molang＋分层＋头随视角）；未载入则绑定姿势
     static std::vector<float> sWorld; // 每节点 16
     sWorld.assign(sNodes.size() * 16, 0);
     std::vector<char> sHidden(sNodes.size(), 0);
-    std::vector<float> sScaleX(sNodes.size()*3, 0);
-    for (int ni : sRootSet) {
-        float sc[3] = { sNodes[ni].s[0], sNodes[ni].s[1], sNodes[ni].s[2] };
-        auto hc = computed.find(sNodes[ni].name);
-        BOOL hide = NO;
-        if (hc != computed.end()) {
-            NSDictionary *hit = hc->second;
-            int lp = [hit[@"loop"] intValue];
-            float ln = GLBLen(hit[@"len"]);
-            float tb = [hit[@"main"] boolValue] ? sTMain : sTVis;
-            float s[3]; GLBScaleAt(hit[@"kfs"], tb, &env, lp, ln, s);
-            sc[0]=s[0]; sc[1]=s[1]; sc[2]=s[2];
-            hide = (fabsf(s[0])<1e-3f || fabsf(s[1])<1e-3f || fabsf(s[2])<1e-3f);
-        }
-        sHidden[ni] = hide;
-        sScaleX[ni*3]=sc[0]; sScaleX[ni*3+1]=sc[1]; sScaleX[ni*3+2]=sc[2];
-        float t[3], q[4];
-        memcpy(t, sNodes[ni].t, sizeof(t)); memcpy(q, sNodes[ni].q, sizeof(q));
-        if (an) {
-            auto rp = an->rot.find(ni); if (rp != an->rot.end()) GLBRotAt(&rp->second, sTMain, loop, len, q);
-            auto pp = an->pos.find(ni); if (pp != an->pos.end()) GLBPosAt(&pp->second, sTMain, loop, len, t);
-        }
-        float L[16]; GLBLocalMat(t, q, sc, L);
-        memcpy(&sWorld[ni*16], L, sizeof(L));
-    }
-    // 头跟视角、身跟身体（香草架构：拖视角只转头，身体不动；T 只带身体 yaw，见下落位段）。
-    // 给 Head 骨 local premultiply 一段 Δyaw=body-view（与 T 的 θ=π-ψ 同约定），头在颈部原地转向；
-    // 子件（脸/帽/耳）在 Head 之下，dfs 组装时自动继承。身体源 +0x150（Mob::normalTick 实锤），
-    // 旧 +0x3c 无写者≈常量，走路时身体不跟。
-    if (gLocalPlayer) {
-        auto hIt = sName2Idx.find("Head");
-        if (hIt != sName2Idx.end()) {
-            float vb = *(float *)((char *)gLocalPlayer + ENTITY_BODY_YAW_OFF);
-            float vv = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);
-            float dd = (vb - vv) * (float)M_PI / 180.0f;
-            if (fabsf(dd) > 1e-4f) {
-                float cd = cosf(dd), sd = sinf(dd);
-                float Rd[16] = {cd,0,-sd,0, 0,1,0,0, sd,0,cd,0, 0,0,0,1};
-                float Lh[16]; GLBMatMul(Rd, &sWorld[hIt->second*16], Lh);
-                memcpy(&sWorld[hIt->second*16], Lh, sizeof(Lh));
-            }
-        } else {
-            static BOOL sNoHead = NO;
-            if (!sNoHead) { sNoHead = YES; MWBLogFile(@"[GLB] Head 骨没找到，头不跟视角"); }
-        }
+    if (sAnimOK) {
+        MWBAnimTick(dt);
+        MWBAnimPose(sRootSet.data(), (int)sRootSet.size(), sNodeT.data(), sWorld.data(), sHidden.data());
+    } else {
+        for (int ni : sRootSet) GLBLocalMat(sNodes[ni].t, sNodes[ni].q, sNodes[ni].s, &sWorld[ni*16]);
     }
     auto rIt = sName2Idx.find("Root");
     int rootIdx = (rIt != sName2Idx.end()) ? rIt->second : sRootSet[0];
@@ -887,7 +677,7 @@ void MWBGLBDraw(void) {
         visOK[ni] = visOK[sNodes[ni].parent] && !sHidden[ni];
     }
     for (int ni : sRootSet) {
-        if (computed.count(sNodes[ni].name)) { total++; if (visOK[ni]) shown++; }
+        if (sNodes[ni].mesh >= 0) { total++; if (visOK[ni]) shown++; } // 可见=有网格且自身/祖先未被缩放隐藏
         if (!visOK[ni]) continue;
         int mi = sNodes[ni].mesh;
         if (mi < 0 || mi >= (int)sMeshes.size()) continue;

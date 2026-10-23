@@ -58,6 +58,14 @@
   <label>动作（<span id="animCount"></span>）</label>
   <select id="anim"></select>
   <div class="row"><button id="play">⏸ 暂停</button><button id="selftest">🧪 自检</button></div>
+  <div class="chk"><input type="checkbox" id="ysm" checked> 右侧用 YSM 运行时（全量关键帧＋molang＋分层，取代 GLB clip）</div>
+  <div id="ysmctl" style="font-size:12px">
+    状态 <select id="ysmState"><option value="">自动（按下方信号）</option></select>
+    <div>地速 <input type="range" id="ysmGs" min="0" max="8" step="0.1" value="0"> 竖速 <input type="range" id="ysmVs" min="-20" max="10" step="0.5" value="0"></div>
+    <div>头yaw <input type="range" id="ysmHy" min="-90" max="90" step="1" value="0"> 头pitch <input type="range" id="ysmHp" min="-90" max="90" step="1" value="0"></div>
+    <div><input type="checkbox" id="ysmGround" checked>着地 <input type="checkbox" id="ysmWater">水中
+      <input type="checkbox" id="ysmFly">飞行 <input type="checkbox" id="ysmSneak">潜行 <input type="checkbox" id="ysmSleep">睡</div>
+  </div>
   <div class="chk"><input type="checkbox" id="layers" checked> 常驻层（order 八层，mod 同款）
     <input type="checkbox" id="spin" style="margin-left:12px"> 自动旋转</div>
   <div id="diff">等待加载…</div>
@@ -70,6 +78,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { molVal } from './js/plugin-molang.js';
+import { createRig } from './js/ysm-anim.js';
 import { parseGLB, computePose, firstVertexClip, fmtParseLog, fmtStats, fmtFirstVertex } from './js/plugin-glb.js';
 import { viewerVisibility } from './js/viewer-ref.js';
 
@@ -132,6 +141,7 @@ function initProg() {
 
 // ---------- 状态 ----------
 let vis = null, parsed = null, texR = null;
+let animSide = null, rig = null; // YSM 全量动画 sidecar + 运行时
 const vbos = []; // 每 mesh [posBuf, uvBuf, idxBuf]
 let mixer = null, actions = {}, cur = null, curName = 'idle', modelL = null;
 const nodeByName = new Map();
@@ -262,10 +272,18 @@ async function boot() {
     fetch('./testdata/fatfish_vis.json').then((r) => { if (!r.ok) throw new Error('fatfish_vis.json 取不到'); return r.json(); }),
   ]);
   vis = visJson;
+  // YSM 全量动画 sidecar（可选；没有就只走旧链路）
+  try { const r = await fetch('./testdata/fatfish_anim.json'); if (r.ok) animSide = await r.json(); } catch (e) { animSide = null; }
   // 右：手解 GLB（插件 MWBGLBEnsureParsed 移植）
   parsed = parseGLB(glbBuf, log);
   if (!parsed) { $('loading').textContent = '手解 GLB 失败，看日志'; return; }
   log(fmtParseLog(parsed, Object.keys(vis.scale || {}).length));
+  if (animSide) {
+    rig = createRig(animSide, parsed, roaming);
+    const sel = $('ysmState');
+    Object.keys(animSide.anims).filter((n) => !/parallel|——/.test(n)).forEach((n) => { const o = document.createElement('option'); o.value = n; o.textContent = n; sel.appendChild(o); });
+    log(`[YSM] 运行时就绪 动画=${Object.keys(animSide.anims).length} 控制器=${Object.keys(animSide.ctrls || {}).length} 函数=${(animSide.funcs || []).length}`);
+  }
   log(fmtStats(parsed, 'idle', Object.keys(vis.scale || {}).length));
   // ?m=1 米制调试：位移/顶点/动画位移除 16（与三边同单位）
   if (METERS) {
@@ -434,7 +452,16 @@ function animate() {
     viewM.copy(rc.matrixWorldInverse);
     wvpM.multiplyMatrices(projM, viewM);
     wvpArr.set(wvpM.elements);
-    const pose = computePose(parsed, vis, curName, tMain, tVis, roaming);
+    let pose;
+    if (rig && $('ysm').checked) {
+      const st = $('ysmState').value;
+      const inp = { groundSpeed: +$('ysmGs').value, vertSpeed: +$('ysmVs').value, yawSpeed: 0,
+        onGround: $('ysmGround').checked, inWater: $('ysmWater').checked, flying: $('ysmFly').checked,
+        sneaking: $('ysmSneak').checked, sleeping: $('ysmSleep').checked, dead: false,
+        headYaw: +$('ysmHy').value, headPitch: +$('ysmHp').value, forceMain: st || null };
+      rig.tick(paused ? 0 : dt, inp);
+      pose = rig.pose();
+    } else pose = computePose(parsed, vis, curName, tMain, tVis, roaming);
     drawPlugin(wvpArr, pose);
     if (frames % 30 === 0) {
       // 对照：可见计数（移植 vs 参考，只比 Root 子树＋子树继承，见 viewer-ref.js）
@@ -451,6 +478,7 @@ function animate() {
       }
       const same = pose.shown === ref.shown && pose.total === ref.total;
       diffBox.innerHTML =
+        (rig && $('ysm').checked ? `YSM 主=${pose.main} 控制器=${pose.ctrl} 寿命=${rig.life.toFixed(1)}s v.timer=${(rig.vars.get('v.timer') || 0).toFixed(1)} 二阶=${rig.so.size}\n` : '') +
         `动作=${curName} tMain=${tMain.toFixed(2)} tVis=${tVis.toFixed(2)}\n` +
         `可见 移植=${pose.shown}/${pose.total} 参考=${ref.shown}/${ref.total} ` +
         (same ? '<span class="ok">一致 ✅</span>' : '<span class="bad">不一致 ❌</span>') + '\n' +
