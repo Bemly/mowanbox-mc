@@ -94,9 +94,14 @@ static void GLBSlerp(const float *a, const float *b, float f, float *o) {
 }
 
 // ---- 关键帧采样（viewer trackVal 同语义；rot 专用四元数版） ----
+static float GLBLen(id v) { return [v isKindOfClass:[NSNumber class]] ? [v floatValue] : INFINITY; }
 static float GLBWrapT(float t, int loop, float length) {
-    if (loop == 1 && isfinite(length) && length > 0) {
-        float r = fmodf(t, length); if (r < 0) r += length; return r;
+    if (loop == 1) {
+        // viewer：length 无穷（sidecar 里 null）即自由跑，不取模不钳制
+        if (isfinite(length) && length > 0) {
+            float r = fmodf(t, length); if (r < 0) r += length; return r;
+        }
+        return t;
     }
     if (isfinite(length)) return fminf(t, length);
     return t;
@@ -439,17 +444,21 @@ void MWBGLBDraw(void) {
     if (it != sAnims.end()) { an = &it->second; loop = an->loop; len = an->length; }
 
     // vis 叠加：常驻层 + 当前动作，后者覆盖（viewer updateVisibility 同款）
+    // 每层带自己的 loop/length，时间基：主动作层用 sTMain，常驻层用 sTVis（viewer 双时钟同款）
     MWBMolangEnv env; env.roaming = @{}; env.t = sTMain; // 默认设置全 0（P4 接 UI）
-    std::map<std::string, NSArray *> computed; // bone -> track 数组
-    std::map<std::string, const GLBAnim *> srcOf;
+    std::map<std::string, NSDictionary *> computed; // bone -> @{kfs,loop,len,main}
     if (sVisScale) {
         for (id a in (NSArray *)(sVisOrder ?: @[])) {
             NSDictionary *A = sVisScale[a];
             if (!A) continue;
-            for (id bn in (NSDictionary *)A[@"tracks"]) computed[[bn UTF8String]] = A[@"tracks"][bn];
+            for (id bn in (NSDictionary *)A[@"tracks"])
+                computed[[bn UTF8String]] = @{@"kfs": A[@"tracks"][bn], @"loop": A[@"loop"] ?: @2,
+                                              @"len": A[@"length"] ?: [NSNull null], @"main": @NO};
         }
         NSDictionary *A = sVisScale[sCurAnim];
-        if (A) for (id bn in (NSDictionary *)A[@"tracks"]) computed[[bn UTF8String]] = A[@"tracks"][bn];
+        if (A) for (id bn in (NSDictionary *)A[@"tracks"])
+            computed[[bn UTF8String]] = @{@"kfs": A[@"tracks"][bn], @"loop": A[@"loop"] ?: @2,
+                                          @"len": A[@"length"] ?: [NSNull null], @"main": @YES};
     }
 
     // 世界矩阵（只算 Root 子树；local = T·R·S）
@@ -463,9 +472,11 @@ void MWBGLBDraw(void) {
         auto hc = computed.find(sNodes[ni].name);
         BOOL hide = NO;
         if (hc != computed.end()) {
-            float s[3]; GLBScaleAt(hc->second, sTVis, &env, loop, len, s);
-            // 注意：sidecar 里常驻层与主动作时间基不同（viewer：主用 cur.time，常驻用 visT）
-            // 这里简化全用 sTVis；主动作 scale 轨道 P5 对齐 viewer 再分双时钟
+            NSDictionary *hit = hc->second;
+            int lp = [hit[@"loop"] intValue];
+            float ln = GLBLen(hit[@"len"]);
+            float tb = [hit[@"main"] boolValue] ? sTMain : sTVis;
+            float s[3]; GLBScaleAt(hit[@"kfs"], tb, &env, lp, ln, s);
             sc[0]=s[0]; sc[1]=s[1]; sc[2]=s[2];
             hide = (fabsf(s[0])<1e-3f || fabsf(s[1])<1e-3f || fabsf(s[2])<1e-3f);
         }
