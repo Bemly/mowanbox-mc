@@ -132,9 +132,9 @@ static NSData *sTexPNG = nil;
 static NSString *sCurAnim = nil;
 static BOOL sParsed = NO;
 static float sTMain = 0, sTVis = 0; // 主动作时间 / 常驻层时间（viewer 双时钟同款）
-// 落位三件套：本体缩放 sGLBScale（默认 2x，用户要看大）＋Y 偏置 sGLBLift（接地算法上再叠）＋
+// 落位三件套：本体缩放 sGLBScale（默认 1x，2x 实机太大已回退）＋Y 偏置 sGLBLift（接地算法上再叠）＋
 // 模型最低点 sMinY（解析期扫全顶点，判原点是否在脚）＋实地顶面 sGroundY（AutoTick 方块扫描）。
-static float sGLBScale = 2.0f, sGLBLift = 0.0f, sMinY = 1e30f;
+static float sGLBScale = 1.0f, sGLBLift = 0.0f, sMinY = 1e30f;
 static float sGroundY = 0; static BOOL sHasGround = NO;
 static GLuint sTex = 0; // 自家贴图（GL 线程建，reload 时置 0 下次重建）
 static BOOL sVBOInit = NO; // VBO 已上传标记（reload 清零，下次重传；旧 GPU 缓冲随进程释放）
