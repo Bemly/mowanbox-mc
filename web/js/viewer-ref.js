@@ -25,7 +25,9 @@ function trackVal(track, t, env, loop, length) { // viewer 230-248 行原样
 
 // 与 viewer updateVisibility 等价，但改为纯函数：输入节点表，输出 {shown,total,scales}
 // layers: order 常驻层 + 当前动作（后者覆盖），与插件 computePose 的叠加顺序一致。
-function viewerVisibility(nodeNames, vis, curName, tMain, tVis, roaming) {
+// parentOf: Map(name→父名，根为null)。three 里父不可见则子树全不可见，
+// 插件 computePose 的 visOK 同款继承（mm 646-651 行），不对齐这个两边永远差一截。
+function viewerVisibility(nodeNames, parentOf, vis, curName, tMain, tVis, roaming) {
   const env = { roaming, t: tMain };
   const layers = [...(vis.order || []), curName];
   const computed = new Map();
@@ -36,18 +38,28 @@ function viewerVisibility(nodeNames, vis, curName, tMain, tVis, roaming) {
   }
   let shown = 0, total = 0;
   const scales = new Map();
+  const flatHide = new Map();
   for (const name of nodeNames) {
     const hit = computed.get(name);
-    if (!hit) { scales.set(name, null); continue; } // 无轨道：保持可见（viewer 266 行）
+    if (!hit) { scales.set(name, null); flatHide.set(name, false); continue; } // 无轨道：保持可见（viewer 266 行）
     const t = hit.A === vis.scale[curName] ? tMain : tVis;
     const len = (typeof hit.A.length === 'number' && isFinite(hit.A.length)) ? hit.A.length : Infinity;
     const s = trackVal(hit.track, t, env, hit.A.loop, len);
     const hide = s.some((c) => Math.abs(c) < 1e-3);
     total++;
+    flatHide.set(name, hide);
     if (hide) scales.set(name, null);
-    else { scales.set(name, s); shown++; }
+    else { scales.set(name, s); }
   }
-  return { shown, total, scales };
+  // 子树继承：父藏则子藏（three 场景图语义，插件 visOK 同款）
+  const effVis = new Map();
+  for (const name of nodeNames) {
+    const p = parentOf ? parentOf.get(name) : null;
+    const ok = !flatHide.get(name) && (p == null || effVis.get(p) !== false);
+    effVis.set(name, ok);
+    if (computed.has(name) && ok) shown++;
+  }
+  return { shown, total, scales, effVis };
 }
 
 export { trackVal, viewerVisibility };

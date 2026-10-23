@@ -131,6 +131,8 @@ const vbos = []; // 每 mesh [posBuf, uvBuf, idxBuf]
 let mixer = null, actions = {}, cur = null, curName = 'idle', modelL = null;
 const nodeByName = new Map();
 const roaming = {};
+// Root 子树父链（名→父名，根为null）：对照只比 Root 子树＋子树继承，boot 里解析完填充
+const rootParentOf = new Map();
 let tMain = 0, tVis = 0, paused = false, frames = 0;
 const clock = new THREE.Clock();
 
@@ -239,9 +241,9 @@ function selfTest() {
   }
   // 解析对账（期望值来自 fatfish.glb 实测：452骨骼声明/256网格/23688三角/48动画clip）
   lines.push(`解析 节点=${parsed.nodes.length} 网格=${parsed.meshes.length} 三角=${parsed.totalTris} Root子树=${parsed.rootSet.length} 动画=${parsed.anims.size}`);
-  // 首帧对照：idle t=0 左右可见计数必须相等
+  // 首帧对照：idle t=0 左右可见计数必须相等（只比 Root 子树＋继承）
   const pose0 = computePose(parsed, vis, 'idle', 0, 0, {});
-  const vv = viewerVisibility([...nodeByName.keys()], vis, 'idle', 0, 0, {});
+  const vv = viewerVisibility(pose0.dfs.map((ni) => parsed.nodes[ni].name), rootParentOf, vis, 'idle', 0, 0, {});
   const passVis = pose0.shown === vv.shown && pose0.total === vv.total;
   lines.push(`对照 idle@t0 移植可见=${pose0.shown}/${pose0.total} 参考可见=${vv.shown}/${vv.total} ${passVis ? 'OK' : 'FAIL'}`);
   log('🧪 自检 molang ' + ok + '/' + cases.length + '，对照 ' + (passVis ? 'OK' : 'FAIL'));
@@ -260,6 +262,11 @@ async function boot() {
   if (!parsed) { $('loading').textContent = '手解 GLB 失败，看日志'; return; }
   log(fmtParseLog(parsed, Object.keys(vis.scale || {}).length));
   log(fmtStats(parsed, 'idle', Object.keys(vis.scale || {}).length));
+  // Root 子树父链（对照用）
+  for (const ni of parsed.rootSet) {
+    const pi = parsed.nodes[ni].parent;
+    rootParentOf.set(parsed.nodes[ni].name, pi < 0 ? null : parsed.nodes[pi].name);
+  }
   // 右：贴图（GLB 内嵌 PNG，Nearest + Clamp，插件 mm 452-484 行同款）
   const texBlob = new Blob([parsed.texBytes], { type: 'image/png' });
   const texImg = await createImageBitmap(texBlob);
@@ -391,8 +398,8 @@ function animate() {
     const pose = computePose(parsed, vis, curName, tMain, tVis, roaming);
     drawPlugin(wvpArr, pose);
     if (frames % 30 === 0) {
-      // 对照：可见计数（移植 vs 参考）+ 首顶点（插件格式）
-      const ref = viewerVisibility([...nodeByName.keys()], vis, curName, cur ? cur.time : tVis, tVis, roaming);
+      // 对照：可见计数（移植 vs 参考，只比 Root 子树＋子树继承，见 viewer-ref.js）
+      const ref = viewerVisibility(pose.dfs.map((ni) => parsed.nodes[ni].name), rootParentOf, vis, curName, cur ? cur.time : tVis, tVis, roaming);
       const fv = firstVertexClip(parsed, pose, wvpArr);
       const same = pose.shown === ref.shown && pose.total === ref.total;
       diffBox.innerHTML =
