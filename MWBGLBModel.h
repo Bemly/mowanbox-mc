@@ -10,7 +10,10 @@
 
 // GLB 捕获到的矩阵（MWBHooks010 的 uniform hook 内调，投影/模型视图各存最新一份）
 void MWBGLBCaptureMatrix(const float *m);
+// WVP 快照（render hook 内 orig 之前调：此时绑定的正是给本实体上传的 program+uniform，
+// 读出来就是香草画它用的 P·V；draw 内 post-orig 再读会拿到别的 pass，w<0 就是这么来的）
 // 入口矩阵（不再使用；绘制走鱼链单次 sPartRender，矩阵由游戏栈处理）
+void MWBGLBSnapshotWVP(void);
 
 // 解析（任意线程可调，只做 CPU 事：读文件/解 JSON/拷顶点，不碰 GL；成功返回 YES）
 BOOL MWBGLBEnsureParsed(void);

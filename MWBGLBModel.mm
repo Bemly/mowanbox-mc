@@ -4,8 +4,9 @@
 //  2) 姿势：旋转 slerp/位移 lerp（GLB 纯数字通道），scale 走 vis 叠加（molang 求值）；
 //  3) 绘制：走已验证的鱼链（单次 sPartRender(root, s6)＋游戏递归＋自家贴图绑定），
 //     盒子/UV/贴图走 ysm codec（RestoreCube 现成），骨架/动画/显隐走 GLB。
-// 单位：游戏是 Bedrock 单位；GLB 节点位移解析时已乘 16（顶点已相对 pivot，无需再算）。
-// UV：codec 给像素区（u,v,du,dv），按 MWBYSMModel.mm 实锤偏移写入 quad（face 0..5=东西上下南北）。
+// 单位：游戏渲染就是 Bedrock/米制单位，GLB 解析零换算（web 移植页实锤：之前误乘 16
+// 会把鱼放大 16 倍、相机包 inside，只能看到巨型多边形；iPad 症状一致）。
+// UV：不翻转（GLTFLoader 对 glTF 贴图 flipY=false；上传链内存行序见 GLBInitGL 注释，必须同 web 一致）。
 #import "MWBGLBModel.h"
 #import "MWBGLBMolang.h"
 #import "MWBCommon.h"
@@ -49,7 +50,8 @@ static BOOL GLBInitProg(void) {
     return YES;
 }
 // 游戏 program 里找透视矩阵（名含 PROJ 但非 WORLDVIEW*，或列主序签名；运行时放宽 eps）
-static void GLBScanProgram(GLuint prog) {
+// 注：绘制已改走 orig 前快照，此扫描仅留作 glinfo 诊断用（平时不调）
+__attribute__((unused)) static void GLBScanProgram(GLuint prog) {
     sProjScanned = YES; sProjLoc = -1; sHasP = NO; sProgFor = prog;
     GLint n = 0; glGetProgramiv(prog, GL_ACTIVE_UNIFORMS, &n);
     char name[128];
@@ -298,8 +300,8 @@ BOOL MWBGLBEnsureParsed(void) {
         NSString *nm = [n[@"name"] isKindOfClass:[NSString class]] ? n[@"name"] : [NSString stringWithFormat:@"n%lu", (unsigned long)i];
         snprintf(nb, sizeof(nb), "%s", [nm UTF8String]); nd.name = nb;
         NSArray *t = n[@"translation"], *q = n[@"rotation"], *sc = n[@"scale"];
-        // 解析时直接乘 16 进游戏单位（顶点+位移同乘，运行时零换算）
-        nd.t[0] = t ? [t[0] floatValue]*16.0f : 0; nd.t[1] = t ? [t[1] floatValue]*16.0f : 0; nd.t[2] = t ? [t[2] floatValue]*16.0f : 0;
+        // 位移零换算，米制直用（与 web/js/plugin-glb.js 逐行一致；勿乘 16）
+        nd.t[0] = t ? [t[0] floatValue] : 0; nd.t[1] = t ? [t[1] floatValue] : 0; nd.t[2] = t ? [t[2] floatValue] : 0;
         if (q) { nd.q[0]=[q[0] floatValue]; nd.q[1]=[q[1] floatValue]; nd.q[2]=[q[2] floatValue]; nd.q[3]=[q[3] floatValue]; }
         else { nd.q[0]=nd.q[1]=nd.q[2]=0; nd.q[3]=1; }
         if (sc) { nd.s[0]=[sc[0] floatValue]; nd.s[1]=[sc[1] floatValue]; nd.s[2]=[sc[2] floatValue]; }
@@ -327,7 +329,7 @@ BOOL MWBGLBEnsureParsed(void) {
         if (seen[cur]) continue; seen[cur] = 1; sRootSet.push_back(cur);
         for (int c : sNodes[cur].children) stack.push_back(c);
     }
-    // 网格（只解析 POSITION/NORMAL 跳过/TEXCOORD_0 + 索引；verts 已相对 pivot，乘 16）
+    // 网格（只解析 POSITION/NORMAL 跳过/TEXCOORD_0 + 索引；顶点/位移零换算，UV 不翻转；与 web 一致）
     long totalTris = 0;
     for (NSUInteger i = 0; i < jMeshes.count; i++) {
         NSDictionary *prim = jMeshes[i][@"primitives"][0];
@@ -346,7 +348,7 @@ BOOL MWBGLBEnsureParsed(void) {
         if (!m.pos || !m.uv || !m.idx) { free(m.pos); free(m.uv); free(m.idx); continue; }
         const float *fp = (const float *)pp; const float *fu = (const float *)pu;
         for (int v = 0; v < nv; v++) {
-            m.pos[v*3]=fp[v*3]*16.0f; m.pos[v*3+1]=fp[v*3+1]*16.0f; m.pos[v*3+2]=fp[v*3+2]*16.0f;
+            m.pos[v*3]=fp[v*3]; m.pos[v*3+1]=fp[v*3+1]; m.pos[v*3+2]=fp[v*3+2]; // 零换算（与 web 一致）
             m.uv[v*2]=fu[v*2]; m.uv[v*2+1]=fu[v*2+1]; // 不翻转（web 移植页实锤：GLTFLoader 对 glTF 贴图 flipY=false，翻了会被 alphaTest 吃成锥体残件）
         }
         memcpy(m.idx, pi_, sizeof(uint16_t) * (size_t)ni);
@@ -390,10 +392,9 @@ BOOL MWBGLBEnsureParsed(void) {
             GLBKeys k; k.comp = comp; k.step = [interp isEqualToString:@"STEP"];
             const float *ft = (const float *)tp, *fv = (const float *)vp;
             for (int f = 0; f < nt; f++) { k.times.push_back(ft[f]); for (int c = 0; c < comp; c++) k.vals.push_back(fv[f*comp+c]); }
-            if (isRot) an.rot[ni] = k; else an.pos[ni] = k;
+            if (isRot) an.rot[ni] = k; else an.pos[ni] = k; // 位移与节点同单位，零换算（与 web 一致）
         }
-        // translation 输出是绝对位移（含 pivot），解析时乘 16 进游戏单位
-        for (auto &kv : an.pos) for (float &v : kv.second.vals) v *= 16.0f;
+        // translation 输出是绝对位移（含 pivot），与节点同单位零换算（与 web 一致；勿乘 16）
         sAnims[[bare UTF8String]] = an;
     }
     // 贴图（images[0] 内嵌 PNG，解码留给 GL 线程上传，这里只存字节）
@@ -463,6 +464,11 @@ static BOOL GLBInitGL(void) {
             CGContextRef ctx = CGBitmapContextCreate(px, w, h, 8, w*4,
                 CGColorSpaceCreateDeviceRGB(), kCGImageAlphaPremultipliedLast);
             if (ctx) {
+                // 行序对齐 web（ImageBitmap 内存行序 = PNG 行序，不翻转）：
+                // CGBitmapContext 默认 user space 原点在左下，直接 DrawImage 会把 PNG 存成上下颠倒
+                // （内存 row0 = PNG 底行），配合数据侧不翻转就会整图 V 反转。
+                // 先 CTM 翻转让内存 row0 = PNG 顶行，与 web 上传语义逐字节一致；真机第三人称确认。
+                CGContextTranslateCTM(ctx, 0, h); CGContextScaleCTM(ctx, 1.0, -1.0);
                 CGContextDrawImage(ctx, CGRectMake(0, 0, w, h), img);
                 glGenTextures(1, &sTex);
                 glBindTexture(GL_TEXTURE_2D, sTex);
@@ -483,7 +489,22 @@ static BOOL GLBInitGL(void) {
     return YES;
 }
 
-// ---- 绘制（VBO + 自家 shader，全 ES3 合法；MVP = 游戏 WVP读回 · 节点世界） ----
+// ---- WVP 快照（render hook 内 orig 之前调，只读 uniform 不碰状态机） ----
+static float sSnapWVP[16]; static BOOL sHasSnapWVP = NO;
+static GLuint sSnapProg = 0; static GLint sSnapLoc = -2;
+void MWBGLBSnapshotWVP(void) {
+    GLint gprog = 0; glGetIntegerv(GL_CURRENT_PROGRAM, &gprog);
+    if ((GLuint)gprog != sSnapProg) {
+        sSnapProg = (GLuint)gprog;
+        sSnapLoc = (sSnapProg == 0) ? -1 : glGetUniformLocation(sSnapProg, "WORLDVIEWPROJ");
+        MWBLogFile(@"[GLB] 快照 prog=%u loc=%d", sSnapProg, sSnapLoc);
+    }
+    if (sSnapLoc < 0) { sHasSnapWVP = NO; return; }
+    glGetUniformfv(sSnapProg, sSnapLoc, sSnapWVP);
+    sHasSnapWVP = YES;
+}
+
+// ---- 绘制（VBO + 自家 shader，全 ES3 合法；MVP = 快照WVP · 节点世界） ----
 static char sGLVer[128] = {0}, sGLRen[128] = {0}; // GL 线程缓存版本串（诊断用）
 void MWBGLBLogDiag(void) {
     extern int MWB010GLCalls(void);
@@ -599,18 +620,13 @@ void MWBGLBDraw(void) {
         float W[16]; GLBMatMul(&sWorld[pi*16], &sWorld[ni*16], W);
         memcpy(&sWorld[ni*16], W, sizeof(W));
     }
-    // WVP 直读：游戏刚为最后一个原版 part 上传的 P·V·E·partN（loc 按名查，每帧重读值）
-    // partN 偏差（最后画的原版部件位移）看截图再补修正矩阵，先原样画出来
-    GLint gprog = 0; glGetIntegerv(GL_CURRENT_PROGRAM, &gprog);
-    if (!sProjScanned || (GLuint)gprog != sProgFor) GLBScanProgram((GLuint)gprog);
-    static GLint sWVPLocCache = -2; static GLuint sWVPProgCache = 0;
-    if (sWVPProgCache != (GLuint)gprog) {
-        sWVPProgCache = (GLuint)gprog;
-        sWVPLocCache = glGetUniformLocation((GLuint)gprog, "WORLDVIEWPROJ");
+    // WVP 快照（hook 内 orig 之前抓的本实体 program 矩阵；post-orig 读会拿到别的 pass，w<0 就是这么来的）
+    if (!sHasSnapWVP) {
+        static int sNoSnap = 0;
+        if (!sNoSnap) { sNoSnap = 1; MWBLogFile(@"[GLB] 无快照WVP（prog=%u loc=%d）", sSnapProg, sSnapLoc); }
+        return;
     }
-    static int sWVPLogged = 0;
-    if (sWVPLocCache < 0) { if (!sWVPLogged) { sWVPLogged = 1; MWBLogFile(@"[GLB] 无 WORLDVIEWPROJ"); } return; }
-    float WVP[16]; glGetUniformfv((GLuint)gprog, sWVPLocCache, WVP);
+    float WVP[16]; memcpy(WVP, sSnapWVP, sizeof(WVP)); // 每帧拷贝，防 hook 线程改写竞态
 
     // ES3 现场保存（只动用到的状态）
     GLint oldProg = 0, oldTex = 0, oldActive = 0, oldAB = 0, oldEB = 0;
@@ -674,8 +690,8 @@ void MWBGLBDraw(void) {
             float cy = M[1]*x + M[5]*y + M[9]*z + M[13];
             float cz = M[2]*x + M[6]*y + M[10]*z + M[14];
             float cw = M[3]*x + M[7]*y + M[11]*z + M[15];
-            MWBLogFile(@"[GLB] 首顶点 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f)",
-                       x, y, z, cx, cy, cz, cw,
+            MWBLogFile(@"[GLB] 首顶点 prog=%u 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f)",
+                       sSnapProg, x, y, z, cx, cy, cz, cw,
                        cw != 0 ? cx/cw : 999, cw != 0 ? cy/cw : 999, cw != 0 ? cz/cw : 999);
         }
     }

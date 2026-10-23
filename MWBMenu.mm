@@ -4,6 +4,7 @@
 #import "MWBUI.h"
 #import "MWBMenu.h"
 #import "MWBFloat.h"
+#import "MWBGLBModel.h" // 菜单 4D 开直接驱动 GLB（唯一模型），开时顺手 CPU 解析
 
 #pragma mark - 选项菜单主视图
 
@@ -577,8 +578,10 @@
     if (t.on && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); [self toast:MWBTr("t_map_auto")]; }
 }
 - (void)togSkin4D:(MWBPixelToggle *)t {
-    if (!MWB010Only()) { t.on = NO; gSkin4D = NO; [self toast:MWBTr("t_only010")]; return; }
-    gSkin4D = t.on;
+    if (!MWB010Only()) { t.on = NO; gSkin4D = NO; gGLBModel = NO; [self toast:MWBTr("t_only010")]; return; }
+    // 4D 菜单项即 GLB 模型（旧烘焙模型已删）：开则解析+画，关则恢复原版
+    gSkin4D = t.on; gGLBModel = t.on ? YES : NO;
+    if (t.on) MWBGLBEnsureParsed();
 }
 - (void)togDebug:(MWBPixelToggle *)t {
     gMWBDebug = t.on;

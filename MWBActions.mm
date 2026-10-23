@@ -110,7 +110,10 @@ void MWBPollCmdFile(void) {
             gSlimeChunk = arg ? YES : NO;
             if (gSlimeChunk && !gMinimap) { gMinimap = YES; MWBMinimapShow(YES); }
         }
-        else if ([act isEqualToString:@"skin4d"]) gSkin4D = arg ? YES : NO;
+        else if ([act isEqualToString:@"skin4d"]) { // 菜单 4D 项即 GLB（旧烘焙模型已删），与菜单同语义
+            gSkin4D = arg ? YES : NO; gGLBModel = arg ? YES : NO;
+            if (arg) MWBGLBEnsureParsed();
+        }
         else if ([act isEqualToString:@"glb"]) {
             gGLBModel = arg ? YES : NO;
             if (arg == 1) MWBGLBEnsureParsed(); // 只做 CPU 解析，GL 上传留到渲染线程首画
