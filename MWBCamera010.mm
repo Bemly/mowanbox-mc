@@ -187,11 +187,13 @@ void MWBCamDiag(void) {
                *(uint8_t *)MWBCamOpt(), MWBCamValue(),
                o ? *(uint8_t *)((char *)o + CAM_F_THIRD) : -1,
                o ? *(uint8_t *)((char *)o + CAM_F_FRONT) : -1);
-    MWBLogFile(@"[相机] 实体 mc=%p v20(MC+0x1b0)=%p lp=%p 同体=%d v20+0x3c=%.1f lp+0x3c=%.1f lp+0x78=%.1f",
+    MWBLogFile(@"[相机] 实体 mc=%p v20(MC+0x1b0)=%p lp=%p 同体=%d v20+0x3c=%.1f lp+0x3c=%.1f lp+0x78=%.1f lp+0x150=%.1f lp+0x158=%.1f",
                mc, v20, gLocalPlayer, (v20 && v20 == gLocalPlayer) ? 1 : 0,
                v20 ? *(float *)((char *)v20 + 0x3c) : 9999.0f,
                gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x3c) : 9999.0f,
-               gLocalPlayer ? *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF) : 9999.0f);
+               gLocalPlayer ? *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF) : 9999.0f,
+               gLocalPlayer ? *(float *)((char *)gLocalPlayer + ENTITY_BODY_YAW_OFF) : 9999.0f,
+               gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x158) : 9999.0f);
 }
 
 // createToggle hook：Game 组里第三人称原来写死走开关，在此改道步进滑条（步伐由 C1 hook 填）。

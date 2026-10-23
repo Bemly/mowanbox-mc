@@ -583,6 +583,36 @@ static BOOL GLBInitGL(void) {
 // WVP 只是相机 P·V，实体偏移全在 WORLD 里；只乘 WVP 会把鱼画到世界原点，
 // 相机看玩家时原点正好在镜头后（w<0），就是"透明啥也没有"的根因。
 // 故快照把两个都读走，绘制用 MVP = WVP·WORLD·节点世界（WORLD 缺席则退回直用）。
+// 游戏真相机（0.10 MatrixStack 三栈，GameRenderer::saveMatrices 反编译实锤）：
+// 每栈是 std::deque<Matrix>（map@+8 / start@+0x20 / size@+0x28，块 64 个×64 字节，栈顶=start+size-1）；
+// 0x10034F570=投影（saveMatrices 单存 +0x98），0x10034F5D0=视图、0x10034F5A0=世界（存 MV=视图·世界）。
+// 之前读 program uniform 是死路：uniform 绘制时才同步，orig 前读到的是上一 pass 旧值。
+#define MS_PROJ_VA  0x10034F570UL
+#define MS_WORLD_VA 0x10034F5A0UL
+#define MS_VIEW_VA  0x10034F5D0UL
+static const float *GLBStackTop(uintptr_t va) {
+    char *ms = (char *)(MWBMainSlide() + va);
+    void **map = *(void ***)(ms + 8);
+    uint64_t start = *(uint64_t *)(ms + 0x20), size = *(uint64_t *)(ms + 0x28);
+    if (!map || size == 0 || size > 4096) return NULL;
+    uint64_t i = start + size - 1;
+    char *blk = (char *)map[i >> 6];
+    return blk ? (const float *)(blk + ((i & 63) << 6)) : NULL;
+}
+static float sGamePVW[16]; static float sGameRel[3]; static BOOL sHasGameCam = NO;
+// MobRenderer::render 入口（orig 前）调：pos=实体相对相机坐标（渲染用插值值），P·V·W 此刻即本实体的基准相机
+void MWBGLBCaptureEntity(const float *pos) {
+    const float *P = GLBStackTop(MS_PROJ_VA), *V = GLBStackTop(MS_VIEW_VA), *W = GLBStackTop(MS_WORLD_VA);
+    if (!P || !V || !W || !pos) { sHasGameCam = NO; return; }
+    float PV[16]; GLBMatMul(P, V, PV); GLBMatMul(PV, W, sGamePVW);
+    memcpy(sGameRel, pos, sizeof(sGameRel));
+    sHasGameCam = YES;
+    static int sCamLog = 0;
+    if ((sCamLog++ % 300) == 0)
+        MWBLogFile(@"[GLB] 游戏相机 rel=(%.2f,%.2f,%.2f) P=[%.2f,%.2f,%.2f,%.2f] V=[%.2f,%.2f,%.2f|%.2f,%.2f,%.2f] W=[%.2f,%.2f,%.2f,%.2f]",
+                   pos[0], pos[1], pos[2], P[0], P[5], P[10], P[11],
+                   V[0], V[5], V[10], V[12], V[13], V[14], W[0], W[12], W[13], W[14]);
+}
 static float sSnapWVP[16]; static BOOL sHasSnapWVP = NO;
 static float sSnapWorld[16]; static BOOL sHasSnapWorld = NO;
 static GLuint sSnapProg = 0; static GLint sSnapWVPLoc = -2; static GLint sSnapWorldLoc = -2;
@@ -708,11 +738,12 @@ void MWBGLBDraw(void) {
     }
     // 头跟视角、身跟身体（香草架构：拖视角只转头，身体不动；T 只带身体 yaw，见下落位段）。
     // 给 Head 骨 local premultiply 一段 Δyaw=body-view（与 T 的 θ=π-ψ 同约定），头在颈部原地转向；
-    // 子件（脸/帽/耳）在 Head 之下，dfs 组装时自动继承。跟脸档 body==view 即 Δ=0 无操作。
+    // 子件（脸/帽/耳）在 Head 之下，dfs 组装时自动继承。身体源 +0x150（Mob::normalTick 实锤），
+    // 旧 +0x3c 无写者≈常量，走路时身体不跟。
     if (gLocalPlayer) {
         auto hIt = sName2Idx.find("Head");
         if (hIt != sName2Idx.end()) {
-            float vb = *(float *)((char *)gLocalPlayer + 0x3c);
+            float vb = *(float *)((char *)gLocalPlayer + ENTITY_BODY_YAW_OFF);
             float vv = *(float *)((char *)gLocalPlayer + ENTITY_YAW_OFF);
             float dd = (vb - vv) * (float)M_PI / 180.0f;
             if (fabsf(dd) > 1e-4f) {
@@ -795,16 +826,23 @@ void MWBGLBDraw(void) {
         float px = *(float *)((char *)gLocalPlayer + 0x28);
         float py = *(float *)((char *)gLocalPlayer + 0x28 + 4);
         float pz = *(float *)((char *)gLocalPlayer + 0x28 + 8);
-        // T = 平移(玩家脚下)·绕Y(跟身体朝向)：鱼替的是身体，必须跟身体 +0x3c（世界静止量）。
+        // T = 平移(玩家脚下)·绕Y(跟身体朝向)：鱼替的是身体，必须跟身体 +0x150（走动追视角、静止不动）。
+        // 旧 +0x3c 无写者（站着碰巧对、走路不跟），已退役。
         // 跟视角 +0x78 是错的：V 相机世界固定，T 再跟视角转，拖相机时鱼自己转一份，
         // 与背景转动叠加就是“快1倍”（180° 见脸、360° 回背；正确应是 360° 一圈）。
         // 模型正面是 -z，玩家 yaw=0 朝南(+z，同 Java)，故 θ=π-bodyYaw；头尾若反只改 π 常数（与速率无关）。
-        float yawDeg = *(float *)((char *)gLocalPlayer + 0x3c);
+        float yawDeg = *(float *)((char *)gLocalPlayer + ENTITY_BODY_YAW_OFF);
         float th = (180.0f - yawDeg) * (float)M_PI / 180.0f;
         sYawDbg = yawDeg; sThDbg = th;
         // 落位 Y：站立跟实地扫描（sHasGround），飞/游/空跟 py；再叠 lift；本体统一缩放 sGLBScale。
         float ty = (sHasGround ? sGroundY : py) + sGLBLift;
         float sc = sGLBScale, ct = cosf(th), st = sinf(th);
+        if (sHasGameCam) {
+            // 游戏真相机：相对相机坐标系（rel 是眼，+0x28 也是眼；脚=rel.y+(脚绝对-眼绝对)，gap=1.62 实锤）
+            float feetAbs = sHasGround ? sGroundY : (py - 1.62f);
+            px = sGameRel[0]; pz = sGameRel[2]; ty = sGameRel[1] + (feetAbs - py) + sGLBLift;
+            memcpy(WVP, sGamePVW, sizeof(WVP));
+        }
         float T[16] = {ct*sc,0,-st*sc,0, 0,sc,0,0, st*sc,0,ct*sc,0, px,ty,pz,1};
         GLBMatMul(WVP, T, WT);
     } else {
@@ -866,7 +904,8 @@ void MWBGLBDraw(void) {
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m.vbo[2]);
         glDrawElements(GL_TRIANGLES, m.nidx, GL_UNSIGNED_SHORT, 0);
         drawn++; tris += m.nidx / 3;
-        if (drawn == 1 && m.nvert > 0) {
+        static int sVtxLog = 0;
+        if (drawn == 1 && m.nvert > 0 && (sVtxLog++ % 120) == 0) {
             // 首顶点裁剪坐标（免截图定位：NDC 在 [-1,1] 内才可见；w<=0 在镜头后；NaN 即矩阵坏）
             // 用/备两种 MVP 都算：ndc=用WVPuse，alt=省WORLD直用（WORLD 缺席时两者同值）
             float x = m.pos[0], y = m.pos[1], z = m.pos[2];
@@ -891,8 +930,8 @@ void MWBGLBDraw(void) {
             float ppx = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28) : 9999;
             float ppy = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 4) : 9999;
             float ppz = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 8) : 9999;
-            MWBLogFile(@"[GLB] 首顶点 prog=%u world=%d post=%d 玩家=(%.1f,%.1f,%.1f) yaw=%.1f th=%.2f 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f) alt=(%.2f,%.2f,%.2f) postndc=(%.2f,%.2f,%.2f) gy=%.1f gap=%+.2f sc=%.2f",
-                       sSnapProg, sHasSnapWorld ? 1 : 0, hasPost ? (int)postProg : -1, ppx, ppy, ppz, sYawDbg, sThDbg, x, y, z, cx, cy, cz, cw,
+            MWBLogFile(@"[GLB] 首顶点 cam=%s prog=%u world=%d post=%d 玩家=(%.1f,%.1f,%.1f) yaw=%.1f th=%.2f 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f) alt=(%.2f,%.2f,%.2f) postndc=(%.2f,%.2f,%.2f) gy=%.1f gap=%+.2f sc=%.2f",
+                       sHasGameCam ? "game" : "self", sSnapProg, sHasSnapWorld ? 1 : 0, hasPost ? (int)postProg : -1, ppx, ppy, ppz, sYawDbg, sThDbg, x, y, z, cx, cy, cz, cw,
                        cw != 0 ? cx/cw : 999, cw != 0 ? cy/cw : 999, cw != 0 ? cz/cw : 999,
                        aw != 0 ? ax/aw : 999, aw != 0 ? ay/aw : 999, aw != 0 ? az/aw : 999,
                        qw != 0 ? qx/qw : 999, qw != 0 ? qy/qw : 999, qw != 0 ? qz/qw : 999,

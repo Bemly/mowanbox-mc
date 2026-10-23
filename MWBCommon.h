@@ -22,6 +22,7 @@
 #define ENTITY_VELOCITY_Y_OFFSET 112
 #define ENTITY_YAW_OFF   0x78   // LocalPlayer 偏航角(度, 转视角前后内存diff实锤: 311→432, 旧0xAC恒0是错的)
 #define ENTITY_PITCH_OFF 0x7C   // LocalPlayer 俯仰角(度, 与yaw相邻成对, 转视角不变)
+#define ENTITY_BODY_YAW_OFF 0x150 // 身体偏航(度, Mob::normalTick 行走时追视角/静止不写, 旧值+0x154; +0x3c 无写者别用)
 #define TICK_TIME_DAY 1000
 #define TICK_TIME_NIGHT 13000
 

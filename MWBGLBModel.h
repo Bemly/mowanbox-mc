@@ -14,6 +14,8 @@ void MWBGLBCaptureMatrix(const float *m);
 // 读出来就是香草画它用的 P·V；draw 内 post-orig 再读会拿到别的 pass，w<0 就是这么来的）
 // 入口矩阵（不再使用；绘制走鱼链单次 sPartRender，矩阵由游戏栈处理）
 void MWBGLBSnapshotWVP(void);
+// 游戏真相机抓取（MobRenderer::render 入口 orig 前调，pos=本地玩家相对相机坐标；读 MatrixStack 三栈顶）
+void MWBGLBCaptureEntity(const float *pos);
 
 // 解析（任意线程可调，只做 CPU 事：读文件/解 JSON/拷顶点，不碰 GL；成功返回 YES）
 BOOL MWBGLBEnsureParsed(void);

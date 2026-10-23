@@ -56,6 +56,8 @@ static void hooked_mini_render(void *self, void *entity,
 typedef void (*MobRenderFn)(void *self, void *entity, const void *pos, float f1, float f2);
 static MobRenderFn orig_mob_render = NULL;
 static void hooked_mob_render(void *self, void *entity, const void *pos, float f1, float f2) {
+    // 本地玩家：orig 前抓游戏相机（MatrixStack 栈顶此刻还没被本实体 push 改动）+ 相对相机坐标
+    if (entity && entity == gLocalPlayer && (gSkin4D || gGLBModel)) MWBGLBCaptureEntity((const float *)pos);
     orig_mob_render(self, entity, pos, f1, f2);
 }
 
