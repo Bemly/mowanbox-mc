@@ -13,6 +13,8 @@ void MWBGLBCaptureMatrix(const float *m);
 
 // 解析（任意线程可调，只做 CPU 事：读文件/解 JSON/拷顶点，不碰 GL；成功返回 YES）
 BOOL MWBGLBEnsureParsed(void);
+// 免重启重载（清掉重解，GL 对象下次首画重建）
+void MWBGLBReload(void);
 // 及格线自检（节点/网格/三角数，打日志供与 viewer stats 对账）
 void MWBGLBLogStats(void);
 

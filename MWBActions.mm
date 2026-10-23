@@ -113,7 +113,8 @@ void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"skin4d"]) gSkin4D = arg ? YES : NO;
         else if ([act isEqualToString:@"glb"]) {
             gGLBModel = arg ? YES : NO;
-            if (gGLBModel) MWBGLBEnsureParsed(); // 只做 CPU 解析，GL 上传留到渲染线程首画
+            if (arg == 1) MWBGLBEnsureParsed(); // 只做 CPU 解析，GL 上传留到渲染线程首画
+            else if (arg == 2) { gGLBModel = YES; MWBGLBReload(); } // 免重启重载
         }
         else if ([act isEqualToString:@"glbanim"] && parts.count > 1) MWBGLBSetAnim(parts[1]);
         else if ([act isEqualToString:@"debug"]) gMWBDebug = arg ? YES : NO;

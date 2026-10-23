@@ -325,7 +325,8 @@ BOOL MWBGLBEnsureParsed(void) {
     NSData *visData = [NSData dataWithContentsOfFile:visPath];
     if (visData) {
         NSDictionary *vis = [NSJSONSerialization JSONObjectWithData:visData options:0 error:&e];
-        sVisScale = vis[@"scale"]; sVisOrder = vis[@"order"];
+        if (vis) { sVisScale = vis[@"scale"]; sVisOrder = vis[@"order"]; }
+        else MWBLogFile(@"[GLB] sidecar 解析失败：%@", e);
     } else MWBLogFile(@"[GLB] 无 sidecar（只画绑定姿势）：%@", visPath);
     if (!sCurAnim) sCurAnim = @"idle";
     sParsed = YES;
@@ -342,6 +343,18 @@ void MWBGLBLogStats(void) {
                (unsigned long)sNodes.size(), (unsigned long)sMeshes.size(),
                (unsigned long)sRootSet.size(), (unsigned long)sAnims.size(), sCurAnim,
                (unsigned long)(sVisScale ? [sVisScale count] : 0));
+}
+
+// 免重启重载（调参不用反复杀进程；GL 对象下次首画重建）
+void MWBGLBReload(void) {
+    for (auto &m : sMeshes) { free(m.pos); free(m.uv); free(m.idx); }
+    sMeshes.clear(); sNodes.clear(); sName2Idx.clear(); sRootSet.clear(); sAnims.clear();
+    sVisScale = nil; sVisOrder = nil; sTexPNG = nil;
+    if (sTex) { /* GL 线程外不删，下次首画复用或重建 */ }
+    sProg = 0; sTex = 0; sTMain = 0; sTVis = 0;
+    sParsed = NO;
+    MWBLogFile(@"[GLB] 重载");
+    MWBGLBEnsureParsed();
 }
 
 void MWBGLBSetAnim(NSString *name) {
