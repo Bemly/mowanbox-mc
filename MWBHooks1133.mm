@@ -76,7 +76,7 @@ static void hooked_1133_playerTick(void *self) {
     if (gNightVision && gMWBDebug && (gTick1133 % 200) == 1) {
         void *(*getById)(int) = (void *(*)(int))(MWBMainSlide() + V1133_MOBEFFECT_GET_VA);
         void *e1 = getById(1), *e8 = getById(8), *e16 = getById(16);
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
@@ -87,7 +87,7 @@ static void hooked_1133_playerTick(void *self) {
         }
     }
     if (gMWBDebug && (gTick1133 % 200) == 1) {
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
@@ -117,7 +117,7 @@ static void hooked_1133_levelTick(void *self) {
     }
     static int s_lvTick = 0;
     if (gMWBDebug && ((++s_lvTick % 200) == 1)) {
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
@@ -165,7 +165,7 @@ bool MWB1133_ApplyEffect(void *actor, int fxId, int amplifier, int durTicks) {
     ((void (*)(void *, int, void *, void *, int, int, int, void *))(s + V1133_EFFECT_CTOR_VA))(
         buf, fxId, e1, e2, amplifier, 0, durTicks, e3);
     *(uint8_t *)((char *)buf + 0x78) = 1;
-    NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
     NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
     if (lfh) {
         [lfh seekToEndOfFile];
@@ -190,7 +190,7 @@ bool MWB1133_ApplyEffect(void *actor, int fxId, int amplifier, int durTicks) {
 }
 // 传送: getPos槽读当前(+10Y)→teleportTo槽 (不碰raw偏移, 避三pos之争)
 bool MWB1133_TeleportUp10(void *actor) {
-    NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
     NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
     if (!actor) return false;
     void *vt = *(void **)actor;
@@ -272,7 +272,7 @@ int MWB1133SetOne(void *bs, int x, int y, int z, void *blk) {
 int MWB1133_FillStone(int half) {
     void *bs = MWB1133BlockSource();
     void *blk = MWB1133BlockById(1);
-    NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
     NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
     uintptr_t slide = MWBMainSlide();
     uintptr_t lo = slide + 0x100000000UL, hi = lo + 0x4000000UL;
@@ -332,7 +332,7 @@ void MWB1133_KillAuraTick(void) {
                 for (int i = 0; i < nv; i++) if (gHostileVTs1133[i] == vt) return;
                 gHostileVTs1133[nv++] = vt;  // 借表暂存 (count仍0, 不转攻击)
             });
-            NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
             if (fh) {
                 [fh seekToEndOfFile];

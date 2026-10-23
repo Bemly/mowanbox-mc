@@ -43,7 +43,7 @@ static int gPendGive117 = -1, gPendGive143 = -1, gPendEffect143 = -1, gPendEffec
 static int gPendDiff010 = -1, gPendMob010 = -1, gPendGameMode010 = -1;
 static BOOL gPendHeal = NO, gPendEnchant = NO, gPendTeleport = NO, gPendFill = NO, gPendReactor = NO, gPendExplode = NO;
 static void MWBFlushPending(void) {
-    NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
     NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
     if (lfh) {
         [lfh seekToEndOfFile];
@@ -61,7 +61,7 @@ static void MWBFlushPending(void) {
     if (gPendEffect1133 >= 0 && gPlayer1133) {
         int id = gPendEffect1133; gPendEffect1133 = -1;
         BOOL ok = MWB1133_ApplyEffect(gPlayer1133, id, 0, 6000);
-        NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
         if (lfh) {
             [lfh seekToEndOfFile];
@@ -163,7 +163,7 @@ void MWBPollCmdFile(void) {
             // 自然方块铺石: 从脚下往下扫首个非air方块, 用它铺5³ (绕开注册表争议)
             void *bs = MWB1133BlockSource();
             void *air = *(void **)(MWBMainSlide() + V1133_BLOCKBASE_VA);
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             int n = -99;
             if (bs && air && gPlayer1133) {
@@ -198,7 +198,7 @@ void MWBPollCmdFile(void) {
             void **reg = (void **)(MWBMainSlide() + V117_ITEMREG_VA);
             void *diamond = reg[264];
             void *dirt = reg[3];
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -231,7 +231,7 @@ void MWBPollCmdFile(void) {
         else if ([act isEqualToString:@"yawscan010"] && gLocalPlayer) {
             // 转向扫内存: dump 玩家对象 +0~+0x1FF 逐字, 转视角前后各一次, diff 找真 yaw/pitch
             // (C 缓冲直拼, 不用 NSMutableString, 另记长度防吞)
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -253,7 +253,7 @@ void MWBPollCmdFile(void) {
         }
         else if ([act isEqualToString:@"yaw010"] && gLocalPlayer) {
             // 转向探针: 读 ENTITY_YAW_OFF/PITCH_OFF, 原地转视角后多 touch 几次对比两次日志
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -271,7 +271,7 @@ void MWBPollCmdFile(void) {
         }
         else if ([act isEqualToString:@"nightprobe"] && gLevel) {
             // 夜视探针(全只读): Level+0x1638 黑暗系数 + Options gamma 链(MC+0x178→P→+0x1c8→+0x2d0)
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -290,7 +290,7 @@ void MWBPollCmdFile(void) {
         }
         else if ([act isEqualToString:@"glinfo"]) {
             // 穿墙透视诊断: GOT 槽数/矩阵上传总数/透视矩阵数/埋头命中数/实际改写数 (全 ASCII)
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -304,7 +304,7 @@ void MWBPollCmdFile(void) {
         }
         else if ([act isEqualToString:@"aurainfo"]) {
             // 杀戮光环计数探针: 扫描次数/命中目标累计/实际出刀累计 (全 ASCII)
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -317,7 +317,7 @@ void MWBPollCmdFile(void) {
             }
         }
         else if ([act isEqualToString:@"dayinfo"] && gLevel) {            // 时间三值探针: 逻辑时间 / 天空覆写 / 亮度字节 (0.10 白天不亮诊断用)
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -335,7 +335,7 @@ void MWBPollCmdFile(void) {
             // 光照门控+光照表只读探针 (0.10 夜切昼地面不亮诊断用, 全只读不调游戏函数)
             // +0x1854: 光照表重算门 (1=未 settle, 3=已 settle); +0x18B0: W20 派生速率
             // 光照表: 静态 0x10034cd98+slide, 256 项 RGBA (读 6 个下标看昼夜)
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -366,7 +366,7 @@ void MWBPollCmdFile(void) {
             // 重算链三方指针对比 (0.10 光照表冻结诊断: gate开但表不动, 看 MC链v27 与 gLevel 是否同体)
             // MinecraftClient::tick 门内: v11=MC+0x178; P=*v11; V=*P(虚表); slot=*(V+0x158); v18=*v11; v27=*(v18+0xa0)
             // 全只读 + dladdr 符号反查, 不调任何游戏函数
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -447,7 +447,7 @@ void MWBPollCmdFile(void) {
                 UIWindow *w = nil;
                 for (UIWindow *ww in [UIApplication sharedApplication].windows)
                     if ([NSStringFromClass([ww class]) containsString:@"MWBOverlay"]) { w = ww; break; }
-                NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+                NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
                 NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
                 void (^log)(NSString *) = ^(NSString *m){
                     NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], m];
@@ -495,7 +495,7 @@ void MWBPollCmdFile(void) {
         }
         else if ([act isEqualToString:@"held117"] && gPlayer117) {
             void *held = ((void *(*)(void *))(MWBMainSlide() + V117_HELDITEM_VA))(gPlayer117);
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -515,7 +515,7 @@ void MWBPollCmdFile(void) {
         }
         else if ([act isEqualToString:@"effect1133"]) { gPendEffect1133 = arg; needFlush = YES; }
         else if ([act isEqualToString:@"attr1133"] && gPlayer1133) {
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -547,7 +547,7 @@ void MWBPollCmdFile(void) {
                 sky = MWB1133GetOne(bs, ps.x, ps.y, ps.z);
                 foot = MWB1133GetOne(bs, pf.x, pf.y, pf.z);
             }
-            NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+            NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
             NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
             if (lfh) {
                 [lfh seekToEndOfFile];
@@ -566,7 +566,7 @@ void MWBPollCmdFile(void) {
                 UIWindow *w = nil;
                 for (UIWindow *ww in [UIApplication sharedApplication].windows)
                     if ([NSStringFromClass([ww class]) containsString:@"MWBOverlay"]) { w = ww; break; }
-                NSURL *lurl = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+                NSURL *lurl = [NSURL fileURLWithPath:MWB_LOG_PATH];
                 NSFileHandle *lfh = [NSFileHandle fileHandleForWritingToURL:lurl error:nil];
                 void (^log)(NSString *) = ^(NSString *s){
                     NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], s];
@@ -614,7 +614,7 @@ void MWBPollCmdFile(void) {
         }
         // tick返回后异步泻洪 (避免容器锁重入)
         if (needFlush) dispatch_async(dispatch_get_main_queue(), ^{ MWBFlushPending(); });
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
@@ -767,7 +767,7 @@ void MWB010SpawnReactor(void) {
     }
     int launched = useReactor(NULL, gLocalPlayer, cx, y, cz);
     if (maybeLevel && savedGate == 1) *(int *)((char *)maybeLevel + 0x15E4) = savedGate;
-    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
     if (fh) {
         [fh seekToEndOfFile];
@@ -807,7 +807,7 @@ void MWB010SpawnMob(int typeId) {
     float pos[3] = {px + 2.0f, py + 1.0f, pz};
     void *mob = createMob(typeId, ts, pos, NULL);
     int ok = mob ? addMob(mf, mob, 1) : -1;
-    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
     if (fh) {
         [fh seekToEndOfFile];
@@ -902,11 +902,14 @@ BOOL MWB010Only(void) {
 
 // 文件日志 (各版本安装函数共用)
 void MWBLogFile(NSString *format, ...) {
+#ifdef MWB_RELEASE
+    return; // 发布版：不写日志（FINALPACKAGE=1 构建时定义）
+#endif
     va_list args; va_start(args, format);
     NSString *msg = [[NSString alloc] initWithFormat:format arguments:args];
     va_end(args);
     NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], msg];
-    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
     if (fh) {
         [fh seekToEndOfFile];

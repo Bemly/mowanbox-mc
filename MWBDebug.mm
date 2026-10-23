@@ -60,7 +60,7 @@
 }
 
 + (void)tapAtX:(CGFloat)x y:(CGFloat)y {
-    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
     void (^log)(NSString *) = ^(NSString *m) {
         NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], m];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
@@ -116,7 +116,7 @@
 // 直调式点击: began+ended 直接打到游戏 VC (主线程同步执行)
 // 1.20 教训: 设置类弹窗是独立 VC, 只打主 VC 够不着, 改为全窗口全 VC 广播
 + (void)tapGameAtX:(CGFloat)x y:(CGFloat)y {
-    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
     void (^log)(NSString *) = ^(NSString *m) {
         NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], m];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
@@ -160,7 +160,7 @@
 
 // 直调式拖拽: began + 若干 moved + ended, 打到全窗口全 VC (转视角验证用)
 + (void)dragGameFromX:(CGFloat)x1 y:(CGFloat)y1 toX:(CGFloat)x2 y:(CGFloat)y2 {
-    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
     void (^log)(NSString *) = ^(NSString *m) {
         NSString *line = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], m];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];

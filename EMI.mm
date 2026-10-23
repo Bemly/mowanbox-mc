@@ -72,7 +72,7 @@ void MWBDLog(NSString *fmt, ...) {
                       [NSDate date], msg];
     NSLog(@"%@", msg);
     // 追加写文件 (URL-based API, iOS 12 推荐)
-    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
     if (fh) {
         [fh seekToEndOfFile];

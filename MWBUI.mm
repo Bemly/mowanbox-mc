@@ -71,7 +71,7 @@ void MWBEnsureClickLoaded(void) {
             msg = @"[魔玩盒子] 未找到 click.m4a";
         }
         NSLog(@"%@", msg);
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];

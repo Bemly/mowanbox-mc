@@ -92,7 +92,7 @@ static void hooked_143_tickTime(void *level) {
         }
     }
     if (gMWBDebug && ((++gTick143 % 200) == 1)) {
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];

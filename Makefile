@@ -18,4 +18,9 @@ MWB_GIT_HASH := $(shell git rev-parse --short HEAD)
 MWB_GIT_DIRTY := $(shell git status --porcelain | grep -q . && echo -dirty)
 mowanbox_CFLAGS += -DMWB_BUILD_TAG='"$(MWB_GIT_COUNT)-$(MWB_GIT_HASH)$(MWB_GIT_DIRTY)"'
 
+# 发布版：make package FINALPACKAGE=1 → 关日志（MWB_RELEASE），Theos 同时去 +debug 后缀、开优化
+ifeq ($(FINALPACKAGE),1)
+mowanbox_CFLAGS += -DMWB_RELEASE
+endif
+
 include $(THEOS_MAKE_PATH)/tweak.mk

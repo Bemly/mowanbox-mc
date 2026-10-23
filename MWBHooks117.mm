@@ -47,7 +47,7 @@ static int hooked_117_getBool(void *abil, void *entry) {
 static int hooked_117_hurt(void *self, void *src, int dmg, void *a, void *b) {
     gHurtCount117++;
     if (gMWBDebug && (gHurtCount117 % 5) == 1) {
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
@@ -92,7 +92,7 @@ static void hooked_117_playerTick(void *self) {
     else if (sWasBreak) { setB(abil, (void *)(s + V117_ABIL_INSTABUILD), 0); sWasBreak = NO; }
     if (gSpeed) setF(abil, (void *)(s + V117_ABIL_WALKSPEED), 0.25f);
     if (gMWBDebug && (gTick117 % 200) == 1) {
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
@@ -118,7 +118,7 @@ static void hooked_117_levelTick(void *self) {
     else if (gTimeMode == 2) *(int32_t *)((char *)self + V117_LEVEL_DAYTIME_OFF) = V117_NIGHT_TRUE;
     static int s_lv117 = 0;
     if (gMWBDebug && ((++s_lv117 % 200) == 1)) {
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
@@ -141,7 +141,7 @@ bool MWB117_Give(void *player, int itemId, int count) {
     uintptr_t s = MWBMainSlide();
     void **reg = (void **)(s + V117_ITEMREG_VA);
     void *item = reg[itemId];
-    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
     // 堆分配 (容器add可能引用传入实例, 栈内存返回即野指针, -20连给冻屏教训)
     unsigned char *inst = (unsigned char *)malloc(0x70);

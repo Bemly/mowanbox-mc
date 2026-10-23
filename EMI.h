@@ -12,6 +12,12 @@ extern BOOL gMWBDebug;
 extern void *gLocalPlayer;
 
 // 调试日志: NSLog + 写 /var/mobile/Documents/mowanbox.log (实现在 EMI.mm)
+// 日志文件路径（全插件唯一出口）：发布版（FINALPACKAGE=1 → MWB_RELEASE）指向 /dev/null，不落盘
+#ifdef MWB_RELEASE
+#define MWB_LOG_PATH @"/dev/null"
+#else
+#define MWB_LOG_PATH @"/var/mobile/Documents/mowanbox.log"
+#endif
 void MWBDLog(NSString *fmt, ...) NS_FORMAT_FUNCTION(1, 2);
 
 // 缩放系数 (按 1920x1080 参考算, 实现在 EMI.mm)

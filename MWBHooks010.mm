@@ -121,7 +121,7 @@ static void hooked_normalTick(void *self) {
             gSpeed ? "开" : "关", gFly ? "开" : "关",
             gInvincible ? "开" : "关", gFastBreak ? "开" : "关",
             gSuperJump ? "开" : "关"];
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) { [fh seekToEndOfFile]; [fh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
     }

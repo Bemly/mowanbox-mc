@@ -7,6 +7,11 @@
 #import "EMI.h"
 
 // 构建号（Makefile 用 -D 注入 git 计数+短哈希，启动/解析写日志，验证先对它；未注入回 unknown）
+// 发布版（make package FINALPACKAGE=1）：MWBLogFile 直接返回，NSLog 编译成空
+#ifdef MWB_RELEASE
+#define NSLog(...) ((void)0)
+#endif
+
 #ifndef MWB_BUILD_TAG
 #define MWB_BUILD_TAG "unknown"
 #endif

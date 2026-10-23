@@ -45,7 +45,7 @@ static void hooked_120_tick(void *self) {
         else if (gTimeMode == 2) setTime(gLevelData120, TICK_TIME_NIGHT);
     }
     if (gMWBDebug && (gTick120 % 200) == 1) {
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
@@ -63,7 +63,7 @@ static void hooked_120_tick(void *self) {
 static void hooked_120_sysBody(void *registry, uint64_t entity) {
     orig_120_sysBody(registry, entity);
     if (gMWBDebug && ((++gTick120b % 200) == 1)) {
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
@@ -88,7 +88,7 @@ static void hooked_120_wrapper(void *self) {
 static void hooked_120_abilWrite(void *pkt, void *stream, void *ctx) {
     orig_120_abilWrite(pkt, stream, ctx);
     if (gMWBDebug && (gTick120b % 200) == 1) {
-        NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+        NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
         NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
         if (fh) {
             [fh seekToEndOfFile];
@@ -103,7 +103,7 @@ static void hooked_120_abilWrite(void *pkt, void *stream, void *ctx) {
 void MWB120ProbeMobEffect(void) {
     void *(*getById)(int) = (void *(*)(int))(MWBMainSlide() + V120_MOBGETBYID_VA);
     void *e1 = getById(1), *e8 = getById(8), *e16 = getById(16);
-    NSURL *logURL = [NSURL fileURLWithPath:@"/var/mobile/Documents/mowanbox.log"];
+    NSURL *logURL = [NSURL fileURLWithPath:MWB_LOG_PATH];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingToURL:logURL error:nil];
     if (fh) {
         [fh seekToEndOfFile];
