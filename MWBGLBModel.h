@@ -32,3 +32,7 @@ BOOL MWBGLBCanDraw(void);
 
 // 当前动作名（默认 idle；GLB 里 clip 名带 main: 前缀，sidecar 用裸名，两种都试，viewer 同款）
 void MWBGLBSetAnim(NSString *name);
+// 自动动作（默认开：按香草同款状态进 locomotion clip；glbanim-<名> 手动后自动停，glbanim-auto 回自动）
+void MWBGLBSetAuto(BOOL on);
+// 每 tick 调一次（normalTick 内，gGLBModel 才调）：读状态→变化才切 clip
+void MWBGLBAutoTick(void *player);

@@ -446,7 +446,68 @@ void MWBGLBReload(void) {
 
 void MWBGLBSetAnim(NSString *name) {
     sCurAnim = [name copy] ?: @"idle";
+    sTMain = 0; // 切 clip 从头播（中途切不断帧，跳动作不抽搐）
     MWBLogFile(@"[GLB] 切动作 %@", sCurAnim);
+}
+
+// ---- 自动动作（香草接轨）：优先级 death > 睡 > 水 > 飞 > 空中 > 潜行 > 跑/走/闲 ----
+// 状态信号（kuna 反 0.10 实锤，全直接读偏移，零游戏调用，normalTick 内调安全）：
+// - 睡 Player::isSleeping=+0x1804；水 Entity::isInWater=+0x12d；落地 Entity::move 写 +0x125；
+// - 潜行 LocalPlayer::isSneaking=*(*(p+0x1810)+0x12)；飞 abil[1]；血 int +0x168；vy +0x70；
+// - 速度照抄 Mob::updateWalkAnim：水平位移 hypot(dx,dz)/dt，米/秒＋EMA＋迟滞（跑 5.4/4.6，走 0.6/0.35）。
+static BOOL sGLBAuto = YES;
+void MWBGLBSetAuto(BOOL on) {
+    sGLBAuto = on;
+    MWBLogFile(@"[GLB] 自动动作%@", on ? @"开" : @"关");
+}
+void MWBGLBAutoTick(void *player) {
+    if (!sGLBAuto || !player) return;
+    static int sCd = 0;
+    if ((sCd++ % 10) != 0) return; // 秒级状态，10 tick 判一次不抖不费
+    char *p = (char *)player;
+    float now = (float)[[NSDate date] timeIntervalSince1970];
+    static float sPx = 0, sPz = 0, sT = 0, sSpd = 0;
+    static BOOL sInit = NO;
+    static int sLoc = 0; // 0 闲 1 走 2 跑（迟滞位）
+    float px = *(float *)(p + 0x28), pz = *(float *)(p + 0x28 + 8);
+    float vy = *(float *)(p + 0x70);
+    if (!sInit) { sInit = YES; sPx = px; sPz = pz; sT = now; }
+    else if (now > sT) {
+        float dt = now - sT;
+        if (dt > 0.005f && dt < 2.0f) {
+            float inst = sqrtf((px - sPx) * (px - sPx) + (pz - sPz) * (pz - sPz)) / dt;
+            if (inst < 30.0f) sSpd += 0.3f * (inst - sSpd); // EMA，钳传送毛刺
+        }
+        sPx = px; sPz = pz; sT = now;
+    }
+    int hp = *(int *)(p + 0x168);
+    uint8_t water = *(uint8_t *)(p + 0x12d);
+    uint8_t sleep = *(uint8_t *)(p + 0x1804);
+    uint8_t ground = *(uint8_t *)(p + 0x125);
+    BOOL flying = (p + PLAYER_ABILITIES_OFFSET)[1];
+    void *t = *(void **)(p + 0x1810);
+    BOOL sneak = t ? *(uint8_t *)((char *)t + 0x12) : NO;
+    const char *want = "idle";
+    if (hp <= 0) want = "death";
+    else if (sleep) want = "sleep";
+    else if (water) want = (sSpd > 0.5f) ? "swim" : "swim_stand";
+    else if (flying) want = "fly";
+    else if (!ground) want = (vy > 0.25f) ? "jump" : ((vy < -0.25f) ? "drop_loop" : "hover");
+    else if (sneak) { want = "sneak"; sLoc = 0; }
+    else {
+        float s = sSpd;
+        if (s > 5.4f) sLoc = 2;
+        else if (s < 4.6f && sLoc == 2) sLoc = 1;
+        else if (s > 0.6f && sLoc == 0) sLoc = 1;
+        else if (s < 0.35f) sLoc = 0;
+        want = (sLoc == 2) ? "run" : ((sLoc == 1) ? "walk" : "idle");
+    }
+    if (sLoc != 0 && (want[0] != 'r' && want[0] != 'w')) sLoc = 0; // 离开 locomotion 复位迟滞
+    static char sLast[32] = "idle";
+    if (strcmp(sLast, want) != 0) {
+        snprintf(sLast, sizeof(sLast), "%s", want);
+        MWBGLBSetAnim([NSString stringWithUTF8String:want]);
+    }
 }
 
 // ---- 自家贴图（ES1 固定管线：游戏纹理不动，只绑自己的画完恢复；Nearest 像素风）

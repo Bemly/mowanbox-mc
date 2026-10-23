@@ -126,6 +126,7 @@ static void hooked_normalTick(void *self) {
         if (fh) { [fh seekToEndOfFile]; [fh writeData:[m dataUsingEncoding:NSUTF8StringEncoding]]; [fh closeFile]; }
     }
     MWBCamFaceTick();   // 跟脸正面：第 4 档时每 tick 把视角 yaw 灌进相机 yaw（+0x3c 卡死不动是正面定死的根因）
+    if (gGLBModel) MWBGLBAutoTick(self);   // GLB 自动动作（香草接轨，变化才切 clip）
     MWBPollCmdFile();   // 0.10 也接 flag 文件通道 (time/reactor/diff/mob/explode)
 }
 

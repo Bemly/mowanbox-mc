@@ -120,7 +120,10 @@ void MWBPollCmdFile(void) {
             else if (arg == 2) { gGLBModel = YES; MWBGLBReload(); } // 免重启重载
         }
         else if ([act isEqualToString:@"glinfo2"]) MWBGLBLogDiag(); // GLB 矩阵/版本诊断
-        else if ([act isEqualToString:@"glbanim"] && parts.count > 1) MWBGLBSetAnim(parts[1]);
+        else if ([act isEqualToString:@"glbanim"] && parts.count > 1) {
+            if ([parts[1] isEqualToString:@"auto"]) MWBGLBSetAuto(YES); // 回自动
+            else { MWBGLBSetAuto(NO); MWBGLBSetAnim(parts[1]); } // 手动 sticky，自动停
+        }
         else if ([act isEqualToString:@"cam"]) MWBSetCamValue01(arg); // 0=第一 1=第三背面 2=第三正面 3=跟脸正面
         else if ([act isEqualToString:@"caminfo"]) MWBCamDiag();
         else if ([act isEqualToString:@"yaw"] && gLocalPlayer) { // 绝对视角 yaw 直写（跟脸标定用，无拖拽伪影）
