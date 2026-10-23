@@ -113,44 +113,48 @@ static void hooked_cam_set(void *thiz, void *mc) {
 }
 
 // 正面位持久化（NSUserDefaults，跟 options.txt 互不干扰）：读档由 update hook 接回
+// 前值是三态 0=背面/1=正面/2=跟脸正面，必须原值存（存成布尔会把 2 压成 1，跟脸档重进就丢）
 static void MWBCamPersist(void *opt) {
-    int f = opt ? (*(uint8_t *)((char *)opt + CAM_F_FRONT) ? 1 : 0) : 0;
+    int f = opt ? *(uint8_t *)((char *)opt + CAM_F_FRONT) : 0;
+    if (f < 0) f = 0;
+    if (f > 2) f = 2;
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     [d setInteger:f forKey:@"MWBCamFront"];
     [d synchronize];
     MWBLogFile(@"[相机] 正面位已存 %d", f);
 }
 
-// Options::update hook：读档后把正面位接回（原版只读 2cd，2d6 会丢）
+// Options::update hook：读档后把正面位接回（原版只读 2cd，2d6 会丢；三态原值接回，2=跟脸不许压成 1）
 typedef unsigned long (*OptionsUpdateFn)(void *thiz);
 static OptionsUpdateFn orig_cam_update = NULL;
 static unsigned long hooked_cam_update(void *thiz) {
     unsigned long r = orig_cam_update(thiz);
     int f = (int)[[NSUserDefaults standardUserDefaults] integerForKey:@"MWBCamFront"];
-    if (thiz) *(uint8_t *)((char *)thiz + CAM_F_FRONT) = f ? 1 : 0;
+    if (f < 0) f = 0;
+    if (f > 2) f = 2;
+    if (thiz) *(uint8_t *)((char *)thiz + CAM_F_FRONT) = (uint8_t)f;
     MWBLogFile(@"[相机] 读档接回正面位=%d", f);
     return r;
 }
 
-// 跟脸节拍（normalTick 里每帧调）：第 4 档（2d6==2）时把身体朝向钉进视角 yaw。
-// 机理（四基点 yaw-0/90/180/270 实锤）：
-// - 脸/身体朝向固定在世界 0 附近（站立不动从不转，+0x3c 恒 0 就是它）；
-// - 相机跟着视角 +0x78 跑（V=0 正脸，V=90 侧脸，差多少偏多少）；
-// - 所以反过来钉：每 tick 把 +0x78/+0x80（镜像）都写成 +0x3c，视角被钉在身体正前方，
-//   相机也就钉在脸正前方。站立转视角会被顶回来（本模式不许自由看，看脸专用）；
-//   走路时身体转，相机会跟着身体走，自拍跟随。
+// 跟脸节拍（normalTick 里每帧调）：第 4 档（2d6==2）时把视角 yaw 灌进身体朝向。
+// 机理（setupCamera 反汇编实锤）：
+// - 相机轨道/朝向一律读视角 +0x78（yaw）/+0x7c（pitch），+0x80/+0x84 只是上一 tick 旧值（插值用，不是镜像）；
+// - 身体/脸朝向是 +0x3c（只管模型，不进相机），站立拖视角时它恒定不动；
+// - 反面档（2d6=0）是自由轨道：拖视角转相机，身体不动；正面档要“固定到一起转”，
+//   就让身体跟视角走：每 tick 把 +0x78 拷给 +0x3c，拖到哪脸跟到哪，脸永远朝相机（自拍跟随）。
+// - 反向（视角=身体）是错的：它把 +0x78 钉死，转视角会被顶回，相机不动只剩头动；
+//   且禁碰 +0x80/+0x84（那是插值旧值，写成新值会丢平滑直接瞬移）。
 // 只在第 4 档动手，其余档零开销。
 #define CAM_YAW_VIEW_OFF 0x78   // 视角 yaw（ENTITY_YAW_OFF，相机跟它跑）
-#define CAM_YAW_VIEW_MIR 0x80   // 视角镜像（同动，不钉会穿帮）
-#define CAM_YAW_BODY_OFF 0x3c   // 身体/脸朝向（站立恒定，转视角不动它）
+#define CAM_YAW_BODY_OFF 0x3c   // 身体/脸朝向（只管模型，转视角不动它，跟脸时由本函数灌）
 void MWBCamFaceTick(void) {
     if (!gLocalPlayer) return;
     void *o = MWBCamOptions(NULL);
     if (!o) return;
     if (*(uint8_t *)((char *)o + CAM_F_FRONT) != 2) return;
-    float by = *(float *)((char *)gLocalPlayer + CAM_YAW_BODY_OFF);
-    *(float *)((char *)gLocalPlayer + CAM_YAW_VIEW_OFF) = by;
-    *(float *)((char *)gLocalPlayer + CAM_YAW_VIEW_MIR) = by;
+    float vy = *(float *)((char *)gLocalPlayer + CAM_YAW_VIEW_OFF);
+    *(float *)((char *)gLocalPlayer + CAM_YAW_BODY_OFF) = vy;
 }
 
 // 诊断：条目类型 + 双字段 + 相机实体身份（caminfo flag 打）

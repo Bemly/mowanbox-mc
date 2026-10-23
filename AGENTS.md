@@ -49,7 +49,7 @@
   14. YSM 贴图 v=0 在上（与 GLTF 一致）：Three.js 的 TextureLoader 默认 flipY 会把 UV 采到透明区、alphaTest 全吞成"只剩裙子"，必须关 flip；设备端写 quad UV 时同约定的 V 方向待真机第三人称截图确认。
   15. 大肥鱼烘焙（tools/bake_fatfish.py→local/，不提交）：干净盒子（6 朝向齐+免钳）保留整盒，其余按面片转 1 厚薄板（轮廓/角 UV 精确，C 格式不变，8475 件）；亚单位钳≥1 只影响脸部微件（ chunky 但在位），上机先看 P1 静态。
 16. GLB 的 UV 不要翻转：GLTFLoader 对 glTF 贴图 flipY=false（UV 原点左上与 PNG 行序一致），web 移植页已证翻转会被 alphaTest 吃成锥体残件（`?only=Head` 0 像素）；iPad 侧 CGBitmap 行序语义不同，`MWBGLBModel.mm` 的 UV 方向以 web 页为准，真机第三人称截图确认。
-17. 相机四视角（设置第三人称开关改 4 段滑条：第一/第三背面/第三正面/跟脸正面）：条目类型位自家初始化会盖回，故改道 createToggle；相机读 Options+0x2cd（0=第一）×+0x2d6（0=背面，1=正面，原版无 UI 可达）；跟脸档每 tick 把视角 +0x78/+0x80 钉回身体 +0x3c（转视角会被顶回，走路身体转相机会跟）；正面位 NSUserDefaults 持久化（MWBCamFront），读档接回。
+17. 相机四视角（设置第三人称开关改 4 段滑条：第一/第三背面/第三正面/跟脸正面）：条目类型位自家初始化会盖回，故改道 createToggle；相机读 Options+0x2cd（0=第一）×+0x2d6（0=背面，1=正面，原版无 UI 可达）；跟脸档每 tick 把视角 +0x78 灌进身体 +0x3c（拖到哪脸跟到哪，禁碰插值旧值 +0x80/+0x84）；正面位三态原值持久化（MWBCamFront 0/1/2，存布尔会丢跟脸档），读档接回。
 
 ## 0.10.0 逆向符号速查（MSFindSymbol 直解，imagebase=0x100000000）
 
