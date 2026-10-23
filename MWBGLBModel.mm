@@ -8,7 +8,7 @@
 #import "MWBGLBModel.h"
 #import "MWBGLBMolang.h"
 #import "MWBCommon.h"
-#import <OpenGLES/ES2/gl.h>
+#import <OpenGLES/ES1/gl.h> // 游戏是 ES1 固定管线（EAGLView + uniform 几乎零调用），自家画也走固定管线
 #import <ImageIO/ImageIO.h>
 #import <math.h>
 #import <vector>
@@ -24,8 +24,15 @@ void MWBGLBCaptureMatrix(const float *m) {
     if (m[3] == 0.0f && m[7] == 0.0f && fabsf(m[11] + 1.0f) < 1e-6f && m[15] == 0.0f) {
         memcpy(sGLBProj, m, sizeof(sGLBProj)); sHasProj = YES;
     } else if (m[15] == 1.0f) {
-        memcpy(sGLBMV, m, sizeof(sGLBMV)); sHasMV = YES; // 最后一个仿射胜出（画时读，错位也只错位不崩）
+        memcpy(sGLBMV, m, sizeof(sGLBMV)); sHasMV = YES; // 最后一个仿射胜出（诊断用）
     }
+}
+// 入口矩阵（ES1 固定管线：hook 入口时当前 MODELVIEW 即实体级 V·E，画时逐 mesh 接着往下乘）
+static float sEntryP[16]; static float sEntryMV[16]; static BOOL sHasEntry = NO;
+void MWBGLBCaptureEntry(void) {
+    glGetFloatv(GL_PROJECTION_MATRIX, sEntryP);
+    glGetFloatv(GL_MODELVIEW_MATRIX, sEntryMV);
+    sHasEntry = YES;
 }
 
 // ---- 数据 ----
@@ -51,7 +58,7 @@ static NSData *sTexPNG = nil;
 static NSString *sCurAnim = nil;
 static BOOL sParsed = NO;
 static float sTMain = 0, sTVis = 0; // 主动作时间 / 常驻层时间（viewer 双时钟同款）
-static GLuint sProg = 0, sTex = 0; // 自家 shader 与贴图（GL 线程建，reload 时置 0 下次重建）
+static GLuint sTex = 0; // 自家贴图（GL 线程建，reload 时置 0 下次重建）
 
 // ---- 小数学（列主序，与 GL 一致） ----
 static void GLBQuatToMat(const float *q, float *m) {
@@ -357,7 +364,7 @@ void MWBGLBReload(void) {
     sMeshes.clear(); sNodes.clear(); sName2Idx.clear(); sRootSet.clear(); sAnims.clear();
     sVisScale = nil; sVisOrder = nil; sTexPNG = nil;
     if (sTex) { /* GL 线程外不删，下次首画复用或重建 */ }
-    sProg = 0; sTex = 0; sTMain = 0; sTVis = 0;
+    sTex = 0; sTMain = 0; sTVis = 0;
     sParsed = NO;
     MWBLogFile(@"[GLB] 重载");
     MWBGLBEnsureParsed();
@@ -368,32 +375,9 @@ void MWBGLBSetAnim(NSString *name) {
     MWBLogFile(@"[GLB] 切动作 %@", sCurAnim);
 }
 
-// ---- 自家 shader（纹理 + 0.5 丢弃，不碰游戏 shader；attrib 固定 0/1，link 时绑定） ----
-static GLint sUMVP = -1, sUTex = -1;
-static GLuint GLBCompile(GLenum type, const char *src) {
-    GLuint sh = glCreateShader(type);
-    glShaderSource(sh, 1, &src, NULL); glCompileShader(sh);
-    GLint ok = 0; glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
-    if (!ok) { MWBLogFile(@"[GLB] shader 编译失败"); glDeleteShader(sh); return 0; }
-    return sh;
-}
+// ---- 自家贴图（ES1 固定管线：游戏纹理不动，只绑自己的画完恢复；Nearest 像素风）
 static BOOL GLBInitGL(void) {
-    if (sProg) return YES;
-    const char *vs = "attribute vec3 a_pos; attribute vec2 a_uv; uniform mat4 u_mvp; varying vec2 v_uv;"
-                     "void main(){ v_uv=a_uv; gl_Position=u_mvp*vec4(a_pos,1.0); }";
-    const char *fs = "precision mediump float; varying vec2 v_uv; uniform sampler2D u_tex;"
-                     "void main(){ vec4 c=texture2D(u_tex,v_uv); if(c.a<0.5) discard; gl_FragColor=c; }";
-    GLuint v = GLBCompile(GL_VERTEX_SHADER, vs), f = GLBCompile(GL_FRAGMENT_SHADER, fs);
-    if (!v || !f) return NO;
-    sProg = glCreateProgram();
-    glAttachShader(sProg, v); glAttachShader(sProg, f);
-    glBindAttribLocation(sProg, 0, "a_pos"); glBindAttribLocation(sProg, 1, "a_uv");
-    glLinkProgram(sProg);
-    GLint ok = 0; glGetProgramiv(sProg, GL_LINK_STATUS, &ok);
-    glDeleteShader(v); glDeleteShader(f);
-    if (!ok) { MWBLogFile(@"[GLB] program 链接失败"); sProg = 0; return NO; }
-    sUMVP = glGetUniformLocation(sProg, "u_mvp");
-    sUTex = glGetUniformLocation(sProg, "u_tex");
+    if (sTex) return YES;
     // 贴图上传（PNG 解码 + Nearest，不过滤，viewer 同款像素风）
     if (sTexPNG) {
         CGImageSourceRef src = CGImageSourceCreateWithData((CFDataRef)sTexPNG, NULL);
@@ -427,25 +411,17 @@ static BOOL GLBInitGL(void) {
 static char sGLVer[128] = {0}, sGLRen[128] = {0}; // GL 线程缓存版本串（诊断用）
 void MWBGLBLogDiag(void) {
     extern int MWB010GLCalls(void);
-    MWBLogFile(@"[GLB] 诊断 开关=%d 解析=%d 网格=%lu 投影=%d 模型视图=%d uniform调用=%d 版本=%s 渲染器=%s",
+    MWBLogFile(@"[GLB] 诊断 开关=%d 解析=%d 网格=%lu 入口矩阵=%d uniform调用=%d 版本=%s 渲染器=%s",
                gGLBModel, sParsed, (unsigned long)sMeshes.size(),
-               sHasProj, sHasMV, MWB010GLCalls(), sGLVer, sGLRen);
+               sHasEntry, MWB010GLCalls(), sGLVer, sGLRen);
 }
-// 开关+解析+矩阵齐才藏原版（缺任一样都不藏，免得鱼没画出来人也没了）
+// 开关+解析+入口矩阵齐才藏原版（缺任一样都不藏，免得鱼没画出来人也没了）
 BOOL MWBGLBCanDraw(void) {
-    return gGLBModel && sParsed && !sRootSet.empty() && sHasProj && sHasMV;
+    return gGLBModel && sParsed && !sRootSet.empty() && sHasEntry;
 }
 void MWBGLBDraw(void) {
     if (!gGLBModel || !sParsed || sRootSet.empty()) return;
-    // 卡点一次通报（之前静默 return， elsewhere 猜；只打一次不刷屏）
-    static int sBlockLogged = 0;
-    if ((!sHasProj || !sHasMV) && !sBlockLogged) {
-        sBlockLogged = 1;
-        extern int MWB010GLCalls(void);
-        MWBLogFile(@"[GLB] 等矩阵 投影=%d 模型视图=%d uniform调用=%d（为0说明主二进制几乎不调该函数）",
-                   sHasProj, sHasMV, MWB010GLCalls());
-    }
-    if (!sHasProj || !sHasMV) return;
+    if (!sHasEntry) return; // 入口还没跑到本地玩家渲染（首帧之后恒有）
     if (!sGLVer[0]) {
         const char *v = (const char *)glGetString(GL_VERSION);
         const char *r = (const char *)glGetString(GL_RENDERER);
@@ -544,36 +520,32 @@ void MWBGLBDraw(void) {
         memcpy(&sWorld[ni*16], W, sizeof(W));
     }
 
-    // GL 现场保存
-    GLint oldProg = 0, oldTex = 0, oldActive = 0, oldAB = 0, oldCull = 0;
-    glGetIntegerv(GL_CURRENT_PROGRAM, &oldProg);
+    // ES1 现场：只动开关/绑定/模型栈，画完原样恢复（投影不动游戏的）
+    GLint oldTex = 0, oldActive = 0, oldMode = 0;
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &oldTex);
     glGetIntegerv(GL_ACTIVE_TEXTURE, &oldActive);
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &oldAB);
-    oldCull = glIsEnabled(GL_CULL_FACE);
-    GLint a0e=0, a1e=0; GLint a0s=0,a0t=0,a0n=0,a0st=0,a1s=0,a1t=0,a1n=0,a1st=0; void *a0p=NULL,*a1p=NULL;
-    glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &a0e);
-    glGetVertexAttribiv(1, GL_VERTEX_ATTRIB_ARRAY_ENABLED, &a1e);
-    glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_SIZE, &a0s);
-    glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_TYPE, &a0t);
-    glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &a0n);
-    glGetVertexAttribiv(0, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &a0st);
-    glGetVertexAttribiv(1, GL_VERTEX_ATTRIB_ARRAY_SIZE, &a1s);
-    glGetVertexAttribiv(1, GL_VERTEX_ATTRIB_ARRAY_TYPE, &a1t);
-    glGetVertexAttribiv(1, GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &a1n);
-    glGetVertexAttribiv(1, GL_VERTEX_ATTRIB_ARRAY_STRIDE, &a1st);
-    glGetVertexAttribPointerv(0, GL_VERTEX_ATTRIB_ARRAY_POINTER, &a0p);
-    glGetVertexAttribPointerv(1, GL_VERTEX_ATTRIB_ARRAY_POINTER, &a1p);
+    glGetIntegerv(GL_MATRIX_MODE, &oldMode);
+    GLboolean texEn = glIsEnabled(GL_TEXTURE_2D);
+    GLboolean lightEn = glIsEnabled(GL_LIGHTING);
+    GLboolean fogEn = glIsEnabled(GL_FOG);
+    GLboolean cullEn = glIsEnabled(GL_CULL_FACE);
+    GLboolean alphaEn = glIsEnabled(GL_ALPHA_TEST);
+    GLint oldAlphaFunc = 0; GLfloat oldAlphaRef = 0;
+    glGetIntegerv(GL_ALPHA_TEST_FUNC, &oldAlphaFunc);
+    glGetFloatv(GL_ALPHA_TEST_REF, &oldAlphaRef);
+    GLboolean vaEn = glIsEnabled(GL_VERTEX_ARRAY);
+    GLboolean taEn = glIsEnabled(GL_TEXTURE_COORD_ARRAY);
+    GLint vaS=0, vaT=0, vaSt=0, taS=0, taT=0, taSt=0; void *vaP=NULL, *taP=NULL;
+    glGetIntegerv(GL_VERTEX_ARRAY_SIZE, &vaS);
+    glGetIntegerv(GL_VERTEX_ARRAY_TYPE, &vaT);
+    glGetIntegerv(GL_VERTEX_ARRAY_STRIDE, &vaSt);
+    glGetIntegerv(GL_TEXTURE_COORD_ARRAY_SIZE, &taS);
+    glGetIntegerv(GL_TEXTURE_COORD_ARRAY_TYPE, &taT);
+    glGetIntegerv(GL_TEXTURE_COORD_ARRAY_STRIDE, &taSt);
+    glGetPointerv(GL_VERTEX_ARRAY_POINTER, &vaP);
+    glGetPointerv(GL_TEXTURE_COORD_ARRAY_POINTER, &taP);
 
-    glUseProgram(sProg);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, sTex);
-    glUniform1i(sUTex, 0);
-    glDisable(GL_CULL_FACE); // 双面（viewer doubleSide 同款）
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glEnableVertexAttribArray(0); glEnableVertexAttribArray(1);
-
-    // MVP = 投影 · 实体模型视图 · 节点世界（实体矩阵取捕获到的最新仿射，错位只错位不崩）
+    // 逐 mesh：实体矩阵（入口捕获） · 节点世界；无光照全亮 + 0.5 丢弃（viewer MASK 同款）
     long drawn = 0, tris = 0; long shown = 0, total = 0;
     // 祖先隐藏链（viewer 子树隐藏同款）
     std::vector<char> visOK(sNodes.size(), 0);
@@ -588,26 +560,39 @@ void MWBGLBDraw(void) {
         int mi = sNodes[ni].mesh;
         if (mi < 0 || mi >= (int)sMeshes.size()) continue;
         GLBMesh &m = sMeshes[mi];
-        float MV[16], MVP[16];
-        GLBMatMul(sGLBMV, &sWorld[ni*16], MV);
-        GLBMatMul(sGLBProj, MV, MVP);
-        glUniformMatrix4fv(sUMVP, 1, GL_FALSE, MVP);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, m.pos);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 0, m.uv);
+        glMatrixMode(GL_MODELVIEW);
+        glPushMatrix();
+        glMultMatrixf(sEntryMV);
+        glMultMatrixf(&sWorld[ni*16]);
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, sTex);
+        glDisable(GL_LIGHTING); // 无光照全亮（法线后补，P2 再看要不要灯）
+        glDisable(GL_FOG);
+        glDisable(GL_CULL_FACE); // 双面（viewer doubleSide 同款）
+        glEnable(GL_ALPHA_TEST); glAlphaFunc(GL_GREATER, 0.5f);
+        glEnableClientState(GL_VERTEX_ARRAY);
+        glVertexPointer(3, GL_FLOAT, 0, m.pos);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        glTexCoordPointer(2, GL_FLOAT, 0, m.uv);
         glDrawElements(GL_TRIANGLES, m.nidx, GL_UNSIGNED_SHORT, m.idx);
+        glPopMatrix();
         drawn++; tris += m.nidx / 3;
     }
 
     // 现场恢复
-    if (a0e) glEnableVertexAttribArray(0); else glDisableVertexAttribArray(0);
-    if (a1e) glEnableVertexAttribArray(1); else glDisableVertexAttribArray(1);
-    glVertexAttribPointer(0, a0s, a0t, a0n, a0st, a0p);
-    glVertexAttribPointer(1, a1s, a1t, a1n, a1st, a1p);
-    glBindBuffer(GL_ARRAY_BUFFER, oldAB);
-    if (oldCull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    if (vaEn) glEnableClientState(GL_VERTEX_ARRAY); else glDisableClientState(GL_VERTEX_ARRAY);
+    if (taEn) glEnableClientState(GL_TEXTURE_COORD_ARRAY); else glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+    glVertexPointer(vaS, vaT, vaSt, vaP);
+    glTexCoordPointer(taS, taT, taSt, taP);
+    if (texEn) glEnable(GL_TEXTURE_2D); else glDisable(GL_TEXTURE_2D);
+    if (lightEn) glEnable(GL_LIGHTING); else glDisable(GL_LIGHTING);
+    if (fogEn) glEnable(GL_FOG); else glDisable(GL_FOG);
+    if (cullEn) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    if (alphaEn) glEnable(GL_ALPHA_TEST); else glDisable(GL_ALPHA_TEST);
+    glAlphaFunc(oldAlphaFunc, oldAlphaRef);
     glActiveTexture(oldActive);
     glBindTexture(GL_TEXTURE_2D, oldTex);
-    glUseProgram(oldProg);
+    glMatrixMode(oldMode);
 
     static int sFrames = 0; sFrames++;
     if (sFrames == 1 || sFrames % 600 == 0)

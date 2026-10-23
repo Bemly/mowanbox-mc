@@ -10,6 +10,8 @@
 
 // GLB 捕获到的矩阵（MWBHooks010 的 uniform hook 内调，投影/模型视图各存最新一份）
 void MWBGLBCaptureMatrix(const float *m);
+// 入口矩阵（ES1：render hook 入口调，此时 MODELVIEW 即实体级变换）
+void MWBGLBCaptureEntry(void);
 
 // 解析（任意线程可调，只做 CPU 事：读文件/解 JSON/拷顶点，不碰 GL；成功返回 YES）
 BOOL MWBGLBEnsureParsed(void);
