@@ -1,0 +1,7 @@
+# testdata — 本地测试模型（不提交）
+# 从 ~/Downloads/大肥鱼_3js_viewer/ 拷入：
+#   fatfish.glb / fatfish_vis.json
+*.glb
+*.json
+*.png
+*.bin

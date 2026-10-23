@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>4D皮肤 · GLB 移植验证页（左=viewer参考 / 右=插件移植）</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#0d1117; color:#e6edf3;
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif; }
+  #wrap { display:flex; height:100vh; }
+  .view { flex:1; position:relative; min-width:0; }
+  .view canvas { display:block; width:100%; height:100%; }
+  .tag { position:absolute; top:10px; left:10px; background:rgba(13,17,23,.85);
+    border:1px solid #30363d; border-radius:8px; padding:6px 10px; font-size:12px; }
+  #hud { position:fixed; top:10px; left:50%; transform:translateX(-50%); width:360px;
+    background:rgba(13,17,23,.92); border:1px solid #30363d; border-radius:10px;
+    padding:12px 14px; max-height:calc(100vh - 20px); overflow-y:auto; z-index:5; }
+  #hud h1 { font-size:14px; margin:0 0 2px; }
+  #hud .sub { font-size:12px; color:#8b949e; margin-bottom:8px; }
+  #hud label { font-size:12px; color:#8b949e; display:block; margin:8px 0 4px; }
+  #hud select, #hud button { width:100%; box-sizing:border-box; background:#161b22; color:#e6edf3;
+    border:1px solid #30363d; border-radius:6px; padding:6px 8px; font-size:13px; }
+  #hud button { cursor:pointer; margin-top:8px; }
+  #hud .row { display:flex; gap:8px; }
+  #hud .chk { display:flex; align-items:center; gap:6px; font-size:12px; color:#8b949e; margin-top:8px; }
+  #hud .chk input { width:auto; }
+  #diff { font-size:12px; line-height:1.7; white-space:pre-wrap; color:#c9d1d9;
+    border-top:1px solid #30363d; margin-top:8px; padding-top:8px; }
+  #diff .ok { color:#7ee787; } #diff .bad { color:#ff9e9e; }
+  #log { font-size:11px; line-height:1.6; white-space:pre-wrap; color:#8b949e;
+    border-top:1px solid #30363d; margin-top:8px; padding-top:8px; max-height:220px; overflow-y:auto; }
+  #settings { font-size:12px; }
+  #settings h2 { font-size:12px; margin:8px 0 4px; color:#e6edf3; border-top:1px solid #30363d; padding-top:6px; }
+  #settings .t { color:#8b949e; margin:4px 0 2px; }
+  #settings input[type=range] { width:65%; vertical-align:middle; }
+  #settings .v { color:#79c0ff; margin-left:6px; }
+  #loading { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:14px; color:#8b949e; background:#0d1117; z-index:10; }
+  #err { position:fixed; bottom:10px; left:10px; right:10px; color:#ff9e9e; font-size:12px;
+    white-space:pre-wrap; z-index:6; }
+</style>
+<script type="importmap">
+{ "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="loading">正在加载 testdata/fatfish.glb …（需 http 服务：web/ 下执行 python3 -m http.server）</div>
+<div id="wrap">
+  <div class="view"><canvas id="cvL"></canvas><div class="tag">左 · viewer 参考（GLTFLoader + 原 updateVisibility）</div></div>
+  <div class="view"><canvas id="cvR"></canvas><div class="tag">右 · 插件移植（手解 GLB + 移植 pose/vis + 自家 shader，WVP=SIM）</div></div>
+</div>
+<div id="hud">
+  <h1>🐟 4D皮肤 · GLB 移植验证</h1>
+  <div class="sub">web 先行：这里对了才部署 iPad。判定=双视口逐帧对照＋肉眼＋插件同格式日志。</div>
+  <label>动作（<span id="animCount"></span>）</label>
+  <select id="anim"></select>
+  <div class="row"><button id="play">⏸ 暂停</button><button id="selftest">🧪 自检</button></div>
+  <div class="chk"><input type="checkbox" id="layers" checked> 常驻层（order 八层，mod 同款）
+    <input type="checkbox" id="spin" style="margin-left:12px"> 自动旋转</div>
+  <div id="diff">等待加载…</div>
+  <div id="settings"></div>
+  <div id="log"></div>
+</div>
+<div id="err"></div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { molVal } from './js/plugin-molang.js';
+import { parseGLB, computePose, firstVertexClip, fmtParseLog, fmtStats, fmtFirstVertex } from './js/plugin-glb.js';
+import { viewerVisibility } from './js/viewer-ref.js';
+
+const $ = (id) => document.getElementById(id);
+const errBox = $('err'), logBox = $('log'), diffBox = $('diff');
+function log(s) { logBox.textContent += s + '\n'; logBox.scrollTop = logBox.scrollHeight; console.log(s); }
+window.addEventListener('error', (e) => { errBox.textContent += '[ERR] ' + e.message + '\n'; });
+window.addEventListener('unhandledrejection', (e) => { errBox.textContent += '[REJ] ' + String(e.reason) + '\n'; });
+
+// ---------- 左：viewer 参考 ----------
+const cvL = $('cvL');
+const rendererL = new THREE.WebGLRenderer({ canvas: cvL, antialias: false });
+rendererL.setPixelRatio(Math.min(devicePixelRatio, 2));
+const sceneL = new THREE.Scene();
+sceneL.background = new THREE.Color(0x0d1117);
+const cameraL = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+cameraL.position.set(3.2, 1.6, 4.2);
+const controls = new OrbitControls(cameraL, cvL);
+controls.target.set(0, 1.0, 0);
+controls.enableDamping = true;
+sceneL.add(new THREE.HemisphereLight(0xffffff, 0x223344, 1.1));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(4, 6, 3); sceneL.add(key);
+const rim = new THREE.DirectionalLight(0x88aaff, 0.7); rim.position.set(-4, 3, -4); sceneL.add(rim);
+const gridL = new THREE.GridHelper(12, 24, 0x30363d, 0x1c2128); gridL.position.y = -0.02; sceneL.add(gridL);
+
+// ---------- 右：插件移植（自家 shader + 手解数据） ----------
+// 对应 MWBGLBModel.mm GLBInitProg（32-50 行）：MVP 全 CPU 算好一次传入，不碰游戏 program。
+const cvR = $('cvR');
+const gl = cvR.getContext('webgl', { antialias: false });
+function compileShader(type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src); gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) { log('[GLB] shader 编译失败'); gl.deleteShader(sh); return null; }
+  return sh;
+}
+let progR = null, uMvp = -1, uTex = -1;
+function initProg() {
+  if (progR) return true;
+  const vs = 'attribute vec3 a_pos; attribute vec2 a_uv; uniform mat4 u_mvp; varying vec2 v_uv;'
+    + 'void main(){ v_uv=a_uv; gl_Position=u_mvp*vec4(a_pos,1.0); }';
+  const fs = 'precision mediump float; varying vec2 v_uv; uniform sampler2D u_tex;'
+    + 'void main(){ vec4 c=texture2D(u_tex,v_uv); if(c.a<0.5) discard; gl_FragColor=c; }';
+  const v = compileShader(gl.VERTEX_SHADER, vs), f = compileShader(gl.FRAGMENT_SHADER, fs);
+  if (!v || !f) return false;
+  progR = gl.createProgram();
+  gl.attachShader(progR, v); gl.attachShader(progR, f);
+  gl.bindAttribLocation(progR, 0, 'a_pos'); gl.bindAttribLocation(progR, 1, 'a_uv');
+  gl.linkProgram(progR);
+  gl.deleteShader(v); gl.deleteShader(f);
+  if (!gl.getProgramParameter(progR, gl.LINK_STATUS)) { log('[GLB] program 链接失败'); progR = null; return false; }
+  uMvp = gl.getUniformLocation(progR, 'u_mvp');
+  uTex = gl.getUniformLocation(progR, 'u_tex');
+  return true;
+}
+
+// ---------- 状态 ----------
+let vis = null, parsed = null, texR = null;
+const vbos = []; // 每 mesh [posBuf, uvBuf, idxBuf]
+let mixer = null, actions = {}, cur = null, curName = 'idle', modelL = null;
+const nodeByName = new Map();
+const roaming = {};
+let tMain = 0, tVis = 0, paused = false, frames = 0;
+const clock = new THREE.Clock();
+
+function resize() {
+  const w = cvL.clientWidth || innerWidth / 2, h = cvL.clientHeight || innerHeight;
+  rendererL.setSize(w, h, false);
+  cameraL.aspect = w / h; cameraL.updateProjectionMatrix();
+  cvR.width = Math.floor(w * Math.min(devicePixelRatio, 2));
+  cvR.height = Math.floor(h * Math.min(devicePixelRatio, 2));
+}
+window.addEventListener('resize', resize);
+
+// ---------- 设置面板（viewer buildSettings 搬运：roaming 实时驱动显隐） ----------
+function applyAssignments(str) {
+  str.split(';').forEach((part) => {
+    const m = part.trim().match(/^v\.roaming\.([\w]+)\s*=\s*(.+)$/);
+    if (!m) return;
+    const v = parseFloat(m[2]);
+    roaming[m[1]] = isNaN(v) ? 0 : v;
+  });
+  syncSettingsUI();
+}
+function syncSettingsUI() {
+  document.querySelectorAll('#settings [data-var]').forEach((el) => {
+    const v = roaming[el.dataset.var] ?? 0;
+    if (el.type === 'checkbox') el.checked = v !== 0;
+    else if (el.type === 'range') { el.value = v; const o = el.parentElement.querySelector('.v'); if (o) o.textContent = v; }
+  });
+}
+function buildSettings() {
+  const box = $('settings');
+  box.innerHTML = '';
+  vis.settings.forEach((b) => {
+    const h = document.createElement('h2'); h.textContent = b.name; box.appendChild(h);
+    b.forms.forEach((f) => {
+      const m = (f.var || '').match(/^roaming\.(.+)$/);
+      if (!m) return;
+      const vname = m[1];
+      if (!(vname in roaming)) roaming[vname] = 0;
+      const div = document.createElement('div');
+      const t = document.createElement('div'); t.className = 't'; t.textContent = f.title; div.appendChild(t);
+      if (f.type === 'checkbox') {
+        const cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.dataset.var = vname;
+        cb.onchange = () => { roaming[vname] = cb.checked ? 1 : 0; syncSettingsUI(); };
+        div.appendChild(cb); div.appendChild(document.createTextNode(' 开/关'));
+      } else if (f.type === 'range') {
+        const rg = document.createElement('input');
+        rg.type = 'range'; rg.min = f.min; rg.max = f.max; rg.step = f.step || 0.1; rg.value = 0;
+        rg.dataset.var = vname;
+        const vv = document.createElement('span'); vv.className = 'v'; vv.textContent = '0';
+        rg.oninput = () => { roaming[vname] = parseFloat(rg.value); vv.textContent = rg.value; };
+        div.appendChild(rg); div.appendChild(vv);
+      } else if (f.type === 'radio') {
+        Object.entries(f.labels || {}).forEach(([assign, label], idx) => {
+          const lab = document.createElement('label');
+          const rd = document.createElement('input');
+          rd.type = 'radio'; rd.name = 'radio_' + b.id + '_' + f.var; rd.checked = idx === 0;
+          rd.onchange = () => { if (rd.checked) applyAssignments(assign); };
+          lab.appendChild(rd); lab.appendChild(document.createTextNode(' ' + label));
+          div.appendChild(lab);
+        });
+        const opts = Object.entries(f.labels || {});
+        if (opts.length) applyAssignments(opts[0][0]);
+      }
+      box.appendChild(div);
+    });
+  });
+  syncSettingsUI();
+}
+
+function playAnim(name) {
+  curName = name;
+  if (cur) cur.stop();
+  if (modelL) modelL.traverse((o) => {
+    if (o.userData.baseT) {
+      o.position.copy(o.userData.baseT);
+      o.quaternion.copy(o.userData.baseR);
+      o.scale.copy(o.userData.baseS);
+      o.visible = true;
+    }
+  });
+  // GLB 里 clip 名带 main: 前缀，sidecar 用裸名，两种都试（viewer playAnim / 插件 mm 539-541 行同款）
+  cur = actions['main:' + name] || actions[name] || null;
+  if (cur) { cur.reset(); cur.loop = THREE.LoopRepeat; cur.clampWhenFinished = true; cur.paused = false; cur.play(); }
+  tVis = 0;
+}
+
+// ---------- 自检（molang + 解析 + 首帧对照） ----------
+function selfTest() {
+  const lines = [];
+  const eq = (a, b, eps = 1e-5) => Math.abs(a - b) <= eps;
+  // molang 用例（插件与 viewer 必须一致）
+  const env = { roaming: { le: 2 }, t: 1.5 };
+  const cases = [
+    ['1+2*3', 7], ['(v.roaming.le==2)||(v.roaming.le==3)', 1],
+    ['query.anim_time', 1.5], ["'abc'", 0], ['math.clamp(5,0,3)', 3],
+    ['1>2?10:20', 20], ['!0', 1],
+  ];
+  let ok = 0;
+  for (const [expr, want] of cases) {
+    const got = molVal(expr, env);
+    const pass = eq(got, want);
+    if (pass) ok++;
+    lines.push(`molang ${pass ? 'OK ' : 'FAIL'} ${expr} = ${got}（期望 ${want}）`);
+  }
+  // 解析对账（期望值来自 fatfish.glb 实测：452骨骼声明/256网格/23688三角/48动画clip）
+  lines.push(`解析 节点=${parsed.nodes.length} 网格=${parsed.meshes.length} 三角=${parsed.totalTris} Root子树=${parsed.rootSet.length} 动画=${parsed.anims.size}`);
+  // 首帧对照：idle t=0 左右可见计数必须相等
+  const pose0 = computePose(parsed, vis, 'idle', 0, 0, {});
+  const vv = viewerVisibility([...nodeByName.keys()], vis, 'idle', 0, 0, {});
+  const passVis = pose0.shown === vv.shown && pose0.total === vv.total;
+  lines.push(`对照 idle@t0 移植可见=${pose0.shown}/${pose0.total} 参考可见=${vv.shown}/${vv.total} ${passVis ? 'OK' : 'FAIL'}`);
+  log('🧪 自检 molang ' + ok + '/' + cases.length + '，对照 ' + (passVis ? 'OK' : 'FAIL'));
+  lines.forEach(log);
+}
+
+// ---------- 启动 ----------
+async function boot() {
+  const [glbBuf, visJson] = await Promise.all([
+    fetch('./testdata/fatfish.glb').then((r) => { if (!r.ok) throw new Error('fatfish.glb 取不到'); return r.arrayBuffer(); }),
+    fetch('./testdata/fatfish_vis.json').then((r) => { if (!r.ok) throw new Error('fatfish_vis.json 取不到'); return r.json(); }),
+  ]);
+  vis = visJson;
+  // 右：手解 GLB（插件 MWBGLBEnsureParsed 移植）
+  parsed = parseGLB(glbBuf, log);
+  if (!parsed) { $('loading').textContent = '手解 GLB 失败，看日志'; return; }
+  log(fmtParseLog(parsed, Object.keys(vis.scale || {}).length));
+  log(fmtStats(parsed, 'idle', Object.keys(vis.scale || {}).length));
+  // 右：贴图（GLB 内嵌 PNG，Nearest + Clamp，插件 mm 452-484 行同款）
+  const texBlob = new Blob([parsed.texBytes], { type: 'image/png' });
+  const texImg = await createImageBitmap(texBlob);
+  texR = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, texImg);
+  log(`[GLB] 贴图上传 ${texImg.width}x${texImg.height}（移植侧，Nearest）`);
+  // 右：VBO（插件 mm 509-528 行同款，一次上传）
+  for (const m of parsed.meshes) {
+    const pb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, pb);
+    gl.bufferData(gl.ARRAY_BUFFER, m.pos, gl.STATIC_DRAW);
+    const ub = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, ub);
+    gl.bufferData(gl.ARRAY_BUFFER, m.uv, gl.STATIC_DRAW);
+    const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW);
+    vbos.push([pb, ub, ib]);
+  }
+  log(`[GLB] VBO 上传完成 网格=${parsed.meshes.length}（移植侧）`);
+  initProg();
+
+  // 左：GLTFLoader 参考
+  const objUrl = URL.createObjectURL(new Blob([glbBuf], { type: 'model/gltf-binary' }));
+  new GLTFLoader().load(objUrl, (gltf) => {
+    $('loading').style.display = 'none';
+    modelL = gltf.scene;
+    sceneL.add(modelL);
+    modelL.traverse((o) => {
+      if (o.isMesh && o.material.map) {
+        o.material.map.magFilter = THREE.NearestFilter;
+        o.material.map.minFilter = THREE.NearestMipmapLinearFilter;
+        o.material.map.needsUpdate = true;
+      }
+    });
+    modelL.traverse((o) => {
+      if (o.name) nodeByName.set(o.name, o);
+      o.userData.baseT = o.position.clone();
+      o.userData.baseR = o.quaternion.clone();
+      o.userData.baseS = o.scale.clone();
+    });
+    const box = new THREE.Box3().setFromObject(modelL);
+    const c = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    controls.target.copy(c);
+    const r = Math.max(size.x, size.y, size.z);
+    cameraL.position.set(c.x + r * 0.9, c.y + r * 0.35, c.z - r * 1.45);
+    cameraL.near = r / 1000; cameraL.far = r * 100; cameraL.updateProjectionMatrix();
+    let tris = 0, meshes = 0;
+    modelL.traverse((o) => {
+      if (o.isMesh) {
+        meshes++;
+        tris += (o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count) / 3;
+      }
+    });
+    log(`[viewer] 参考 网格=${meshes} 三角=${Math.round(tris)}（GLTFLoader）`);
+    mixer = new THREE.AnimationMixer(modelL);
+    const acts = (vis.actions && vis.actions.length ? vis.actions : gltf.animations.map((x) => x.name))
+      .filter((n) => !n.startsWith('—'));
+    $('animCount').textContent = acts.length;
+    const sel = $('anim');
+    acts.forEach((name) => {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name; sel.appendChild(opt);
+    });
+    gltf.animations.forEach((clip) => {
+      const a = mixer.clipAction(clip); a.loop = THREE.LoopRepeat;
+      actions[clip.name] = a;
+    });
+    sel.value = acts.includes('idle') ? 'idle' : acts[0];
+    playAnim(sel.value);
+    sel.onchange = () => playAnim(sel.value);
+    buildSettings();
+    resize();
+    animate();
+  }, undefined, (e) => { errBox.textContent = 'GLB 加载失败: ' + (e.message || e); });
+  resize();
+}
+
+$('play').onclick = (e) => {
+  paused = !paused;
+  if (cur) cur.paused = paused;
+  e.target.textContent = paused ? '▶ 播放' : '⏸ 暂停';
+};
+$('selftest').onclick = () => { if (parsed) selfTest(); };
+$('spin').onchange = (e) => { controls.autoRotate = e.target.checked; };
+
+// ---------- 主循环（双时钟 viewer 同款：tMain 动作 / tVis 常驻层，dt 钳 0.1） ----------
+const projM = new THREE.Matrix4(), viewM = new THREE.Matrix4(), wvpM = new THREE.Matrix4();
+const wvpArr = new Float32Array(16);
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.1);
+  if (mixer) mixer.update(paused ? 0 : dt);
+  if (!paused) { tMain += dt; tVis += dt; }
+
+  // 左：参考更新（viewer updateVisibility：常驻层 order + 当前动作覆盖）
+  if (modelL && vis) {
+    const env = { roaming, t: cur ? cur.time : tVis };
+    const layers = [];
+    if ($('layers').checked) layers.push(...vis.order);
+    layers.push(curName);
+    const computed = new Map();
+    for (const an of layers) {
+      const A = vis.scale[an];
+      if (!A) continue;
+      for (const bn in A.tracks) computed.set(bn, { A, track: A.tracks[bn] });
+    }
+    // 左视口直接用 three 的 mixer 姿势 + 下方统一对照函数做显隐，保持与 viewer 一致：
+    applyViewerVisibility(env, computed);
+  }
+  controls.update();
+  rendererL.render(sceneL, cameraL);
+
+  // 右：移植绘制（MVP = WVP_SIM · 世界，WVP_SIM 由右相机 P·V 给出；插件是游戏 WORLDVIEWPROJ 直读）
+  if (parsed && progR && texR) {
+    // 右相机 = 左相机 ×16（移植世界是 ×16 游戏单位，图像可比，矩阵保持插件数值）
+    const rc = new THREE.PerspectiveCamera(cameraL.fov, cameraL.aspect, cameraL.near * 16, cameraL.far * 16);
+    rc.position.copy(cameraL.position).multiplyScalar(16);
+    const tgt = controls.target.clone().multiplyScalar(16);
+    rc.lookAt(tgt);
+    rc.updateMatrixWorld();
+    projM.copy(rc.projectionMatrix);
+    viewM.copy(rc.matrixWorldInverse);
+    wvpM.multiplyMatrices(projM, viewM);
+    wvpArr.set(wvpM.elements);
+    const pose = computePose(parsed, vis, curName, tMain, tVis, roaming);
+    drawPlugin(wvpArr, pose);
+    if (frames % 30 === 0) {
+      // 对照：可见计数（移植 vs 参考）+ 首顶点（插件格式）
+      const ref = viewerVisibility([...nodeByName.keys()], vis, curName, cur ? cur.time : tVis, tVis, roaming);
+      const fv = firstVertexClip(parsed, pose, wvpArr);
+      const same = pose.shown === ref.shown && pose.total === ref.total;
+      diffBox.innerHTML =
+        `动作=${curName} tMain=${tMain.toFixed(2)} tVis=${tVis.toFixed(2)}\n` +
+        `可见 移植=${pose.shown}/${pose.total} 参考=${ref.shown}/${ref.total} ` +
+        (same ? '<span class="ok">一致 ✅</span>' : '<span class="bad">不一致 ❌</span>') + '\n' +
+        fmtFirstVertex(fv) + '（WVP=SIM，iPad 上为游戏直读）';
+      if (frames === 30 || frames % 600 === 0) {
+        log(`[GLB] 存活帧=${frames} 本帧网格≈${pose.dfs.filter((ni) => pose.visOK[ni] && parsed.nodes[ni].mesh >= 0).length} 可见=${pose.shown}/${pose.total}`);
+        if (fv) log(fmtFirstVertex(fv));
+      }
+    }
+  }
+  frames++;
+}
+// 参考显隐应用（viewer 262-275 行原样，scale 写入 three 节点）
+function applyViewerVisibility(env, computed) {
+  let shown = 0, total = 0;
+  for (const [name, node] of nodeByName) {
+    if (!node.isMesh && !node.children.length) continue;
+    const hit = computed.get(name);
+    if (!hit) { node.visible = true; continue; }
+    const t = hit.A === vis.scale[curName] ? (cur ? cur.time : tVis) : tVis;
+    const len = (typeof hit.A.length === 'number' && isFinite(hit.A.length)) ? hit.A.length : Infinity;
+    // trackVal 内联（viewer-ref 同款，避免每节点 import 开销之外的分歧）
+    const track = hit.track;
+    let tt = t;
+    if (hit.A.loop === 1 && isFinite(hit.A.length) && hit.A.length > 0) tt = ((t % hit.A.length) + hit.A.length) % hit.A.length;
+    else if (isFinite(len)) tt = Math.min(t, len);
+    let s;
+    if (tt <= track[0][0]) s = track[0][2].map((v) => molVal(v, env));
+    else {
+      s = null;
+      for (let i = 0; i < track.length - 1; i++) {
+        const a = track[i], b = track[i + 1];
+        if (tt >= a[0] && tt <= b[0]) {
+          if (a[1] === 1 || b[0] === a[0]) { s = a[2].map((v) => molVal(v, env)); break; }
+          const f = (tt - a[0]) / (b[0] - a[0]);
+          s = [0, 1, 2].map((k) => { const va = molVal(a[2][k], env), vb = molVal(b[2][k], env); return va + (vb - va) * f; });
+          break;
+        }
+      }
+      if (!s) s = track[track.length - 1][2].map((v) => molVal(v, env));
+    }
+    const hide = s.some((c) => Math.abs(c) < 1e-3);
+    total++;
+    if (hide) node.visible = false;
+    else { node.visible = true; shown++; node.scale.set(s[0], s[1], s[2]); }
+  }
+}
+
+// 移植绘制内循环（对应 mm 640-681 行：MVP=WVP·world，自家 program，alphaTest，双面）
+function drawPlugin(wvp, pose) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, cvR.width, cvR.height);
+  gl.clearColor(0x0d / 255, 0x11 / 255, 0x17 / 255, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+  gl.disable(gl.CULL_FACE); // 双面（viewer doubleSide 同款，mm 644 行）
+  gl.useProgram(progR);
+  gl.uniform1i(uTex, 0);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, texR);
+  const M = new Float32Array(16);
+  for (const ni of pose.dfs) {
+    if (!pose.visOK[ni]) continue;
+    const mi = parsed.nodes[ni].mesh;
+    if (mi < 0 || mi >= parsed.meshes.length) continue;
+    // M = WVP · world（列主序，与 mm GLBMatMul 一致）
+    const W = pose.world;
+    for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
+      M[c * 4 + r] = wvp[r] * W[ni * 16 + c * 4] + wvp[4 + r] * W[ni * 16 + c * 4 + 1]
+        + wvp[8 + r] * W[ni * 16 + c * 4 + 2] + wvp[12 + r] * W[ni * 16 + c * 4 + 3];
+    gl.uniformMatrix4fv(uMvp, false, M);
+    const [pb, ub, ib] = vbos[mi];
+    gl.bindBuffer(gl.ARRAY_BUFFER, pb);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, ub);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
+    gl.drawElements(gl.TRIANGLES, parsed.meshes[mi].nidx, gl.UNSIGNED_SHORT, 0);
+  }
+}
+
+boot();
+</script>
+</body>
+</html>
