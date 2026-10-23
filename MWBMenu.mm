@@ -5,6 +5,8 @@
 #import "MWBMenu.h"
 #import "MWBFloat.h"
 #import "MWBGLBModel.h" // 菜单 4D 开直接驱动 GLB（唯一模型），开时顺手 CPU 解析
+#import "MWBYSMAnim.h"  // 第 5 项：YSM 模型设置页
+#import "EMIViews.h"    // 侧栏第 5 图标用物品图集（皮革头盔）
 
 #pragma mark - 选项菜单主视图
 
@@ -28,7 +30,7 @@
 }
 
 // 侧栏游戏原版图标 (touchgui2 裸图标 + items 刷怪蛋; v7 分区零宽容矩形, 校对过)
-// [0](138,4,21,21) [1](109,2,22,22) [2](136,31,24,24) [3](108,30,23,23) [4]蛋(16,192,16,16)
+// [0](138,4,21,21) [1](109,2,22,22) [2](136,31,24,24) [3](108,30,23,23) [4]皮革头盔（物品图集，见下）
 - (UIView *)makeSideIcon:(int)idx {
     struct { const char *f; CGRect r; } tabs[5] = {
         {"touchgui2.png", (CGRect){{138,4},{21,21}}},
@@ -38,6 +40,11 @@
         {"items-opaque.png", (CGRect){{16,192},{16,16}}},
     };
     if (idx < 0 || idx > 4) return nil;
+    if (idx == 4) { // 第 5 项改 YSM 模型设置：皮革头盔（items.meta 名 helmet 下标 0，游戏图集运行时读）
+        MWBItemIconView *iv = [[MWBItemIconView alloc] initWithSize:64];
+        [iv setItemTile:@"helmet" index:0];
+        return iv;
+    }
     UIImage *img = MWBGameIcon(@(tabs[idx].f), tabs[idx].r);
     if (!img) return nil;
     UIImageView *iv = [[UIImageView alloc] initWithImage:img];
@@ -466,49 +473,8 @@
     pF.frame = (CGRect){{0,0},{pw,fBase+280}};
     [pages addObject:pF];
 
-    // ---- 页 4: 刷怪 (刷怪蛋): 点按直调 MWB010SpawnMob 在玩家旁边刷怪 (仅 0.10)
-    // 蛋序 ↔ 实体[10-16,32-39] = 鸡/牛/猪/羊/狼/村民/哞菇/僵尸/爬行者/骷髅/蜘蛛/猪人/史莱姆/末影人/蠹虫
-    UIView *pEgg = [[UIView alloc] init];
-    pEgg.backgroundColor = [UIColor clearColor];
-    UILabel *hE = [[UILabel alloc] init];
-    hE.attributedText = MWBPixelText(MWBTr("spawn"), MWBPixelFont(41), MWB_COLOR(0xf0,0xee,0xea),
-                                     4, 4, MWB_COLOR(0x30,0x30,0x31));
-    [hE sizeToFit];
-    hE.frame = (CGRect){{padL,padTop},{hE.bounds.size.width,hE.bounds.size.height}};
-    [pEgg addSubview:hE];
-    NSArray *eggNames = @[MWBTr("egg0"), MWBTr("egg1"), MWBTr("egg2"), MWBTr("egg3"), MWBTr("egg4"),
-                          MWBTr("egg5"), MWBTr("egg6"), MWBTr("egg7"), MWBTr("egg8"), MWBTr("egg9"),
-                          MWBTr("egg10"), MWBTr("egg11"), MWBTr("egg12"), MWBTr("egg13"), MWBTr("egg14")];
-    CGFloat eTop = CGRectGetMaxY(hE.frame) + 20;
-    CGFloat eCell = (pw - 66) / 5.0;
-    for (int i = 0; i < 15; i++) {
-        int r = i / 5, c = i % 5;
-        UIButton *egg = [UIButton buttonWithType:UIButtonTypeCustom];
-        egg.frame = (CGRect){{33 + c * eCell, eTop + r * 118},{eCell - 8, 84}};
-        UIImage *eggImg = MWBGameIcon(@"items-opaque.png",
-            (CGRect){{(CGFloat)(16 + (i + 1) * 16), 192},{16, 16}});
-        [egg setImage:eggImg forState:UIControlStateNormal];
-        egg.imageView.contentMode = UIViewContentModeScaleAspectFit;
-        egg.imageView.layer.magnificationFilter = kCAFilterNearest;
-        egg.tag = 100 + i;
-        [egg addTarget:self action:@selector(eggTap:) forControlEvents:UIControlEventTouchUpInside];
-        if (!MWB010Only()) {
-            egg.alpha = 0.35;
-            egg.userInteractionEnabled = NO;
-        }
-        [pEgg addSubview:egg];
-        UILabel *en = [[UILabel alloc] init];
-        en.text = eggNames[i];
-        en.font = [UIFont systemFontOfSize:20];
-        en.adjustsFontSizeToFitWidth = YES;   // 英文名长 (Villager/Enderman) 自动缩小防截断
-        en.minimumScaleFactor = 0.7;
-        en.textColor = MWB_COLOR(0xcf,0xcc,0xc6);
-        en.textAlignment = NSTextAlignmentCenter;
-        en.frame = (CGRect){{33 + c * eCell, eTop + r * 118 + 86},{eCell - 8, 28}};
-        [pEgg addSubview:en];
-    }
-    pEgg.frame = (CGRect){{0,0},{pw,eTop + 3 * 118 + 10}};
-    [pages addObject:pEgg];
+    // ---- 页 4: YSM 模型设置（皮革头盔）：mod 里 Alt+Y 面板的原生版（刷怪已迁往物品页第 5 个 tab）
+    [pages addObject:MWBBuildYSMPage(pw)];
 
     self.pages = pages;
     self.currentPage = 0;
@@ -640,17 +606,6 @@
     MWBApplyLang();
     [self toast:(gChinese ? @"中文" : @"English")];
     [self close];
-}
-- (void)eggTap:(UIButton *)sender {
-    int i = (int)sender.tag - 100;
-    if (i < 0 || i >= 15) return;
-    // 蛋序 ↔ 实体 id (MobFactory::CreateMob 实锤映射, 仅 0.10 有后端, 非 0.10 按钮本身置灰点不到)
-    int mobIds[15] = {10, 11, 12, 13, 14, 15, 16, 32, 33, 34, 35, 36, 37, 38, 39};
-    NSArray *eggNames = @[MWBTr("egg0"), MWBTr("egg1"), MWBTr("egg2"), MWBTr("egg3"), MWBTr("egg4"),
-                          MWBTr("egg5"), MWBTr("egg6"), MWBTr("egg7"), MWBTr("egg8"), MWBTr("egg9"),
-                          MWBTr("egg10"), MWBTr("egg11"), MWBTr("egg12"), MWBTr("egg13"), MWBTr("egg14")];
-    MWB010SpawnMob(mobIds[i]);
-    [self toast:[eggNames[i] stringByAppendingString:MWBTr("t_spawned")]];
 }
 - (void)doAction:(MWBPixelButton *)sender {
     int tag = (int)sender.tag;

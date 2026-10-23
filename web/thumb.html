@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>模型橱窗烘焙</title>
+<style>
+  :root { --bg:#0d1117; --fg:#e6edf3; --mute:#8b949e; }
+  @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { --bg:#f6f8fa; --fg:#1f2328; --mute:#57606a; } }
+  body { margin:0; padding:16px; background:var(--bg); color:var(--fg); font:13px/1.5 -apple-system, sans-serif; }
+  #strip { max-width:100%; image-rendering:pixelated; background:repeating-conic-gradient(#8884 0 25%, #0000 0 50%) 0 0/16px 16px; }
+  #log { white-space:pre-wrap; color:var(--mute); }
+</style>
+</head>
+<body>
+<h3>模型橱窗烘焙（gui 动画 → 精灵条，插件菜单第 5 项卡片用）</h3>
+<div>参数：?id=fatfish&anim=gui&in=24&infps=12&lp=48&lpfps=8&w=128&h=160&pre=0.25&up=8140</div>
+<canvas id="cv" width="128" height="160" style="display:none"></canvas>
+<p><img id="strip"></p>
+<div id="log"></div>
+<script type="module">
+// 复用插件同款：parseGLB（MWBGLBModel 移植）＋ createRig（MWBYSMAnim 移植），自家 shader 同款（alphaTest 0.5/Nearest/双面）
+// 动态 import 带时间戳：烘焙页常随运行时一起改，静态 import 会吃浏览器模块缓存
+const { parseGLB } = await import('./js/plugin-glb.js?v=' + Date.now());
+const { createRig } = await import('./js/ysm-anim.js?v=' + Date.now());
+const Q = new URLSearchParams(location.search);
+const ID = Q.get('id') || 'fatfish', ANIM = Q.get('anim') || 'gui';
+// 两段：开门段（intro，播一次）＋循环段（loop，parallel4 小鱼周期 6s，首尾相接）
+const IN_N = +(Q.get('in') || 24), IN_FPS = +(Q.get('infps') || 12);
+const LP_N = +(Q.get('lp') || 48), LP_FPS = +(Q.get('lpfps') || 8);
+const FRAMES = IN_N + LP_N, W = +(Q.get('w') || 128), H = +(Q.get('h') || 160);
+const UP = Q.get('up') || '8140';
+const PRE = +(Q.get('pre') || 0.25); // 预跑秒数（默认 0.25：跳过从 idle 淡入的 0.2s，开门 0.5~1.5s 要录进去）
+const log = (s) => { document.getElementById('log').textContent += s + '\n'; console.log(s); };
+
+const cv = document.getElementById('cv');
+const gl = cv.getContext('webgl', { antialias: false, preserveDrawingBuffer: true, premultipliedAlpha: false, alpha: true });
+function sh(t, s) { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); return o; }
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, 'attribute vec3 a_pos; attribute vec2 a_uv; uniform mat4 u_mvp; varying vec2 v_uv; void main(){ v_uv=a_uv; gl_Position=u_mvp*vec4(a_pos,1.0); }'));
+gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, 'precision mediump float; varying vec2 v_uv; uniform sampler2D u_tex; void main(){ vec4 c=texture2D(u_tex,v_uv); if(c.a<0.5) discard; gl_FragColor=vec4(c.rgb,1.0); }'));
+gl.bindAttribLocation(prog, 0, 'a_pos'); gl.bindAttribLocation(prog, 1, 'a_uv'); gl.linkProgram(prog);
+const uMvp = gl.getUniformLocation(prog, 'u_mvp'), uTex = gl.getUniformLocation(prog, 'u_tex');
+
+function mul(a, b) { const o = new Float32Array(16); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3]; return o; }
+function persp(fovDeg, asp, n, f) { const t = 1 / Math.tan(fovDeg * Math.PI / 360), nf = 1 / (n - f); return new Float32Array([t/asp,0,0,0, 0,t,0,0, 0,0,(f+n)*nf,-1, 0,0,2*f*n*nf,0]); }
+function lookAt(e, c) { // three.js 同款：z=normalize(eye-center)，x=normalize(up×z)，y=z×x
+  let zx = e[0]-c[0], zy = e[1]-c[1], zz = e[2]-c[2]; let l = Math.hypot(zx, zy, zz); zx/=l; zy/=l; zz/=l;
+  let xx = zz, xy = 0, xz = -zx; l = Math.hypot(xx, xy, xz); xx/=l; xz/=l;
+  const yx = zy*xz - zz*xy, yy = zz*xx - zx*xz, yz = zx*xy - zy*xx;
+  return new Float32Array([xx,yx,zx,0, xy,yy,zy,0, xz,yz,zz,0, -(xx*e[0]+xy*e[1]+xz*e[2]), -(yx*e[0]+yy*e[1]+yz*e[2]), -(zx*e[0]+zy*e[1]+zz*e[2]), 1]);
+}
+
+const [buf, side] = await Promise.all([
+  fetch(`./testdata/${ID}.glb`).then((r) => r.arrayBuffer()),
+  fetch(`./testdata/${ID}_anim.json`).then((r) => r.ok ? r.json() : fetch(`./testdata/fatfish_anim.json`).then((x) => x.json())),
+]);
+const parsed = parseGLB(buf, log);
+const rig = createRig(side, parsed, null, { allRoots: true }); // GUI 场景（门/背景板/小鱼）在顶层 Gui，不在 Root 下
+const tex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, tex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, await createImageBitmap(new Blob([parsed.texBytes], { type: 'image/png' })));
+for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+const vbos = parsed.meshes.map((m) => {
+  const mk = (t, d) => { const b = gl.createBuffer(); gl.bindBuffer(t, b); gl.bufferData(t, d, gl.STATIC_DRAW); return b; };
+  return [mk(gl.ARRAY_BUFFER, m.pos), mk(gl.ARRAY_BUFFER, m.uv), mk(gl.ELEMENT_ARRAY_BUFFER, m.idx)];
+});
+
+const inp = { groundSpeed: 0, vertSpeed: 0, yawSpeed: 0, onGround: true, inWater: false, flying: false, sneaking: false,
+  sleeping: false, dead: false, headYaw: 0, headPitch: 0, forceMain: ANIM };
+// 取景：先跑完整段帧，收集可见网格顶点包围盒（世界=模型本地），一次定机位，所有帧共用（不抖）
+const poses = [];
+for (let t = 0; t < PRE; t += 1 / 30) rig.tick(1 / 30, inp);
+for (let f = 0; f < FRAMES; f++) { rig.tick(f < IN_N ? 1 / IN_FPS : 1 / LP_FPS, inp); const p = rig.pose(); poses.push({ world: p.world.slice(), visOK: p.visOK.slice(), dfs: p.dfs }); }
+// 取景：有背景板 Gui0 就按它（YSM 的 GUI 场景本身就是一张卡片），否则按全部可见网格
+const board = parsed.name2idx.get('Gui0');
+const deco = new Array(parsed.nodes.length).fill(board != null);
+if (board != null) deco[board] = false;
+let mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+for (const p of poses) for (const ni of p.dfs) {
+  if (!p.visOK[ni] || deco[ni]) continue; const mi = parsed.nodes[ni].mesh; if (mi < 0) continue;
+  const m = parsed.meshes[mi], Wm = p.world.subarray(ni * 16, ni * 16 + 16);
+  for (let v = 0; v < m.nvert; v += 3) { const x = m.pos[v*3], y = m.pos[v*3+1], z = m.pos[v*3+2];
+    const wx = Wm[0]*x + Wm[4]*y + Wm[8]*z + Wm[12], wy = Wm[1]*x + Wm[5]*y + Wm[9]*z + Wm[13], wz = Wm[2]*x + Wm[6]*y + Wm[10]*z + Wm[14];
+    mn = [Math.min(mn[0], wx), Math.min(mn[1], wy), Math.min(mn[2], wz)]; mx = [Math.max(mx[0], wx), Math.max(mx[1], wy), Math.max(mx[2], wz)]; }
+}
+const cx = (mn[0] + mx[0]) / 2, cy = (mn[1] + mx[1]) / 2, cz = (mn[2] + mx[2]) / 2;
+const halfH = Math.max((mx[1] - mn[1]) / 2, (mx[0] - mn[0]) / 2 * H / W) * (board != null ? 1.0 : 1.08), fov = 30;
+const dist = halfH / Math.tan(fov * Math.PI / 360) + (mx[2] - mn[2]) / 2;
+const VP = mul(persp(fov, W / H, 0.05, 100), lookAt([cx, cy, cz - dist], [cx, cy, cz])); // 模型正面朝 -z：机位在 -z 侧看回来
+log(`[橱窗] 包围盒 x[${mn[0].toFixed(2)},${mx[0].toFixed(2)}] y[${mn[1].toFixed(2)},${mx[1].toFixed(2)}] z[${mn[2].toFixed(2)},${mx[2].toFixed(2)}] 距离=${dist.toFixed(2)}`);
+
+{ const pr = (x, y, z) => { const c = [0,1,2,3].map((r) => VP[r]*x + VP[4+r]*y + VP[8+r]*z + VP[12+r]); return (c[0]/c[3]).toFixed(2) + ',' + (c[1]/c[3]).toFixed(2); };
+  log('[橱窗] 投影 底=' + pr(cx, mn[1], cz) + ' 顶=' + pr(cx, mx[1], cz) + ' 左=' + pr(mn[0], cy, cz) + ' 右=' + pr(mx[0], cy, cz)); }
+const strip = document.createElement('canvas'); strip.width = W * FRAMES; strip.height = H;
+const g2 = strip.getContext('2d');
+for (let f = 0; f < FRAMES; f++) {
+  const p = poses[f];
+  gl.viewport(0, 0, W, H); gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST); gl.disable(gl.CULL_FACE); gl.useProgram(prog); gl.uniform1i(uTex, 0);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+  for (const ni of p.dfs) {
+    if (!p.visOK[ni]) continue; const mi = parsed.nodes[ni].mesh; if (mi < 0) continue;
+    gl.uniformMatrix4fv(uMvp, false, mul(VP, p.world.subarray(ni * 16, ni * 16 + 16)));
+    const [pb, ub, ib] = vbos[mi];
+    gl.bindBuffer(gl.ARRAY_BUFFER, pb); gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, ub); gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.drawElements(gl.TRIANGLES, parsed.meshes[mi].nidx, gl.UNSIGNED_SHORT, 0);
+  }
+  g2.drawImage(cv, f * W, 0);
+}
+async function upload(name, x0, n) {
+  const c = document.createElement('canvas'); c.width = W * n; c.height = H;
+  c.getContext('2d').drawImage(strip, x0 * W, 0, W * n, H, 0, 0, W * n, H);
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  try {
+    const r = await fetch(`http://127.0.0.1:${UP}/?name=${name}`, { method: 'POST', body: blob });
+    log('[橱窗] 上传 ' + (await r.text()));
+  } catch (e) { log('[橱窗] 上传服务不在（只预览）：' + e.message); }
+}
+document.getElementById('strip').src = strip.toDataURL('image/png');
+log(`[橱窗] ${ID} ${ANIM} 开门段=${IN_N}帧@${IN_FPS} 循环段=${LP_N}帧@${LP_FPS} 单帧${W}x${H}`);
+await upload(`${ID}_thumb_intro.png`, 0, IN_N);
+await upload(`${ID}_thumb_loop.png`, IN_N, LP_N);
+window.__done = true;
+</script>
+</body>
+</html>

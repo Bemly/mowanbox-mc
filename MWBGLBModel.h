@@ -41,5 +41,8 @@ void MWBGLBAutoTick(void *player);
 // 本体缩放（×，默认 1；glbscale-N 百分比免重编调）＋落位 Y 偏置（米，默认 0；glblift-N 厘米）
 void MWBGLBSetScale(float s);
 void MWBGLBSetLift(float m);
+// 当前模型 id / 切换（橱窗选中；切换会重载 GLB 与动画）
+NSString *MWBGLBModelId(void);
+void MWBGLBSetModel(NSString *mid);
 // 手持物品矩阵（世界栈坐标系，已含原版臂→鱼手换算 K）；本帧鱼画出且相机齐才回 YES
 BOOL MWBGLBHandMatrix(float *out);

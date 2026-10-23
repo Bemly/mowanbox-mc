@@ -124,7 +124,7 @@ static std::vector<int> sRootSet; // Root 子树（含 Root），只画这些
 static NSData *sTexPNG = nil;
 static BOOL sParsed = NO;
 static std::vector<float> sNodeT; // 3*节点：相对父轴心位移（运行时局部矩阵用）
-static BOOL sAnimOK = NO;          // fatfish_anim.json 载入成功（否则画绑定姿势）
+static BOOL sAnimOK = NO;          // <模型>_anim.json 载入成功（否则画绑定姿势）
 // 落位三件套：本体缩放 sGLBScale（默认 1x，2x 实机太大已回退）＋Y 偏置 sGLBLift（接地算法上再叠）＋
 // 模型最低点 sMinY（解析期扫全顶点，判原点是否在脚）＋实地顶面 sGroundY（AutoTick 方块扫描）。
 static float sGLBScale = 1.0f, sGLBLift = 0.0f, sMinY = 1e30f;
@@ -172,10 +172,22 @@ static BOOL GLBReadAcc(NSDictionary *acc, NSArray *views, const uint8_t *bin, si
     return YES;
 }
 
+// 当前模型 id（橱窗选中，NSUserDefaults MWBYSMModel；文件 mwbmodels/<id>.glb ＋ <id>_anim.json）
+NSString *MWBGLBModelId(void) {
+    NSString *m = [[NSUserDefaults standardUserDefaults] stringForKey:@"MWBYSMModel"];
+    return m.length ? m : @"fatfish";
+}
+void MWBGLBSetModel(NSString *mid) {
+    if (!mid.length || [mid isEqualToString:MWBGLBModelId()]) return;
+    [[NSUserDefaults standardUserDefaults] setObject:mid forKey:@"MWBYSMModel"];
+    MWBLogFile(@"[GLB] 切模型 %@", mid);
+    if (sParsed) MWBGLBReload(); // GL 对象下次首画重建
+}
+
 BOOL MWBGLBEnsureParsed(void) {
     if (sParsed) return YES;
-    NSString *dir = @"/var/mobile/Documents/mwbmodels";
-    NSString *glbPath = [dir stringByAppendingPathComponent:@"fatfish.glb"];
+    NSString *dir = @"/var/mobile/Documents/mwbmodels", *mid = MWBGLBModelId();
+    NSString *glbPath = [dir stringByAppendingPathComponent:[mid stringByAppendingString:@".glb"]];
     NSData *data = [NSData dataWithContentsOfFile:glbPath];
     if (!data || data.length < 20) { MWBLogFile(@"[GLB] 读不到 %@", glbPath); return NO; }
     const uint8_t *b = (const uint8_t *)data.bytes;
@@ -287,7 +299,7 @@ BOOL MWBGLBEnsureParsed(void) {
             names.push_back(sNodes[i].name.c_str());
             memcpy(&sNodeT[i * 3], sNodes[i].t, sizeof(float) * 3);
         }
-        sAnimOK = MWBAnimLoad([dir stringByAppendingPathComponent:@"fatfish_anim.json"], names.data(), (int)names.size());
+        sAnimOK = MWBAnimLoad([dir stringByAppendingPathComponent:[mid stringByAppendingString:@"_anim.json"]], names.data(), (int)names.size());
     }
     sParsed = YES;
     MWBLogFile(@"[GLB] 解析成功 构建=%@ 节点=%lu 网格=%lu 三角=%ld Root子树=%lu 贴图=%lu字节 YSM动画=%@ minY=%.2f",

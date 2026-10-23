@@ -28,8 +28,19 @@ void MWBAnimForceMain(const char *name);
 void MWBAnimTick(float dt);
 // 出姿势：rootSet 内节点写 local[16*ni]（列主序）与 hidden[ni]；nodeT 为 GLB 节点相对父轴心位移（3*ni）
 void MWBAnimPose(const int *rootSet, int nRoot, const float *nodeT, float *local, char *hidden);
-// 模型设置（v.roaming.*）
+// 模型设置（v.roaming.*）：写入即生效并持久化（NSUserDefaults MWBYSMRoaming），载入时回放；
+// 未设过的 radio 取第一个选项（与 mod/web 默认一致），其余默认 0
 void MWBAnimSetRoaming(const char *name, float v);
+float MWBAnimRoaming(const char *name);
+// 执行 radio 赋值串（"v.roaming.a=1;v.roaming.b=1"），逐项 MWBAnimSetRoaming
+void MWBAnimApplyAssign(NSString *assign);
+// 设置面板定义（sidecar settings；运行时未载入则直接读文件，缓存）
+NSArray *MWBAnimSettings(void);
+// 菜单页（MWBYSMMenu.mm）：按 settings 生成，pw=面板宽
+#ifdef __OBJC__
+@class UIView;
+UIView *MWBBuildYSMPage(double pw);
+#endif
 // 诊断：当前主动画/控制器状态/寿命/二阶状态数
 const char *MWBAnimMainName(void);
 const char *MWBAnimCtrlState(void);

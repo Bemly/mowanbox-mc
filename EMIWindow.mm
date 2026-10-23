@@ -5,6 +5,8 @@
 #import "EMIViews.h"
 #import "EMIWindow.h"
 #import "MWBUI.h"
+#import "MWBCommon.h" // MWB010SpawnMob / MWB010Only（刷怪 tab）
+#define kEMIMobTab 4    // 第 5 个 tab = 刷怪（不是物品分类）
 
 #pragma mark - 配方查看面板 (长按物品弹出)
 
@@ -312,10 +314,16 @@
     MWBCubeView *brickIcon = [[MWBCubeView alloc] initWithSize:64*kEMIScale];
     [brickIcon setTopTile:@"brick" frontTile:@"brick" sideTile:@"brick"
                 topIndex:0 frontIndex:0 sideIndex:0];
-    NSArray *icons = @[seedsIcon, swordIcon, shelfIcon, brickIcon];
+    // 第 5 个 tab：刷怪（刷怪蛋，items-opaque 第 192 行；从菜单第 5 项迁来，那里改成了 YSM 模型设置）
+    UIImageView *eggIcon = [[UIImageView alloc] initWithImage:MWBGameIcon(@"items-opaque.png", (CGRect){{16,192},{16,16}})];
+    eggIcon.frame = (CGRect){{0,0},{64*kEMIScale,64*kEMIScale}};
+    eggIcon.contentMode = UIViewContentModeScaleAspectFit;
+    eggIcon.layer.magnificationFilter = kCAFilterNearest;
+    NSArray *icons = @[seedsIcon, swordIcon, shelfIcon, brickIcon, eggIcon];
     NSMutableArray *tabs = [NSMutableArray new];
-    CGFloat gap = 10*s, tw = (W - gap * 5) / 4, th = 100*s;
-    for (int i = 0; i < 4; i++) {
+    int nt = (int)icons.count;
+    CGFloat gap = 10*s, tw = (W - gap * (nt + 1)) / nt, th = 100*s;
+    for (int i = 0; i < nt; i++) {
         MWBEMITab *tab = [[MWBEMITab alloc] initWithIcon:icons[i]];
         tab.frame = (CGRect){{gap + i * (tw + gap),8*s},{tw,th}};
         tab.tag = i; tab.active = (i == 0);
@@ -356,6 +364,7 @@
     // 列数随合并后的整宽自适应 (原来写死 10 列是按旧内窗 1590 宽算的)
     int cols = (int)(_gridScroll.bounds.size.width / cellSize);
     if (cols < 4) cols = 4;
+    if (_currentCategory == kEMIMobTab) { [self buildMobGrid:cellSize cols:cols]; return; }
     NSMutableArray *visible = [NSMutableArray new];
     for (int i = 0; i < gItemCount; i++) {
         if (_currentCategory == 0 || gItems[i].category == _currentCategory)
@@ -409,6 +418,39 @@
             MWBDLog(@"[EMI调试] 长按 %@ (查看配方)", cn);
             [ws showRecipeForId:(int)itemId];
         };
+        [_gridScroll addSubview:cell];
+    }
+}
+
+// 刷怪 tab：15 个刷怪蛋，点按直调 MWB010SpawnMob 在玩家旁边刷怪（仅 0.10，其余版本置灰）
+// 蛋序 ↔ 实体 id（MobFactory::CreateMob 实锤映射）：鸡/牛/猪/羊/狼/村民/哞菇/僵尸/爬行者/骷髅/蜘蛛/猪人/史莱姆/末影人/蠹虫
+- (void)buildMobGrid:(CGFloat)cellSize cols:(int)cols {
+    static const int kMobIds[15] = {10, 11, 12, 13, 14, 15, 16, 32, 33, 34, 35, 36, 37, 38, 39};
+    int rows = (15 + cols - 1) / cols;
+    _gridScroll.contentSize = (CGSize){cols*cellSize, rows*cellSize};
+    BOOL ok = MWB010Only();
+    for (int i = 0; i < 15; i++) {
+        int r = i / cols, c = i % cols;
+        MWBEMICell *cell = [[MWBEMICell alloc] initWithFrame:(CGRect){{c*cellSize,r*cellSize},{cellSize,cellSize}}];
+        UIView *box = [[UIView alloc] initWithFrame:(CGRect){{0,0},{cellSize*0.78,cellSize*0.78}}];
+        UIImageView *egg = [[UIImageView alloc] initWithImage:MWBGameIcon(@"items-opaque.png",
+            (CGRect){{(CGFloat)(16 + (i + 1) * 16), 192},{16,16}})];
+        egg.frame = (CGRect){{box.bounds.size.width*0.15,0},{box.bounds.size.width*0.7,box.bounds.size.width*0.7}};
+        egg.contentMode = UIViewContentModeScaleAspectFit;
+        egg.layer.magnificationFilter = kCAFilterNearest;
+        [box addSubview:egg];
+        UILabel *nm = [[UILabel alloc] initWithFrame:(CGRect){{0,box.bounds.size.height*0.72},{box.bounds.size.width,box.bounds.size.height*0.28}}];
+        nm.text = MWBTr([NSString stringWithFormat:@"egg%d", i].UTF8String);
+        nm.font = [UIFont systemFontOfSize:cellSize*0.13];
+        nm.adjustsFontSizeToFitWidth = YES; nm.minimumScaleFactor = 0.6;
+        nm.textColor = EMIColor(0xcf,0xcc,0xc6);
+        nm.textAlignment = NSTextAlignmentCenter;
+        [box addSubview:nm];
+        cell.content = box;
+        if (!ok) { cell.alpha = 0.35; cell.userInteractionEnabled = NO; }
+        int mid = kMobIds[i];
+        NSString *name = nm.text;
+        cell.onTap = ^{ MWB010SpawnMob(mid); MWBDLog(@"[EMI] 刷怪 %@ id=%d", name, mid); };
         [_gridScroll addSubview:cell];
     }
 }

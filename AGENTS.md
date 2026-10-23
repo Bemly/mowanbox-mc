@@ -53,6 +53,7 @@
 18. 【重点】GLB 用游戏真相机：0.10 MatrixStack 三栈 std::deque<Matrix>（投影 0x10034F570/世界 0x10034F5A0/视图 0x10034F5D0，map@+8 start@+0x20 size@+0x28，块64×64B），MobRenderer::render 入口 orig 前抓栈顶＋pos（相对相机，眼位）；读 program uniform 是死路（绘制时才同步）。身体 yaw=+0x150（Mob::normalTick 实锤：走动追移动方向 30%/tick，恒钳视角±75°），+0x3c 无写者。
 19. 1.x GLES 四版 GLB 移植 hook 点表见 docs/glb-1x-hookpoints.md：四版 MatrixStack 同构（vector，end-64=栈顶，dirty@24），1.1.7 全局三栈、1.2.15/1.4.3/1.13.3 相机结构内三栈（视图@0/世界@0x20/投影@0x40，从每次绘制同步入口抓）；1.13.3 分发器 0x100AAD1F4、身体 yaw Mob+0x750 已实锤，老三版渲染 hook 与朝向待上机差分。
 20. 【重点】GLB 姿势只走 YSM 运行时（MWBYSMAnim＋fatfish_anim.json，tools/ysm_anim_sidecar.py 生成，设备放 mwbmodels/）：GLB 里的动画 clip 已废（丢 molang 通道/catmull 当线性/欧拉转 slerp/无分层）；层序 pre_parallel→主→parallel 同骨同通道覆盖，旋转(-x,-y,+z)、位移(-x,+y,+z)/16；bones/transitions 必须有序数组（同名 second_order 先调者定值）；改逻辑先改 web/js/ysm-*.js 再与 C++ 对拍。
+21. 第 5 项＝模型橱窗（MWBYSMMenu）：扫 mwbmodels/ 的 <id>.glb＋<id>_anim.json；卡片动画是 web/thumb.html 离线烘焙的 <id>_thumb_intro/loop.png（GUI 场景挂顶层 Gui 节点不在 Root 下，游戏里不画，只烘焙时 allRoots 画）；刷怪迁到 EMI 第 5 tab。
 
 ## 0.10.0 逆向符号速查（MSFindSymbol 直解，imagebase=0x100000000）
 

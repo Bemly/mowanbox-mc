@@ -103,8 +103,11 @@ function pickMain(rig, inp) {
   return moving ? 'walk' : 'idle';
 }
 
-function createRig(side, parsed, sharedRoaming) {
-  const { nodes, name2idx, rootSet } = parsed;
+function createRig(side, parsed, sharedRoaming, opts) {
+  const { nodes, name2idx } = parsed;
+  // allRoots：合成全部顶层节点（橱窗烘焙用：GUI 场景 Gui 是与 Root 平级的顶层节点，游戏里不画）
+  const allRoots = !!(opts && opts.allRoots);
+  const rootSet = allRoots ? nodes.map((_, i) => i) : parsed.rootSet;
   const anims = new Map();
   for (const name in side.anims) anims.set(name, prepAnim(name, side.anims[name], name2idx));
   // 静止欧拉角（弧度）：sidecar 给；缺省按 0（GLB 四元数只做兜底不参与叠加）
@@ -256,17 +259,18 @@ function createRig(side, parsed, sharedRoaming) {
       eulerMat(rx, ry, rz, tx, ty, tz, sx, sy, sz, m);
     }
     const rootIdx = name2idx.has('Root') ? name2idx.get('Root') : rootSet[0];
-    const dfs = [], st = [rootIdx];
+    const tops = allRoots ? nodes.map((n, i) => (n.parent < 0 ? i : -1)).filter((i) => i >= 0) : [rootIdx];
+    const dfs = [], st = tops.slice().reverse();
     while (st.length) { const c = st.pop(); dfs.push(c); nodes[c].children.forEach((k) => st.push(k)); }
     const W = new Float32Array(16);
-    for (let di = 1; di < dfs.length; di++) {
-      const ni = dfs[di], pi = nodes[ni].parent;
+    const visOK = new Array(N).fill(false);
+    for (const ni of dfs) {
+      const pi = nodes[ni].parent;
+      if (pi < 0 || !tops.length || (!allRoots && ni === rootIdx)) { visOK[ni] = !hidden[ni]; continue; }
       mul(world.subarray(pi * 16, pi * 16 + 16), world.subarray(ni * 16, ni * 16 + 16), W);
       world.set(W, ni * 16);
+      visOK[ni] = visOK[pi] && !hidden[ni];
     }
-    const visOK = new Array(N).fill(false);
-    visOK[rootIdx] = !hidden[rootIdx];
-    for (let di = 1; di < dfs.length; di++) { const ni = dfs[di]; visOK[ni] = visOK[nodes[ni].parent] && !hidden[ni]; }
     let shown = 0; for (const ni of rootSet) if (visOK[ni] && nodes[ni].mesh >= 0) shown++;
     return { world, hidden, visOK, dfs, rootIdx, shown, total: rootSet.length, animFound: !!mainAn, main: rig.main, ctrl: rig.cstate };
   };

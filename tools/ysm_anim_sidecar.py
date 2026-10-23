@@ -10,6 +10,7 @@
   ctrls     动画控制器（parallel_7 等；transitions 转成有序 [[条件, 目标]...]）
   funcs     player_update 函数 [[名, 源码]]（维护 v.fall_timer / v.timer）
   settings  模型设置面板（与 fatfish_vis.json 同格式）
+  meta      模型名/作者/简介（插件第 5 项橱窗卡片显示）
 用法：python3 ysm_anim_sidecar.py <parse目录> <decrypted.bin> [输出路径]
      （与 viewer 的 tools/ysm_parse.py 放同目录跑，函数源码靠它的读取器）
 """
@@ -44,7 +45,10 @@ def main():
     anims = pickle.load(open(os.path.join(wd, 'anims_main.pkl'), 'rb'))['animations']
     geo = pickle.load(open(os.path.join(wd, 'model_type1.pkl'), 'rb'))['geo']
     summ = json.load(open(os.path.join(wd, 'summary.json')))
-    out = {'rest': {}, 'anims': {}, 'ctrls': {}, 'funcs': read_funcs(binp), 'settings': []}
+    props = summ.get('props', {})
+    out = {'rest': {}, 'anims': {}, 'ctrls': {}, 'funcs': read_funcs(binp), 'settings': [],
+           'meta': {'name': props.get('name', ''), 'tips': props.get('tips', ''),
+                    'authors': [a.get('name', '') for a in props.get('authors', [])]}}
     for b in geo['bones']:
         out['rest'][b['name']] = [float(x) for x in b['rotation']]
     for name, a in anims.items():

@@ -125,6 +125,9 @@ static float ACall(void *ctx, int fid, void **args, int nargs, const MWBMolEnv *
     return 0;
 }
 static MWBMolEnv sEnv = { NULL, AGet, ASet, ACall };
+static void AReplayRoaming(void); // 模型设置回放（定义在后）
+static NSArray *sSettings = nil;   // 设置面板定义（sidecar settings，菜单页用）
+static NSString *sSettingsPath = nil; // 当前 settings 来源（模型切换时作废缓存）
 
 // ---- 载入 ----
 static AVal AParseVal(id v) {
@@ -210,10 +213,12 @@ BOOL MWBAnimLoad(NSString *path, const char *const *nodeNames, int nodeCount) {
         sCState = [ctrl[@"initial"] UTF8String] ?: "";
     }
     for (NSArray *f in (NSArray *)j[@"funcs"]) if (f.count >= 2) sFuncs.push_back(MWBMolCompile([f[1] UTF8String]));
+    if ([j[@"settings"] isKindOfClass:[NSArray class]]) { sSettings = j[@"settings"]; sSettingsPath = path; }
     sR.assign(nodeCount * 3, 0); sP.assign(nodeCount * 3, 0); sS.assign(nodeCount * 3, 1);
     sHasR.assign(nodeCount, 0); sHasP.assign(nodeCount, 0); sHasS.assign(nodeCount, 0);
     auto mi = sAnimIdx.find("idle"); sMain = mi != sAnimIdx.end() ? mi->second : -1;
     sReady = YES;
+    AReplayRoaming();
     MWBLogFile(@"[YSM动画] 载入 动画=%lu 控制器态=%lu 函数=%lu molang失败=%d 头骨=%d",
                (unsigned long)sAnims.size(), (unsigned long)sCtrl.size(), (unsigned long)sFuncs.size(), MWBMolFailCount(), sHeadNi);
     return YES;
@@ -225,9 +230,62 @@ void MWBAnimUnload(void) {
 }
 void MWBAnimSetInput(const MWBAnimInput *in) { if (in) sIn = *in; }
 void MWBAnimForceMain(const char *name) { sForce = name ? name : ""; }
-void MWBAnimSetRoaming(const char *name, float v) {
+// ---- 模型设置（v.roaming.*）持久化 ----
+static NSString *const kRoamKey = @"MWBYSMRoaming";
+static void ASetRoamRaw(const char *name, float v) {
     char buf[128]; snprintf(buf, sizeof(buf), "v.roaming.%s", name);
     ASet(NULL, MWBMolIntern(buf), v);
+}
+void MWBAnimSetRoaming(const char *name, float v) {
+    if (!name) return;
+    ASetRoamRaw(name, v);
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    NSMutableDictionary *m = [([d dictionaryForKey:kRoamKey] ?: @{}) mutableCopy];
+    m[@(name)] = @(v);
+    [d setObject:m forKey:kRoamKey];
+}
+float MWBAnimRoaming(const char *name) {
+    NSNumber *n = name ? [[NSUserDefaults standardUserDefaults] dictionaryForKey:kRoamKey][@(name)] : nil;
+    return n ? n.floatValue : 0;
+}
+void MWBAnimApplyAssign(NSString *assign) {
+    for (NSString *part in [assign componentsSeparatedByString:@";"]) {
+        NSArray *kv = [part componentsSeparatedByString:@"="];
+        if (kv.count != 2) continue;
+        NSString *k = [kv[0] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if ([k hasPrefix:@"v.roaming."]) MWBAnimSetRoaming([k substringFromIndex:10].UTF8String, [kv[1] floatValue]);
+    }
+}
+NSArray *MWBAnimSettings(void) {
+    NSString *mid = [[NSUserDefaults standardUserDefaults] stringForKey:@"MWBYSMModel"];
+    NSString *path = [NSString stringWithFormat:@"/var/mobile/Documents/mwbmodels/%@_anim.json", mid.length ? mid : @"fatfish"];
+    if (sSettings && [sSettingsPath isEqualToString:path]) return sSettings;
+    sSettings = nil; sSettingsPath = path;
+    NSData *d = [NSData dataWithContentsOfFile:path];
+    NSDictionary *j = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
+    if ([j isKindOfClass:[NSDictionary class]] && [j[@"settings"] isKindOfClass:[NSArray class]]) sSettings = j[@"settings"];
+    return sSettings;
+}
+// 载入时回放：存过的原值；没存过的 radio 取第一项（按主变量赋值数值最小者）
+static void AReplayRoaming(void) {
+    NSDictionary *saved = [[NSUserDefaults standardUserDefaults] dictionaryForKey:kRoamKey] ?: @{};
+    for (NSDictionary *g in sSettings) for (NSDictionary *f in (NSArray *)g[@"forms"]) {
+        NSString *var = f[@"var"];
+        if (![var hasPrefix:@"roaming."] || ![f[@"type"] isEqualToString:@"radio"]) continue;
+        NSString *rv = [var substringFromIndex:8];
+        if (saved[rv]) continue;
+        NSString *best = nil; float bv = INFINITY;
+        for (NSString *a in (NSDictionary *)f[@"labels"]) {
+            NSRange r = [a rangeOfString:[NSString stringWithFormat:@"v.%@=", var]];
+            if (r.location == NSNotFound) continue;
+            float v = [[a substringFromIndex:NSMaxRange(r)] floatValue];
+            if (v < bv) { bv = v; best = a; }
+        }
+        if (best) MWBAnimApplyAssign(best);
+    }
+    saved = [[NSUserDefaults standardUserDefaults] dictionaryForKey:kRoamKey] ?: @{};
+    for (NSString *k in saved) ASetRoamRaw(k.UTF8String, [saved[k] floatValue]);
+    MWBLogFile(@"[YSM动画] 模型设置回放 %lu 项", (unsigned long)saved.count);
 }
 
 // ---- 时间 ----
