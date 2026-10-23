@@ -634,11 +634,42 @@ void MWBGLBDraw(void) {
         if (!sNoSnap) { sNoSnap = 1; MWBLogFile(@"[GLB] 无快照WVP（prog=%u wvp=%d）", sSnapProg, sSnapWVPLoc); }
         return;
     }
-    // MVP 组装：WORLD 在则左乘（实体偏移），缺席则直用 WVP；两种 ndc 首顶点行都打出，肉眼对数
-    float WVPuse[16], WVPalt[16];
-    if (sHasSnapWorld) { GLBMatMul(sSnapWVP, sSnapWorld, WVPuse); memcpy(WVPalt, sSnapWVP, sizeof(WVPalt)); }
-    else { memcpy(WVPuse, sSnapWVP, sizeof(WVPuse)); memcpy(WVPalt, sSnapWVP, sizeof(WVPalt)); }
-    float WVP[16]; memcpy(WVP, WVPuse, sizeof(WVP));
+    // MVP 组装（与 web 对齐的最终形态：自家已知相机，不再读游戏 program 矩阵）。
+    // 背景：prog 42 的 WORLDVIEWPROJ 经多轮日志实锤不是 gameplay 相机（原点恒居中/z 恒越界，
+    // 疑似天空或固定 pass；pre/post 同值，换时机没用）。web SIM 相机同理可验证，故 iPad 也用自家相机：
+    //  P(60°/视口比/0.1/1000) · V(eye=玩家+(6,8,6) 世界固定偏置俯视，免 yaw 约定风险) · T(玩家) · 节点世界。
+    // 节点世界数学与 web/js/plugin-glb.js 逐元一致；相机/T 落位是 iPad 侧实体概念，日志可验。
+    float WVP[16];
+    float ppx0 = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28) : 0;
+    float ppy0 = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 4) : 0;
+    float ppz0 = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 8) : 0;
+    {
+        float ex = ppx0 + 6.0f, ey = ppy0 + 8.0f, ez = ppz0 + 6.0f; // 眼睛（世界固定偏置）
+        float cx = ppx0, cy = ppy0 + 1.0f, cz = ppz0;              // 看点（玩家胸口）
+        // 列主序 lookAt（three.js 同款：z=normalize(eye-center)，x=normalize(up×z)，y=z×x）
+        float zx = ex - cx, zy = ey - cy, zz = ez - cz;
+        float zl = sqrtf(zx*zx + zy*zy + zz*zz); if (zl < 1e-6f) zl = 1; zx/=zl; zy/=zl; zz/=zl;
+        float xx = zy * 0.0f - zz * 1.0f, xy = zz * 0.0f - zx * 0.0f, xz = zx * 1.0f - zy * 0.0f; // up=(0,1,0)×z
+        float xl = sqrtf(xx*xx + xy*xy + xz*xz); if (xl < 1e-6f) xl = 1; xx/=xl; xy/=xl; xz/=xl;
+        float yx = zy*xz - zz*xy, yy = zz*xx - zx*xz, yz = zx*xy - zy*xx;
+        float V[16] = {xx,yx,zx,0, xy,yy,zy,0, xz,yz,zz,0,
+                        -(xx*ex+xy*ey+xz*ez), -(yx*ex+yy*ey+yz*ez), -(zx*ex+zy*ey+zz*ez), 1};
+        GLint vp[4] = {0,0,0,0}; glGetIntegerv(GL_VIEWPORT, vp); // 游戏视口比（web 用 canvas 比，同理）
+        float aspect = (vp[2] > 0 && vp[3] > 0) ? (float)vp[2] / (float)vp[3] : 1.0f;
+        float f = 1.0f / tanf(60.0f * 0.5f * (float)M_PI / 180.0f);
+        float nf = 1.0f / (0.1f - 1000.0f);
+        float P[16] = {f/aspect,0,0,0, 0,f,0,0, 0,0,(1000.0f+0.1f)*nf,-1, 0,0,2*1000.0f*0.1f*nf,0};
+        GLBMatMul(P, V, WVP);
+    }
+    static int sVpLogged = 0;
+    if (!sVpLogged) {
+        GLint vp[4] = {0,0,0,0}; glGetIntegerv(GL_VIEWPORT, vp);
+        sVpLogged = 1;
+        MWBLogFile(@"[GLB] 自家相机 视口=%dx%d aspect=%.3f", vp[2], vp[3],
+                   (vp[2] > 0 && vp[3] > 0) ? (float)vp[2] / (float)vp[3] : -1.0f);
+    }
+    float WVPuse[16]; memcpy(WVPuse, WVP, sizeof(WVPuse));
+    float WVPalt[16]; memcpy(WVPalt, sSnapWVP, sizeof(WVPalt)); // alt=游戏 WVP（prog42）直用对照，专供日志证明它不对
     // 对照：draw 时（post-orig）当前 program 的 WVP 也读一份，看和 pre-orig 是否同一矩阵
     GLint postProg = 0; glGetIntegerv(GL_CURRENT_PROGRAM, &postProg);
     float postWVP[16]; BOOL hasPost = NO;
