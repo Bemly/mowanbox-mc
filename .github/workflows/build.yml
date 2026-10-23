@@ -1,0 +1,76 @@
+# 构建 debug（带日志）与 release（FINALPACKAGE=1，关日志）两个插件包
+# - 推 main / PR：两包都编，存为 Actions 制品
+# - 推 v* 标签，或手动触发并勾选“发布”：额外建 GitHub Release，挂两个 deb
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: '发布到 GitHub Release（标签自动取 v<control 版本>-<构建号>）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # Makefile 用 git rev-list --count 生成构建号，要全历史
+
+      - name: 选 Xcode 15.4（iOS 17 SDK，部署目标 iOS 12）
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: 装 Theos 与打包依赖
+        run: |
+          brew install xz dpkg >/dev/null 2>&1 || true
+          git clone --quiet --recursive --depth 1 https://github.com/theos/theos.git "$HOME/theos"
+          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+          echo "$HOME/theos/bin" >> "$GITHUB_PATH"
+
+      - name: 编 debug
+        run: |
+          make package
+          mkdir -p out
+          cp packages/*.deb "out/mowanbox_$(grep '^Version:' control | cut -d' ' -f2)-$(git rev-list --count HEAD)_debug.deb"
+
+      - name: 编 release
+        run: |
+          make clean
+          rm -rf packages
+          make package FINALPACKAGE=1
+          cp packages/*.deb "out/mowanbox_$(grep '^Version:' control | cut -d' ' -f2)-$(git rev-list --count HEAD)_release.deb"
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mowanbox-debs
+          path: out/*.deb
+
+      - name: 发布到 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="v$(grep '^Version:' control | cut -d' ' -f2)-$(git rev-list --count HEAD)"
+          fi
+          NOTES="提交 ${GITHUB_SHA::7}
+          - *_release.deb：日常使用（不写日志）
+          - *_debug.deb：排查问题用（写 /var/mobile/Documents/mowanbox.log）
+          安装：scp 到设备后 dpkg -i，重启 MC 生效。仅用于本地离线单机世界。"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" out/*.deb --clobber
+          else
+            gh release create "$TAG" out/*.deb --target "$GITHUB_SHA" --title "mowanbox $TAG" --notes "$NOTES"
+          fi
