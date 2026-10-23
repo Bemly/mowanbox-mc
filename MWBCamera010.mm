@@ -132,19 +132,25 @@ static unsigned long hooked_cam_update(void *thiz) {
     return r;
 }
 
-// 跟脸节拍（normalTick 里每帧调）：第 4 档（2d6==2）时把视角 yaw 灌进相机 yaw。
-// 根因：正面分支读玩家 +0x3c 当相机偏航，可游戏里从来没人写它（恒 0），转视角只动 +0x78，
-// 相机就钉死在出生朝向。模型脸朝 +0x78（或其镜像），故把 +0x78 拷给 +0x3c 即脸锁。
-// 只在第 4 档动手，其余档零开销（两次读一次比较）。
-#define CAM_YAW_VIEW_OFF 0x78   // 视角 yaw（ENTITY_YAW_OFF，转视角即变）
-#define CAM_YAW_CAM_OFF 0x3c    // 相机 yaw（正面分支读它，游戏不写）
+// 跟脸节拍（normalTick 里每帧调）：第 4 档（2d6==2）时把身体朝向钉进视角 yaw。
+// 机理（四基点 yaw-0/90/180/270 实锤）：
+// - 脸/身体朝向固定在世界 0 附近（站立不动从不转，+0x3c 恒 0 就是它）；
+// - 相机跟着视角 +0x78 跑（V=0 正脸，V=90 侧脸，差多少偏多少）；
+// - 所以反过来钉：每 tick 把 +0x78/+0x80（镜像）都写成 +0x3c，视角被钉在身体正前方，
+//   相机也就钉在脸正前方。站立转视角会被顶回来（本模式不许自由看，看脸专用）；
+//   走路时身体转，相机会跟着身体走，自拍跟随。
+// 只在第 4 档动手，其余档零开销。
+#define CAM_YAW_VIEW_OFF 0x78   // 视角 yaw（ENTITY_YAW_OFF，相机跟它跑）
+#define CAM_YAW_VIEW_MIR 0x80   // 视角镜像（同动，不钉会穿帮）
+#define CAM_YAW_BODY_OFF 0x3c   // 身体/脸朝向（站立恒定，转视角不动它）
 void MWBCamFaceTick(void) {
     if (!gLocalPlayer) return;
     void *o = MWBCamOptions(NULL);
     if (!o) return;
     if (*(uint8_t *)((char *)o + CAM_F_FRONT) != 2) return;
-    float vy = *(float *)((char *)gLocalPlayer + CAM_YAW_VIEW_OFF);
-    *(float *)((char *)gLocalPlayer + CAM_YAW_CAM_OFF) = vy;
+    float by = *(float *)((char *)gLocalPlayer + CAM_YAW_BODY_OFF);
+    *(float *)((char *)gLocalPlayer + CAM_YAW_VIEW_OFF) = by;
+    *(float *)((char *)gLocalPlayer + CAM_YAW_VIEW_MIR) = by;
 }
 
 // 诊断：条目类型 + 双字段 + 相机实体身份（caminfo flag 打）
