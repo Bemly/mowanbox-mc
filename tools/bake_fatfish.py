@@ -51,6 +51,7 @@ def main():
         })
     jcubes = []
     skipped = 0
+    n_panel = 0
     for b in rb:
         bi = new_idx[b['name']]
         piv = b['pivot']
@@ -68,12 +69,10 @@ def main():
             mx = [max(xs) * 16, max(ys) * 16, max(zs) * 16]
             ctr = [(mn[i] + mx[i]) / 2 for i in range(3)]
             sz = [mx[i] - mn[i] for i in range(3)]
-            size_i = [max(1, math.trunc(v)) for v in sz]
-            org = [mn[i] - piv[i] for i in range(3)]
             # 面朝向走几何判定（pkl 法线多为 0 不可用）：四顶点在某轴上几乎无跨度即该轴面，
-            # 符号看面心相对盒心。UV 角序按 FACE_CORNERS 与原始顶点就近匹配（旋转精确，不只记矩形）。
-            # 同一朝向多面时取第一面（裙摆褶皱等非盒近似，P1 接受）。
-            uv = {}
+            # 符号看面心相对盒心。UV 角序按 FACE_CORNERS 与原始顶点就近匹配（旋转精确）。
+            perface = []  # 所有面：(key或None, axis, corners[8], (vpx,vpy,vpz))，薄板路全用
+            first = {}    # 整盒路：每朝向第一面
             for f in faces:
                 us, vs = f['u'], f['v']
                 vpx = [v[0] * 16 for v in f['pos']]
@@ -87,30 +86,67 @@ def main():
                 key = {(0, 1): 'east', (0, -1): 'west',
                        (1, 1): 'up', (1, -1): 'down',
                        (2, 1): 'south', (2, -1): 'north'}[(axis, s)]
-                if key in uv:
-                    continue
+                # 角序按本面片自身范围（qmn/qmx）与原始顶点就近匹配：薄板/整盒通用，
+                # 非盒褶皱也不会被大包围盒带偏
+                qmn = [min(vpx), min(vpy), min(vpz)]
+                qmx = [max(vpx), max(vpy), max(vpz)]
                 corners = []
                 for (fx, fy, fz) in FACE_CORNERS[key]:
-                    cx = mn[0] + fx * sz[0]; cy = mn[1] + fy * sz[1]; cz = mn[2] + fz * sz[2]
+                    cx = qmn[0] + fx * (qmx[0] - qmn[0])
+                    cy = qmn[1] + fy * (qmx[1] - qmn[1])
+                    cz = qmn[2] + fz * (qmx[2] - qmn[2])
                     bi_ = min(range(4), key=lambda k: abs(vpx[k] - cx) + abs(vpy[k] - cy) + abs(vpz[k] - cz))
                     corners += [int(round(us[bi_] * TEX)), int(round(vs[bi_] * TEX))]
-                uv[key] = corners
-            # 缺面补齐：先找对面，无对面记全 0（运行期走 Cube 默认 UV，viewer 品红标出）
-            approx = 0
-            opp = {'east': 'west', 'west': 'east', 'up': 'down',
-                   'down': 'up', 'south': 'north', 'north': 'south'}
-            for nm in FACE_NAMES:
-                if nm not in uv:
-                    approx += 1
-                    uv[nm] = list(uv.get(opp[nm], [0, 0, 0, 0, 0, 0, 0, 0]))
-            jcubes.append({
-                'bone': bi,
-                'origin': [round(v, 4) for v in org],
-                'size': size_i,
-                'size_f': [round(v, 4) for v in sz],
-                'approx': approx,
-                'uv': uv,
-            })
+                if key not in first:
+                    first[key] = corners
+                perface.append((key, axis, corners, (vpx, vpy, vpz)))
+            # 干净盒子：6 朝向齐 + 各轴都不用钳（min(size_f)>=1）→ 整盒；否则每面独立薄板
+            if len(first) == 6 and min(sz) >= 1.0:
+                size_i = [max(1, math.trunc(v)) for v in sz]
+                org = [mn[i] - piv[i] for i in range(3)]
+                uv = dict(first)
+                # 缺面补齐（理论上不会缺，6 朝向齐；保底走对面/0）
+                approx = 0
+                opp = {'east': 'west', 'west': 'east', 'up': 'down',
+                       'down': 'up', 'south': 'north', 'north': 'south'}
+                for nm in FACE_NAMES:
+                    if nm not in uv:
+                        approx += 1
+                        uv[nm] = list(uv.get(opp[nm], [0, 0, 0, 0, 0, 0, 0, 0]))
+                jcubes.append({
+                    'bone': bi,
+                    'origin': [round(v, 4) for v in org],
+                    'size': size_i,
+                    'size_f': [round(v, 4) for v in sz],
+                    'approx': approx,
+                    'uv': uv,
+                })
+            else:
+                # 薄板：每面片独立 1 厚盒（面内轴取整钳≥1，法线轴厚 1 居中），UV 用本面角序；
+                # 另 5 面填本面平均单 texel（细边不可见），approx 记 1 供统计
+                for (key, axis, corners, (vpx, vpy, vpz)) in perface:
+                    qmn = [min(vpx), min(vpy), min(vpz)]
+                    qmx = [max(vpx), max(vpy), max(vpz)]
+                    org = [0, 0, 0]; siz = [0, 0, 0]
+                    for i in range(3):
+                        if i == axis:
+                            org[i] = (qmn[i] + qmx[i]) / 2 - 0.5 - piv[i]
+                            siz[i] = 1
+                        else:
+                            org[i] = qmn[i] - piv[i]
+                            siz[i] = max(1, math.trunc(qmx[i] - qmn[i]))
+                    au = sum(corners[0::2]) / 4; av = sum(corners[1::2]) / 4
+                    fill = [int(round(au)), int(round(av))] * 4
+                    uv = {nm: (corners if nm == key else list(fill)) for nm in FACE_NAMES}
+                    n_panel += 1
+                    jcubes.append({
+                        'bone': bi,
+                        'origin': [round(v, 4) for v in org],
+                        'size': siz,
+                        'size_f': [round(qmx[i] - qmn[i], 4) for i in range(3)],
+                        'approx': 1,
+                        'uv': uv,
+                    })
     data = {'texW': TEX, 'texH': TEX, 'bones': jbones, 'cubes': jcubes,
             'skipped': skipped}
     json.dump(data, open(os.path.join(outdir, 'fatfish_baked.json'), 'w'),
