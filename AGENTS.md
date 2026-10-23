@@ -66,6 +66,7 @@
 | 速度Y | Entity+112 | 跳跃初速 0.42 |
 | 创造栏分类 | 方块 Tile+0x8c / 物品 Item+0x58，tab=cat-1 | populateItems 尾部分发实锤 |
 | 偏航俯仰 | LocalPlayer+0x78/+0x7C | 屏角=(180+yaw)%360 |
+| 身体/头偏航 | Entity+0x150/+0x158（旧值+4） | 身体行走追视角，头每tick=视角；+0x3c 无写者别用（鱼跟它等于跟常量） |
 | gamma | Options+0x2D0（经 MC+0x1C8） | 夜视改 0/5 |
 
 ## 构建与部署
