@@ -132,6 +132,10 @@ static NSData *sTexPNG = nil;
 static NSString *sCurAnim = nil;
 static BOOL sParsed = NO;
 static float sTMain = 0, sTVis = 0; // 主动作时间 / 常驻层时间（viewer 双时钟同款）
+// 落位三件套：本体缩放 sGLBScale（默认 2x，用户要看大）＋Y 偏置 sGLBLift（接地算法上再叠）＋
+// 模型最低点 sMinY（解析期扫全顶点，判原点是否在脚）＋实地顶面 sGroundY（AutoTick 方块扫描）。
+static float sGLBScale = 2.0f, sGLBLift = 0.0f, sMinY = 1e30f;
+static float sGroundY = 0; static BOOL sHasGround = NO;
 static GLuint sTex = 0; // 自家贴图（GL 线程建，reload 时置 0 下次重建）
 static BOOL sVBOInit = NO; // VBO 已上传标记（reload 清零，下次重传；旧 GPU 缓冲随进程释放）
 
@@ -293,6 +297,7 @@ BOOL MWBGLBEnsureParsed(void) {
     if (!jNodes || !jMeshes || !jAccs || !jViews) { MWBLogFile(@"[GLB] 缺段"); return NO; }
 
     sNodes.clear(); sName2Idx.clear(); sMeshes.clear(); sRootSet.clear(); sAnims.clear();
+    sMinY = 1e30f; // 本轮重扫最低点
     // 节点
     for (NSUInteger i = 0; i < jNodes.count; i++) {
         NSDictionary *n = jNodes[i];
@@ -349,6 +354,7 @@ BOOL MWBGLBEnsureParsed(void) {
         const float *fp = (const float *)pp; const float *fu = (const float *)pu;
         for (int v = 0; v < nv; v++) {
             m.pos[v*3]=fp[v*3]; m.pos[v*3+1]=fp[v*3+1]; m.pos[v*3+2]=fp[v*3+2]; // 零换算（与 web 一致）
+            if (m.pos[v*3+1] < sMinY) sMinY = m.pos[v*3+1]; // 记最低点（判原点是否在脚）
             m.uv[v*2]=fu[v*2]; m.uv[v*2+1]=fu[v*2+1]; // 不翻转（web 移植页实锤：GLTFLoader 对 glTF 贴图 flipY=false，翻了会被 alphaTest 吃成锥体残件）
         }
         memcpy(m.idx, pi_, sizeof(uint16_t) * (size_t)ni);
@@ -417,10 +423,10 @@ BOOL MWBGLBEnsureParsed(void) {
     } else MWBLogFile(@"[GLB] 无 sidecar（只画绑定姿势）：%@", visPath);
     if (!sCurAnim) sCurAnim = @"idle";
     sParsed = YES;
-    MWBLogFile(@"[GLB] 解析成功 构建=%@ 节点=%lu 网格=%lu 三角=%ld Root子树=%lu 动画=%lu 贴图=%lu字节 sidecar=%@",
+    MWBLogFile(@"[GLB] 解析成功 构建=%@ 节点=%lu 网格=%lu 三角=%ld Root子树=%lu 动画=%lu 贴图=%lu字节 sidecar=%@ minY=%.2f",
                @MWB_BUILD_TAG,(unsigned long)sNodes.size(), (unsigned long)sMeshes.size(), totalTris,
                (unsigned long)sRootSet.size(), (unsigned long)sAnims.size(),
-               (unsigned long)(sTexPNG ? sTexPNG.length : 0), sVisScale ? @"有" : @"无");
+               (unsigned long)(sTexPNG ? sTexPNG.length : 0), sVisScale ? @"有" : @"无", sMinY);
     MWBGLBLogStats();
     return YES;
 }
@@ -460,6 +466,14 @@ void MWBGLBSetAuto(BOOL on) {
     sGLBAuto = on;
     MWBLogFile(@"[GLB] 自动动作%@", on ? @"开" : @"关");
 }
+void MWBGLBSetScale(float s) {
+    if (s > 0.05f && s < 20.0f) sGLBScale = s;
+    MWBLogFile(@"[GLB] 本体缩放 x%.2f", sGLBScale);
+}
+void MWBGLBSetLift(float m) {
+    if (m > -10.0f && m < 10.0f) sGLBLift = m;
+    MWBLogFile(@"[GLB] 落位偏置 %+.2f米", sGLBLift);
+}
 void MWBGLBAutoTick(void *player) {
     if (!sGLBAuto || !player) return;
     static int sCd = 0;
@@ -484,6 +498,21 @@ void MWBGLBAutoTick(void *player) {
     uint8_t water = *(uint8_t *)(p + 0x12d);
     uint8_t sleep = *(uint8_t *)(p + 0x1804);
     uint8_t ground = *(uint8_t *)(p + 0x125);
+    // 接地扫描：站立跟实地顶面（+0x28 是眼还是脚不再靠猜，直接扫方块）；
+    // 飞/游/空跟玩家（sHasGround=NO 时画侧回落到 py）。
+    // 只在落地非水时扫（ts=*(p+0x48)，getTile  tick 线程只读可调，小地图同款）。
+    if (ground && !water) {
+        void *ts = *(void **)(p + 0x48);
+        sHasGround = NO;
+        if (ts) {
+            int cx = (int)floorf(px), cz = (int)floorf(pz);
+            for (int y = (int)floorf(*(float *)(p + 0x28 + 4)); y > (int)floorf(*(float *)(p + 0x28 + 4)) - 14 && y >= 0; y--) {
+                MWBBlockPos bp = {cx, y, cz};
+                uint8_t id = MWB010GetTile(ts, &bp);
+                if (id != 0 && id != 8 && id != 9) { sGroundY = (float)(y + 1); sHasGround = YES; break; }
+            }
+        }
+    } else sHasGround = NO;
     BOOL flying = (p + PLAYER_ABILITIES_OFFSET)[1];
     void *t = *(void **)(p + 0x1810);
     BOOL sneak = t ? *(uint8_t *)((char *)t + 0x12) : NO;
@@ -753,8 +782,10 @@ void MWBGLBDraw(void) {
         float yawDeg = *(float *)((char *)gLocalPlayer + 0x3c);
         float th = (180.0f - yawDeg) * (float)M_PI / 180.0f;
         sYawDbg = yawDeg; sThDbg = th;
-        float ct = cosf(th), st = sinf(th);
-        float T[16] = {ct,0,-st,0, 0,1,0,0, st,0,ct,0, px,py,pz,1};
+        // 落位 Y：站立跟实地扫描（sHasGround），飞/游/空跟 py；再叠 lift；本体统一缩放 sGLBScale。
+        float ty = (sHasGround ? sGroundY : py) + sGLBLift;
+        float sc = sGLBScale, ct = cosf(th), st = sinf(th);
+        float T[16] = {ct*sc,0,-st*sc,0, 0,sc,0,0, st*sc,0,ct*sc,0, px,ty,pz,1};
         GLBMatMul(WVP, T, WT);
     } else {
         memcpy(WT, WVP, sizeof(WT));
@@ -840,11 +871,12 @@ void MWBGLBDraw(void) {
             float ppx = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28) : 9999;
             float ppy = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 4) : 9999;
             float ppz = gLocalPlayer ? *(float *)((char *)gLocalPlayer + 0x28 + 8) : 9999;
-            MWBLogFile(@"[GLB] 首顶点 prog=%u world=%d post=%d 玩家=(%.1f,%.1f,%.1f) yaw=%.1f th=%.2f 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f) alt=(%.2f,%.2f,%.2f) postndc=(%.2f,%.2f,%.2f)",
+            MWBLogFile(@"[GLB] 首顶点 prog=%u world=%d post=%d 玩家=(%.1f,%.1f,%.1f) yaw=%.1f th=%.2f 世界=(%.1f,%.1f,%.1f) clip=(%.1f,%.1f,%.1f,%.1f) ndc=(%.2f,%.2f,%.2f) alt=(%.2f,%.2f,%.2f) postndc=(%.2f,%.2f,%.2f) gy=%.1f gap=%+.2f sc=%.2f",
                        sSnapProg, sHasSnapWorld ? 1 : 0, hasPost ? (int)postProg : -1, ppx, ppy, ppz, sYawDbg, sThDbg, x, y, z, cx, cy, cz, cw,
                        cw != 0 ? cx/cw : 999, cw != 0 ? cy/cw : 999, cw != 0 ? cz/cw : 999,
                        aw != 0 ? ax/aw : 999, aw != 0 ? ay/aw : 999, aw != 0 ? az/aw : 999,
-                       qw != 0 ? qx/qw : 999, qw != 0 ? qy/qw : 999, qw != 0 ? qz/qw : 999);
+                       qw != 0 ? qx/qw : 999, qw != 0 ? qy/qw : 999, qw != 0 ? qz/qw : 999,
+                       sHasGround ? sGroundY : 9999, sHasGround ? (ppy - sGroundY) : 9999, sGLBScale);
         }
     }
 

@@ -124,6 +124,11 @@ void MWBPollCmdFile(void) {
             if ([parts[1] isEqualToString:@"auto"]) MWBGLBSetAuto(YES); // 回自动
             else { MWBGLBSetAuto(NO); MWBGLBSetAnim(parts[1]); } // 手动 sticky，自动停
         }
+        else if ([act isEqualToString:@"glbscale"] && parts.count > 1) MWBGLBSetScale([parts[1] floatValue] / 100.0f); // 百分比，200=2x
+        else if ([act isEqualToString:@"glblift"] && parts.count > 1) { // 厘米，正上；双横杠负数（同 sink）
+            int c = (parts.count > 2) ? -[parts[2] intValue] : [parts[1] intValue];
+            MWBGLBSetLift(c / 100.0f);
+        }
         else if ([act isEqualToString:@"cam"]) MWBSetCamValue01(arg); // 0=第一 1=第三背面 2=第三正面 3=跟脸正面
         else if ([act isEqualToString:@"caminfo"]) MWBCamDiag();
         else if ([act isEqualToString:@"yaw"] && gLocalPlayer) { // 绝对视角 yaw 直写（跟脸标定用，无拖拽伪影）

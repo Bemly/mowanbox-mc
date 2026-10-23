@@ -36,3 +36,6 @@ void MWBGLBSetAnim(NSString *name);
 void MWBGLBSetAuto(BOOL on);
 // 每 tick 调一次（normalTick 内，gGLBModel 才调）：读状态→变化才切 clip
 void MWBGLBAutoTick(void *player);
+// 本体缩放（×，默认 2；glbscale-N 百分比免重编调）＋落位 Y 偏置（米，默认 0；glblift-N 厘米）
+void MWBGLBSetScale(float s);
+void MWBGLBSetLift(float m);
