@@ -1,6 +1,8 @@
 # 4D 皮肤 GLB 交接（web 对比＋逆向＋iPad 现状，全量经验）
 
-> 给下一个 agent：读完这篇＋`AGENTS.md`＋`web/README.md` 再动手。编年史别碰（`docs/history.md` 只读）。
+> 2026-11-04：`web/`、`tools/`、`preview/` 已从仓库移除，下文相关路径与流程仅作历史记录。
+
+> 给下一个 agent：读完这篇＋`AGENTS.md` 再动手。编年史别碰（`docs/history.md` 只读）。
 > 当前：插件 `4eaabfa`（-228）在设备上，web 页 `8139` 正常，iPad 上鱼已出现但**横躺＋头尾反＋疑似悬空**待验。
 
 ## 1. 一句话目标

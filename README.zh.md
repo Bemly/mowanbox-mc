@@ -172,8 +172,6 @@ ssh root@<设备IP> "uiopen moe.bemly.mcpe.0.10"
 | `MWBYSMAnim.*`、`MWBYSMCodec.*`、`MWBYSMMenu.mm`、`MWBYSMModel.*`、`MWBYSMRender.mm` | YSM 模型解码、动画与橱窗 |
 | `MWBZhLang.mm`、`MWBZhGui.mm`、`MWBZhBlocks.mm` | 0.10 运行时中文汉化 |
 | `MWBDebug.mm` | 触摸模拟与调试辅助 |
-| `web/` | 浏览器端 GLB 验证页 |
-| `tools/` | 离线模型烘焙与 sidecar 脚本 |
 | `docs/` | 逆向笔记 |
 
 ## 自动化 / flag 通道

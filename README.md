@@ -172,8 +172,6 @@ Plugin preferences are stored separately from game saves. The tweak does not edi
 | `MWBYSMAnim.*`, `MWBYSMCodec.*`, `MWBYSMMenu.mm`, `MWBYSMModel.*`, `MWBYSMRender.mm` | YSM model decoding, animation, and showcase |
 | `MWBZhLang.mm`, `MWBZhGui.mm`, `MWBZhBlocks.mm` | 0.10 runtime Chinese localization |
 | `MWBDebug.mm` | Touch simulation and debug helpers |
-| `web/` | Browser-side GLB validation harness |
-| `tools/` | Offline model baking and sidecar scripts |
 | `docs/` | Reverse-engineering notes |
 
 ## Automation / flag channel
