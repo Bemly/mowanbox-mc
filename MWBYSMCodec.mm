@@ -98,12 +98,12 @@ static uint64_t Fetch64(const char *p) { uint64_t v; memcpy(&v, p, 8); return v;
 static uint32_t Fetch32(const char *p) { uint32_t v; memcpy(&v, p, 4); return v; }
 static uint64_t Rot64(uint64_t v, int s) { return s == 0 ? v : ((v >> s) | (v << (64 - s))); }
 static uint64_t ShiftMix64(uint64_t v) { return v ^ (v >> 47); }
-static uint64_t Hash128to64(uint64_t 低, uint64_t 高) {
+static uint64_t Hash128to64(uint64_t loBits, uint64_t hiBits) {
   // YSM 魔改版（city.cc 517-531）：常量与算法都与官方不同，照抄
   const uint64_t kMul = 0xDE0F6EE09BDBAB91ULL;
-  uint64_t 内 = ShiftMix64((低 ^ 高) * kMul);
-  uint64_t 中 = kMul * (内 ^ 低);
-  return kMul * ShiftMix64(中);
+  uint64_t inner = ShiftMix64((loBits ^ hiBits) * kMul);
+  uint64_t mid = kMul * (inner ^ loBits);
+  return kMul * ShiftMix64(mid);
 }
 static uint64_t HashLen16b(uint64_t u, uint64_t v) { return Hash128to64(u, v); }
 static uint64_t HashLen16m(uint64_t u, uint64_t v, uint64_t m) {
@@ -712,9 +712,9 @@ static NSNumber *Round5(float v) {
   return @(o);
 }
 
-#define MWB_FAIL(代码, 格式, ...) do { \
-  if (err) *err = [NSError errorWithDomain:kMWBYSMErrDomain code:(代码) \
-    userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:(格式), ##__VA_ARGS__]}]; \
+#define MWB_FAIL(errCode, fmtStr, ...) do { \
+  if (err) *err = [NSError errorWithDomain:kMWBYSMErrDomain code:(errCode) \
+    userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:(fmtStr), ##__VA_ARGS__]}]; \
   NSLog(@"[魔玩盒子] 解码失败：%@", (*err).localizedDescription); \
   return NO; } while (0)
 
@@ -725,172 +725,172 @@ static NSNumber *Round5(float v) {
             texH:(int *)h
            error:(NSError **)err {
   if (!url) { MWB_FAIL(1, @"缺少文件地址"); }
-  NSData *文件 = [NSData dataWithContentsOfURL:url options:0 error:err];
-  if (!文件) { NSLog(@"[魔玩盒子] 解码失败：读不到文件"); return NO; }
-  const uint8_t *字节 = (const uint8_t *)文件.bytes;
-  size_t 总长 = 文件.length;
-  if (总长 < 8 + 4 + 64) { MWB_FAIL(2, @"文件太短，不是合法 .ysm"); }
+  NSData *fileData = [NSData dataWithContentsOfURL:url options:0 error:err];
+  if (!fileData) { NSLog(@"[魔玩盒子] 解码失败：读不到文件"); return NO; }
+  const uint8_t *rawPtr = (const uint8_t *)fileData.bytes;
+  size_t total = fileData.length;
+  if (total < 8 + 4 + 64) { MWB_FAIL(2, @"文件太短，不是合法 .ysm"); }
 
   // 1) 容器：BOM + YSGP + CRLF 头文本 + 0x00，遇首个 NUL 截断取 <format>
-  if (!(字节[0] == 0xEF && 字节[1] == 0xBB && 字节[2] == 0xBF &&
-        字节[3] == 'Y' && 字节[4] == 'S' && 字节[5] == 'G' && 字节[6] == 'P')) {
+  if (!(rawPtr[0] == 0xEF && rawPtr[1] == 0xBB && rawPtr[2] == 0xBF &&
+        rawPtr[3] == 'Y' && rawPtr[4] == 'S' && rawPtr[5] == 'G' && rawPtr[6] == 'P')) {
     MWB_FAIL(3, @"缺少 YSGP 容器头");
   }
-  size_t 头止 = 0;
-  for (size_t i = 7; i < 总长; i++) { if (字节[i] == 0x00) { 头止 = i; break; } }
-  if (头止 == 0) { MWB_FAIL(4, @"找不到头文本结束符"); }
-  NSString *头文本 = [[NSString alloc] initWithBytes:字节 length:头止 encoding:NSUTF8StringEncoding];
-  if (!头文本) { MWB_FAIL(5, @"头文本不是合法 UTF-8"); }
-  NSRange 格式位 = [头文本 rangeOfString:@"<format>"];
-  if (格式位.location == NSNotFound) { MWB_FAIL(6, @"头文本缺少 <format>"); }
-  NSString *格式尾 = [[头文本 substringFromIndex:格式位.location + 格式位.length]
+  size_t hdrEnd = 0;
+  for (size_t i = 7; i < total; i++) { if (rawPtr[i] == 0x00) { hdrEnd = i; break; } }
+  if (hdrEnd == 0) { MWB_FAIL(4, @"找不到头文本结束符"); }
+  NSString *hdrText = [[NSString alloc] initWithBytes:rawPtr length:hdrEnd encoding:NSUTF8StringEncoding];
+  if (!hdrText) { MWB_FAIL(5, @"头文本不是合法 UTF-8"); }
+  NSRange fmtRange = [hdrText rangeOfString:@"<format>"];
+  if (fmtRange.location == NSNotFound) { MWB_FAIL(6, @"头文本缺少 <format>"); }
+  NSString *fmtBody = [[hdrText substringFromIndex:fmtRange.location + fmtRange.length]
     stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  int 格式号 = 0; NSScanner *扫描 = [NSScanner scannerWithString:格式尾];
-  if (![扫描 scanInt:&格式号] || 格式号 != 32) { MWB_FAIL(7, @"只支持 format 32，读到 %d", 格式号); }
+  int fmtNo = 0; NSScanner *sc = [NSScanner scannerWithString:fmtBody];
+  if (![sc scanInt:&fmtNo] || fmtNo != 32) { MWB_FAIL(7, @"只支持 format 32，读到 %d", fmtNo); }
 
   // 尾 64 字节：key32 + iv24 + fileHash LE64
-  const uint8_t *尾 = 字节 + 总长 - 64;
-  const uint8_t *密钥 = 尾, *iv = 尾 + 32;
-  uint64_t 文件哈希 = MWBYSM::ReadU64(尾 + 56);
+  const uint8_t *trailer = rawPtr + total - 64;
+  const uint8_t *keyBytes = trailer, *iv = trailer + 32;
+  uint64_t fileHash = MWBYSM::ReadU64(trailer + 56);
 
   // 2) 校验：CityHash64WithSeed(全文件除末 8 字节)
-  uint64_t 算哈希 = MWBYSM::CityHashSeed((const char *)字节, 总长 - 8, MWBYSM::kSeedFileVerification);
-  if (算哈希 != 文件哈希) { MWB_FAIL(8, @"文件校验失败（哈希对不上，文件可能损坏）"); }
+  uint64_t calcHash = MWBYSM::CityHashSeed((const char *)rawPtr, total - 8, MWBYSM::kSeedFileVerification);
+  if (calcHash != fileHash) { MWB_FAIL(8, @"文件校验失败（哈希对不上，文件可能损坏）"); }
 
   // 二进制段：头止+1 开始，先读 LE32 crypto，必须 == 3
-  size_t 二进制始 = 头止 + 1;
-  if (二进制始 + 4 > 总长 - 64) { MWB_FAIL(9, @"二进制段缺失"); }
-  if (MWBYSM::ReadU32(字节 + 二进制始) != 3) { MWB_FAIL(10, @"只支持 crypto 3"); }
-  std::vector<uint8_t> 密文(字节 + 二进制始 + 4, 字节 + 总长 - 64);
+  size_t binOff = hdrEnd + 1;
+  if (binOff + 4 > total - 64) { MWB_FAIL(9, @"二进制段缺失"); }
+  if (MWBYSM::ReadU32(rawPtr + binOff) != 3) { MWB_FAIL(10, @"只支持 crypto 3"); }
+  std::vector<uint8_t> cipher(rawPtr + binOff + 4, rawPtr + total - 64);
 
   // 3) 解密 A：魔改 XChaCha；B：MT19937_64 异或；然后 n 取 2+n 字节头
-  std::vector<uint8_t> 明文;
-  MWBYSM::ModDecrypt(密文, 密钥, iv, 明文);
-  MWBYSM::MTXor(明文, 密钥, iv);
-  if (明文.size() < 2) { MWB_FAIL(11, @"解密后数据太短"); }
-  uint16_t n = (uint16_t)(明文[0] | (明文[1] << 8)); n &= 0x3FF;
-  if ((size_t)2 + n > 明文.size()) { MWB_FAIL(12, @"解密头长度越界"); }
-  std::vector<uint8_t> 待解压(明文.begin() + 2 + n, 明文.end());
+  std::vector<uint8_t> plain;
+  MWBYSM::ModDecrypt(cipher, keyBytes, iv, plain);
+  MWBYSM::MTXor(plain, keyBytes, iv);
+  if (plain.size() < 2) { MWB_FAIL(11, @"解密后数据太短"); }
+  uint16_t n = (uint16_t)(plain[0] | (plain[1] << 8)); n &= 0x3FF;
+  if ((size_t)2 + n > plain.size()) { MWB_FAIL(12, @"解密头长度越界"); }
+  std::vector<uint8_t> compressed(plain.begin() + 2 + n, plain.end());
 
   // 4) 洗白 + 标准 zstd 解压
-  std::vector<uint8_t> 洗后;
-  if (!MWBYSM::Wash(待解压, 洗后)) { MWB_FAIL(13, @"不是合法的魔改 zstd 流"); }
-  std::vector<uint8_t> 解压后;
-  if (!MWBYSM::SystemZstd(洗后, 解压后)) {
+  std::vector<uint8_t> washed;
+  if (!MWBYSM::Wash(compressed, washed)) { MWB_FAIL(13, @"不是合法的魔改 zstd 流"); }
+  std::vector<uint8_t> inflated;
+  if (!MWBYSM::SystemZstd(washed, inflated)) {
     MWB_FAIL(14, @"zstd 解压失败（数据损坏或内存不足）");
   }
 
   // 5) 二进制 walk：顺序流按序推进
-  MWBYSM::Cursor 读(解压后.data(), 解压后.size());
-  if (读.off + 4 > 读.len) { MWB_FAIL(15, @"解压数据缺版本号"); }
-  uint32_t 版本 = MWBYSM::ReadU32(读.data + 读.off); 读.off += 4; // LE32，必须 == format
-  if ((int)版本 != 格式号) { MWB_FAIL(16, @"版本号 %u 与头 format 不一致", 版本); }
+  MWBYSM::Cursor rd(inflated.data(), inflated.size());
+  if (rd.off + 4 > rd.len) { MWB_FAIL(15, @"解压数据缺版本号"); }
+  uint32_t ver = MWBYSM::ReadU32(rd.data + rd.off); rd.off += 4; // LE32，必须 == format
+  if ((int)ver != fmtNo) { MWB_FAIL(16, @"版本号 %u 与头 format 不一致", ver); }
 
-  MWBYSM::SkipSounds(读);
-  MWBYSM::SkipFuncs(读);
-  MWBYSM::SkipLangs(读);
-  if (!读.ok) { MWB_FAIL(17, @"声音/函数/语言段损坏"); }
+  MWBYSM::SkipSounds(rd);
+  MWBYSM::SkipFuncs(rd);
+  MWBYSM::SkipLangs(rd);
+  if (!rd.ok) { MWB_FAIL(17, @"声音/函数/语言段损坏"); }
   // format 32 现代分支：载具[] + 投掷物[]
-  uint64_t 载具数 = 读.varint();
-  for (uint64_t i = 0; i < 载具数 && 读.ok; i++) MWBYSM::SkipSubEntity(读);
-  uint64_t 弹数 = 读.varint();
-  for (uint64_t i = 0; i < 弹数 && 读.ok; i++) MWBYSM::SkipSubEntity(读);
-  if (读.varint() != 1) { MWB_FAIL(18, @"子实体尾标志不是 1"); }
+  uint64_t vehicleCount = rd.varint();
+  for (uint64_t i = 0; i < vehicleCount && rd.ok; i++) MWBYSM::SkipSubEntity(rd);
+  uint64_t projectileCount = rd.varint();
+  for (uint64_t i = 0; i < projectileCount && rd.ok; i++) MWBYSM::SkipSubEntity(rd);
+  if (rd.varint() != 1) { MWB_FAIL(18, @"子实体尾标志不是 1"); }
   // 动画[]（modelId + 动画体）
-  uint64_t 动画数 = 读.varint();
-  for (uint64_t i = 0; i < 动画数 && 读.ok; i++) { 读.varint(); MWBYSM::SkipAnims(读); }
+  uint64_t animCount = rd.varint();
+  for (uint64_t i = 0; i < animCount && rd.ok; i++) { rd.varint(); MWBYSM::SkipAnims(rd); }
   // 控制器[]（名称 + 哈希 + 控制器体）
-  uint64_t 控数 = 读.varint();
-  for (uint64_t i = 0; i < 控数 && 读.ok; i++) {
-    读.skipStr(); 读.skipStr(); MWBYSM::SkipControllers(读);
+  uint64_t ctrlCount = rd.varint();
+  for (uint64_t i = 0; i < ctrlCount && rd.ok; i++) {
+    rd.skipStr(); rd.skipStr(); MWBYSM::SkipControllers(rd);
   }
-  if (!读.ok) { MWB_FAIL(19, @"动画/控制器段损坏"); }
+  if (!rd.ok) { MWB_FAIL(19, @"动画/控制器段损坏"); }
 
   // 纹理[]：只保留 name=="white" 的 PNG 原字节（现代路径纹理即 PNG 字节直存）
-  NSData *白图 = nil; int 白宽 = 0, 白高 = 0;
+  NSData *whitePNG = nil; int whiteW = 0, whiteH = 0;
   {
-    uint64_t 纹数 = 读.varint();
-    for (uint64_t i = 0; i < 纹数 && 读.ok; i++) {
-      std::string 名称 = 读.getStr(); 读.skipStr(); // 名称 + 哈希
-      std::vector<uint8_t> 原字节 = 读.getBytes();
-      uint64_t 纹宽 = 读.varint(), 纹高 = 读.varint();
-      读.varint(); 读.varint(); // 图片格式 + 未知标志（只告警不断言）
-      uint64_t 子数 = 读.varint();
-      for (uint64_t s = 0; s < 子数 && 读.ok; s++) {
-        读.varint(); MWBYSM::GetSpecial(读);
-        读.varint(); 读.varint(); 读.varint(); 读.varint();
+    uint64_t texCount = rd.varint();
+    for (uint64_t i = 0; i < texCount && rd.ok; i++) {
+      std::string texName = rd.getStr(); rd.skipStr(); // 名称 + 哈希
+      std::vector<uint8_t> rawBytes = rd.getBytes();
+      uint64_t texWidth = rd.varint(), texHeight = rd.varint();
+      rd.varint(); rd.varint(); // 图片格式 + 未知标志（只告警不断言）
+      uint64_t subCount = rd.varint();
+      for (uint64_t s = 0; s < subCount && rd.ok; s++) {
+        rd.varint(); MWBYSM::GetSpecial(rd);
+        rd.varint(); rd.varint(); rd.varint(); rd.varint();
       }
-      if (名称 == "white" && !白图 && !原字节.empty()) {
-        白图 = [NSData dataWithBytes:原字节.data() length:原字节.size()];
-        白宽 = (int)纹宽; 白高 = (int)纹高;
+      if (texName == "white" && !whitePNG && !rawBytes.empty()) {
+        whitePNG = [NSData dataWithBytes:rawBytes.data() length:rawBytes.size()];
+        whiteW = (int)texWidth; whiteH = (int)texHeight;
       }
     }
   }
-  if (!读.ok) { MWB_FAIL(20, @"纹理段损坏"); }
-  if (!白图) { MWB_FAIL(21, @"没找到名为 white 的纹理"); }
+  if (!rd.ok) { MWB_FAIL(20, @"纹理段损坏"); }
+  if (!whitePNG) { MWB_FAIL(21, @"没找到名为 white 的纹理"); }
 
   // 模型[]：只保留 modelId==1 的完整模型
-  std::vector<MWBYSM::RawBone> 主骨骼; float 主纹宽 = 0, 主纹高 = 0; bool 拿到主模型 = NO;
+  std::vector<MWBYSM::RawBone> mainBones; float mainTexW = 0, mainTexH = 0; bool gotMain = NO;
   {
-    uint64_t 模型数 = 读.varint();
-    for (uint64_t i = 0; i < 模型数 && 读.ok; i++) {
-      uint64_t 模型号 = 读.varint();
-      std::vector<MWBYSM::RawBone> 骨; float 纹宽 = 0, 纹高 = 0;
-      if (!MWBYSM::WalkModel(读, 模型号 == 1, 骨, 纹宽, 纹高)) break;
-      if (模型号 == 1 && !拿到主模型) {
-        主骨骼 = 骨; 主纹宽 = 纹宽; 主纹高 = 纹高; 拿到主模型 = YES;
+    uint64_t modelCount = rd.varint();
+    for (uint64_t i = 0; i < modelCount && rd.ok; i++) {
+      uint64_t modelNo = rd.varint();
+      std::vector<MWBYSM::RawBone> bone; float texWidth = 0, texHeight = 0;
+      if (!MWBYSM::WalkModel(rd, modelNo == 1, bone, texWidth, texHeight)) break;
+      if (modelNo == 1 && !gotMain) {
+        mainBones = bone; mainTexW = texWidth; mainTexH = texHeight; gotMain = YES;
       }
     }
   }
-  if (!读.ok) { MWB_FAIL(22, @"模型段损坏"); }
-  if (!拿到主模型) { MWB_FAIL(23, @"没找到 modelId==1 的主模型"); }
+  if (!rd.ok) { MWB_FAIL(22, @"模型段损坏"); }
+  if (!gotMain) { MWB_FAIL(23, @"没找到 modelId==1 的主模型"); }
   // 读完 models 直接返回，不进 ParseYSMJson
-  if (主纹宽 <= 0) 主纹宽 = (float)白宽;
-  if (主纹高 <= 0) 主纹高 = (float)白高;
+  if (mainTexW <= 0) mainTexW = (float)whiteW;
+  if (mainTexH <= 0) mainTexH = (float)whiteH;
 
   // 6) 盒子还原 + 组装输出
-  NSMutableArray *骨骼数组 = [NSMutableArray new];
-  for (size_t bi = 0; bi < 主骨骼.size(); bi++) {
-    const MWBYSM::RawBone &骨 = 主骨骼[bi];
-    NSMutableArray *方块数组 = [NSMutableArray new];
-    for (size_t ci = 0; ci < 骨.cubes.size(); ci++) {
-      MWBYSM::BBCube 盒 = MWBYSM::RestoreCube(骨.cubes[ci].faces, (int)主纹宽, (int)主纹高);
-      NSMutableDictionary *uv表 = [NSMutableDictionary new];
-      static const char *面序[6] = {"east","west","up","down","south","north"};
+  NSMutableArray *bonesArr = [NSMutableArray new];
+  for (size_t bi = 0; bi < mainBones.size(); bi++) {
+    const MWBYSM::RawBone &bone = mainBones[bi];
+    NSMutableArray *cubesArr = [NSMutableArray new];
+    for (size_t ci = 0; ci < bone.cubes.size(); ci++) {
+      MWBYSM::BBCube uvBox = MWBYSM::RestoreCube(bone.cubes[ci].faces, (int)mainTexW, (int)mainTexH);
+      NSMutableDictionary *uvMap = [NSMutableDictionary new];
+      static const char *faceNames[6] = {"east","west","up","down","south","north"};
       for (int fi = 0; fi < 6; fi++) {
-        std::string 键 = 面序[fi];
-        auto 找 = 盒.uv.find(键);
-        if (找 != 盒.uv.end())
-          uv表[@(面序[fi])] = @[@(找->second.u), @(找->second.v),
-                                @(找->second.du), @(找->second.dv)];
+        std::string faceKey = faceNames[fi];
+        auto found = uvBox.uv.find(faceKey);
+        if (found != uvBox.uv.end())
+          uvMap[@(faceNames[fi])] = @[@(found->second.u), @(found->second.v),
+                                @(found->second.du), @(found->second.dv)];
       }
-      [方块数组 addObject:@{
-        @"origin": @[Round5(盒.origin.x), Round5(盒.origin.y), Round5(盒.origin.z)],
-        @"size": @[Round5(盒.size.x), Round5(盒.size.y), Round5(盒.size.z)],
-        @"pivot": @[Round5(盒.pivot.x), Round5(盒.pivot.y), Round5(盒.pivot.z)],
-        @"rotation": @[Round5(盒.rot.x), Round5(盒.rot.y), Round5(盒.rot.z)],
-        @"uv": uv表,
+      [cubesArr addObject:@{
+        @"origin": @[Round5(uvBox.origin.x), Round5(uvBox.origin.y), Round5(uvBox.origin.z)],
+        @"size": @[Round5(uvBox.size.x), Round5(uvBox.size.y), Round5(uvBox.size.z)],
+        @"pivot": @[Round5(uvBox.pivot.x), Round5(uvBox.pivot.y), Round5(uvBox.pivot.z)],
+        @"rotation": @[Round5(uvBox.rot.x), Round5(uvBox.rot.y), Round5(uvBox.rot.z)],
+        @"uv": uvMap,
       }];
     }
     // 枢轴 X 翻转；旋转 X/Y 翻转并转度（与参考一致）
-    float 度 = (float)(180.0 / M_PI);
-    NSString *名 = [NSString stringWithUTF8String:骨.name.c_str()];
-    if (!名) 名 = @"";
-    NSString *父 = [NSString stringWithUTF8String:骨.parent.c_str()];
-    if (!父) 父 = @"";
-    [骨骼数组 addObject:@{
-      @"name": 名, @"parent": 父,
-      @"pivot": @[Round5(-骨.pivot[0]), Round5(骨.pivot[1]), Round5(骨.pivot[2])],
-      @"rotation": @[Round5(-骨.rot[0]*度), Round5(-骨.rot[1]*度), Round5(骨.rot[2]*度)],
-      @"cubes": 方块数组,
+    float degScale = (float)(180.0 / M_PI);
+    NSString *boneName = [NSString stringWithUTF8String:bone.name.c_str()];
+    if (!boneName) boneName = @"";
+    NSString *parentName = [NSString stringWithUTF8String:bone.parent.c_str()];
+    if (!parentName) parentName = @"";
+    [bonesArr addObject:@{
+      @"name": boneName, @"parent": parentName,
+      @"pivot": @[Round5(-bone.pivot[0]), Round5(bone.pivot[1]), Round5(bone.pivot[2])],
+      @"rotation": @[Round5(-bone.rot[0]*degScale), Round5(-bone.rot[1]*degScale), Round5(bone.rot[2]*degScale)],
+      @"cubes": cubesArr,
     }];
   }
 
-  if (outBones) *outBones = 骨骼数组;
-  if (outPNG) *outPNG = 白图;
-  if (w) *w = 白宽; if (h) *h = 白高;
+  if (outBones) *outBones = bonesArr;
+  if (outPNG) *outPNG = whitePNG;
+  if (w) *w = whiteW; if (h) *h = whiteH;
   NSLog(@"[魔玩盒子] 解码成功：骨骼 %lu，白图 %lu 字节 %dx%d",
-    (unsigned long)骨骼数组.count, (unsigned long)白图.length, 白宽, 白高);
+    (unsigned long)bonesArr.count, (unsigned long)whitePNG.length, whiteW, whiteH);
   return YES;
 }
 
