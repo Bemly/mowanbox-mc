@@ -16,6 +16,23 @@
 - 小地图、史莱姆区块叠加、四视角相机滑条
 - 运行时识别游戏版本，按版本挂载不同 hook 后端
 
+## 截图
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/cheats-page.avif" alt="作弊页"><br><sub><b>作弊页</b>：开关、小地图、4D 皮肤</sub></td>
+    <td width="50%"><img src="docs/screenshots/world-page.avif" alt="世界页"><br><sub><b>世界页</b>：时间、天气、动作、难度</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/items-page.avif" alt="物品页"><br><sub><b>物品页</b>：创造物品浏览、配方查看</sub></td>
+    <td width="50%"><img src="docs/screenshots/model-page.avif" alt="模型页"><br><sub><b>模型页</b>：YSM 橱窗、模型设置</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/options-camera.avif" alt="选项页"><br><sub><b>选项页</b>：四视角相机滑条、4D 皮肤</sub></td>
+    <td width="50%"><img src="docs/screenshots/ingame-4d-skin.avif" alt="游戏内 4D 皮肤"><br><sub><b>游戏内</b>：反应核、刷怪、4D 皮肤</sub></td>
+  </tr>
+</table>
+
 ## 支持的游戏版本
 
 版本识别优先读 `CFBundleShortVersionString`，取不到时按主二进制大小兜底（见 `MWBVersion.mm`）。Tweak Filter 覆盖 6 个 bundle ID。

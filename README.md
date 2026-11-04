@@ -16,6 +16,23 @@ An in-game overlay mod menu ("toolbox") for Minecraft: Pocket Edition on jailbro
 - Minimap, slime-chunk overlay, and a four-view camera slider
 - Runtime game-version detection with per-version hook backends
 
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/cheats-page.avif" alt="Cheats page"><br><sub><b>Cheats</b>: toggles, minimap overlay, 4D skin</sub></td>
+    <td width="50%"><img src="docs/screenshots/world-page.avif" alt="World page"><br><sub><b>World</b>: time, weather, actions, difficulty</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/items-page.avif" alt="Items page"><br><sub><b>Items</b>: creative item browser, recipe viewer</sub></td>
+    <td width="50%"><img src="docs/screenshots/model-page.avif" alt="Model page"><br><sub><b>Model</b>: YSM showcase, per-model settings</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/options-camera.avif" alt="Camera options"><br><sub><b>Options</b>: four-view camera slider, 4D skin</sub></td>
+    <td width="50%"><img src="docs/screenshots/ingame-4d-skin.avif" alt="In-game 4D skin"><br><sub><b>In game</b>: nether reactor, spawned mobs, 4D skin</sub></td>
+  </tr>
+</table>
+
 ## Supported game versions
 
 The version is detected from `CFBundleShortVersionString` first, then from the size of the main binary as a fallback (`MWBVersion.mm`). The tweak filter covers six bundle IDs.
