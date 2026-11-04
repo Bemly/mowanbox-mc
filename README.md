@@ -179,8 +179,12 @@ See the comment block at the top of `MWBActions.mm` for the full command list.
 - 4D skin and the model showcase require 0.10 and GLB assets placed on the device.
 - The repository does not include or redistribute Minecraft assets, textures, sounds, or game binaries.
 
+## License
+
+Released under the **SIL Open Font License 1.1 (OFL-1.1)**. See [LICENSE](LICENSE) for the full text.
+
+OFL was originally designed for font software. Third-party components included in this repository remain under their own licenses; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). The embedded Fusion Pixel font is Copyright (c) 2022 TakWolf and is also licensed under OFL-1.1.
+
 ## Disclaimer
 
 This project is for learning and local offline experimentation only. It is not affiliated with Mojang or Microsoft. Minecraft is a trademark of Mojang Synergies AB. Do not use it to cheat on multiplayer servers.
-
-Third-party components retain their original licenses; see the headers in the corresponding source files.

@@ -179,8 +179,12 @@ touch /tmp/mwbcmd-menupage-1
 - 4D 皮肤与模型橱窗需要 0.10，并需自行把 GLB 资源放到设备上。
 - 仓库不包含也不分发 Minecraft 原版素材、贴图、音效或游戏二进制。
 
+## 许可证
+
+本项目采用 **SIL Open Font License 1.1（OFL-1.1）**，完整文本见 [LICENSE](LICENSE)。
+
+OFL 最初是为字体软件设计的。仓库内第三方组件仍沿用各自许可证，详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。其中内嵌的 Fusion Pixel 字体版权归 Copyright (c) 2022 TakWolf 所有，同样以 OFL-1.1 授权。
+
 ## 免责声明
 
 本项目仅供学习与本地离线实验使用，与 Mojang、Microsoft 无关联。Minecraft 是 Mojang Synergies AB 的商标。请勿用于在多人服务器作弊。
-
-第三方组件保留其原始许可证，详见对应源文件头部。

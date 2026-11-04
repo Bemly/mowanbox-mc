@@ -27,7 +27,7 @@ UIFont *MWBPixelFont(CGFloat size) {
     return f ?: [UIFont systemFontOfSize:size];
 }
 
-// 注册内嵌的 Pixelify Sans 字体
+// 注册内嵌的 Fusion Pixel 字体 (OFL-1.1, 见 THIRD-PARTY-NOTICES.md)
 void MWBRegisterFont(void) {
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
